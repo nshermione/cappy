@@ -18,9 +18,12 @@ repainting, a retained widget tree, reactive signals, taffy-based layout and the
 | `crates/cappy-core` | Retained widget tree, reactive signals and damage tracking |
 | `crates/cappy-style` | Typed styles, design tokens and themes |
 | `crates/cappy-layout` | Geometry and taffy-based layout |
+| `crates/cappy-text` | Fonts, text shaping and measurement shared by the renderers |
+| `crates/cappy-host` | Renderer-independent window host and renderer selection |
 | `crates/cappy-render` | wgpu renderer with damage-region repainting |
+| `crates/cappy-render-cpu` | CPU renderer (tiny-skia + softbuffer) for low memory use |
 | `crates/cappy-components` | Built-in components (planned) |
-| `crates/cappy-testing` | Headless UI driver and GPU snapshot helpers |
+| `crates/cappy-testing` | Headless UI driver and GPU / CPU snapshot helpers |
 | `macros/cappy-dsl` | `macro_rules!` DSL (`ui!`, `style!`, `theme!`) |
 | `macros/cappy-macros` | Procedural macros (`derive(Props)`, `derive(ClassName)`) |
 | `integrations/cappy-winit` | [winit](https://github.com/rust-windowing/winit) integration |
@@ -40,6 +43,25 @@ cargo run -p tao-demo
 
 # Run the tests
 cargo test --workspace
+```
+
+### Choosing a renderer
+
+The GPU renderer (wgpu) is the default. The CPU renderer (tiny-skia + softbuffer) loads no
+GPU driver, so a window needs far less memory, at the cost of CPU time per repainted pixel.
+
+- Enable the `cpu` feature of `cappy-tao` or `cappy-winit` (or of the demos) to compile it in.
+- With both backends compiled in, pick one with `WindowOptions::with_renderer(RendererKind::Cpu)`
+  or the `CAPPY_RENDERER=gpu|cpu` environment variable, which takes precedence.
+- With `default-features = false, features = ["cpu"]`, wgpu is not compiled at all.
+- Asking for a backend that is not compiled in is an error; there is no silent fallback.
+
+```sh
+# Both backends, CPU chosen at runtime (PowerShell: $env:CAPPY_RENDERER="cpu")
+CAPPY_RENDERER=cpu cargo run -p tao-demo --features cpu --release
+
+# CPU only, without wgpu
+cargo run -p tao-demo --no-default-features --features cpu --release
 ```
 
 ## Support, issues and pull requests

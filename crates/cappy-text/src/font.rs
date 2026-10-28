@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use glyphon::{FontSystem, fontdb};
+use cosmic_text::{FontSystem, fontdb};
 
 /// Preferred UI families, tried in order; the first one installed becomes `sans-serif`.
 const PREFERRED_SANS_SERIF: &[&str] = &[

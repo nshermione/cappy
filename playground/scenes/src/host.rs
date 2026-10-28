@@ -1,11 +1,11 @@
 //! Settings shared by the playground hosts: logging and window options.
 
-use cappy::render::WindowOptions;
+use cappy::host::WindowOptions;
 
 const DEBUG_DAMAGE_FLAG: &str = "--debug-damage";
 const DEBUG_DAMAGE_ENV: &str = "CAPPY_DEBUG_DAMAGE";
-/// Per-frame repaint statistics are logged by `cappy_render` at debug level.
-const DEFAULT_LOG_FILTER: &str = "info,cappy_render=debug";
+/// Per-frame repaint statistics are logged by `cappy_host` at debug level.
+const DEFAULT_LOG_FILTER: &str = "info,cappy_host=debug";
 
 /// Starts logging; `RUST_LOG` overrides the default filter, which shows per-frame repaints.
 pub fn init_logging() {
@@ -13,7 +13,8 @@ pub fn init_logging() {
         .init();
 }
 
-/// Window options for a playground host, honouring the debug damage flag.
+/// Window options for a playground host, honouring the debug damage flag. The renderer is
+/// chosen by the host's cargo features and `CAPPY_RENDERER`.
 pub fn window_options(title: &str) -> WindowOptions {
     WindowOptions::new(title).with_debug_damage(debug_damage_requested())
 }

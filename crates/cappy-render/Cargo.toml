@@ -8,6 +8,8 @@ authors.workspace = true
 
 [dependencies]
 cappy-core.workspace = true
+cappy-text.workspace = true
+cappy-host.workspace = true
 wgpu.workspace = true
 glyphon.workspace = true
 bytemuck.workspace = true

@@ -8,14 +8,20 @@
 //! let ui = Ui::new(div().class("app").child(text("Hello")), Theme::light());
 //! run(WindowOptions::new("Hello"), ui).expect("app failed");
 //! ```
+//!
+//! Features pick the renderer backends compiled in: `gpu` (wgpu, default) and `cpu`
+//! (tiny-skia + softbuffer, far less memory). With both, [`WindowOptions::with_renderer`] or the
+//! `CAPPY_RENDERER=gpu|cpu` environment variable chooses; otherwise the GPU is preferred.
 
+mod renderer;
 mod translate;
 
 use std::fmt;
 use std::sync::Arc;
 
 use cappy_core::{CursorIcon, InputEvent, Ui};
-use cappy_render::{SurfaceError, WindowHost};
+use cappy_host::{RendererError, RendererSelectionError, WindowHost, select_renderer};
+use cappy_text::FontContext;
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
@@ -23,23 +29,27 @@ use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
-pub use cappy_render::WindowOptions;
+pub use cappy_host::{RendererKind, WindowOptions};
+pub use renderer::AVAILABLE_RENDERERS;
 
 const DEBUG_DAMAGE_KEY: KeyCode = KeyCode::F12;
 
 #[derive(Debug)]
 pub enum RunError {
+    /// No usable renderer: an invalid `CAPPY_RENDERER`, or a backend that was not compiled in.
+    SelectRenderer(RendererSelectionError),
     EventLoop(winit::error::EventLoopError),
     CreateWindow(winit::error::OsError),
-    Surface(SurfaceError),
+    Renderer(RendererError),
 }
 
 impl fmt::Display for RunError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::SelectRenderer(error) => write!(f, "cannot choose a renderer: {error}"),
             Self::EventLoop(error) => write!(f, "winit event loop failed: {error}"),
             Self::CreateWindow(error) => write!(f, "failed to create the window: {error}"),
-            Self::Surface(error) => write!(f, "{error}"),
+            Self::Renderer(error) => write!(f, "{error}"),
         }
     }
 }
@@ -47,20 +57,24 @@ impl fmt::Display for RunError {
 impl std::error::Error for RunError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::SelectRenderer(error) => Some(error),
             Self::EventLoop(error) => Some(error),
             Self::CreateWindow(error) => Some(error),
-            Self::Surface(error) => Some(error),
+            Self::Renderer(error) => Some(error),
         }
     }
 }
 
 /// Opens a window showing `ui` and runs until it is closed.
 pub fn run(options: WindowOptions, ui: Ui) -> Result<(), RunError> {
+    let renderer =
+        select_renderer(options.renderer, AVAILABLE_RENDERERS).map_err(RunError::SelectRenderer)?;
     let event_loop = EventLoop::<Wake>::with_user_event()
         .build()
         .map_err(RunError::EventLoop)?;
     let mut app = App {
         options,
+        renderer,
         proxy: event_loop.create_proxy(),
         pending_ui: Some(ui),
         running: None,
@@ -75,13 +89,14 @@ pub fn run(options: WindowOptions, ui: Ui) -> Result<(), RunError> {
 struct Wake;
 
 struct Running {
-    // Declared before `window` so the surface is dropped before the window it renders to.
+    // Declared before `window` so the renderer is dropped before the window it renders to.
     host: WindowHost,
     window: Arc<Window>,
 }
 
 struct App {
     options: WindowOptions,
+    renderer: RendererKind,
     proxy: EventLoopProxy<Wake>,
     pending_ui: Option<Ui>,
     running: Option<Running>,
@@ -99,13 +114,10 @@ impl App {
                 .create_window(attributes)
                 .map_err(RunError::CreateWindow)?,
         );
-        let size = window.inner_size();
-        let mut host = pollster::block_on(WindowHost::new(
-            Arc::clone(&window),
-            (size.width, size.height),
-            ui,
-        ))
-        .map_err(RunError::Surface)?;
+        let fonts = FontContext::from_system();
+        let renderer =
+            renderer::open_renderer(self.renderer, &window, &fonts).map_err(RunError::Renderer)?;
+        let mut host = WindowHost::new(renderer, &fonts, ui);
         host.set_debug_damage(self.options.debug_damage);
         let proxy = self.proxy.clone();
         host.set_waker(move || {
@@ -216,7 +228,7 @@ fn redraw(running: &mut Running) -> Result<(), RunError> {
     let result = running
         .host
         .redraw((size.width, size.height), running.window.scale_factor())
-        .map_err(RunError::Surface)?;
+        .map_err(RunError::Renderer)?;
     apply_cursor(&running.window, result.cursor);
     if result.needs_retry() {
         running.window.request_redraw();

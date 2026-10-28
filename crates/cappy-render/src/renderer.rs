@@ -5,12 +5,12 @@ use std::fmt;
 use std::ops::Range;
 
 use cappy_core::{Color, Damage, Primitive, Rect, RenderFrame};
+use cappy_host::{PixelRect, physical_regions};
 
 use crate::FontContext;
 use crate::batch::{Batch, plan_batches};
 use crate::composite::{Compositor, OFFSCREEN_FORMAT, Offscreen};
 use crate::quad::{QuadBatch, QuadBlend, QuadInstance, QuadPipelines, needs_manual_srgb};
-use crate::scissor::{ScissorRect, physical_scissors};
 use crate::text::TextLayer;
 
 const DAMAGE_OVERLAY_FILL: Color = Color::rgba(255, 40, 80, 40);
@@ -139,7 +139,7 @@ impl Renderer {
             &frame.damage
         };
         let logical_damage = damage.rects(frame.logical_size());
-        let scissors = physical_scissors(&logical_damage, frame.scale_factor, size);
+        let scissors = physical_regions(&logical_damage, frame.scale_factor, size);
         if scissors.is_empty() {
             return Ok(0);
         }
@@ -192,7 +192,7 @@ impl Renderer {
         &mut self,
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
-        scissors: &[ScissorRect],
+        scissors: &[PixelRect],
         quad_ranges: &[Range<u32>],
     ) -> Result<(), RenderError> {
         let eraser = self
@@ -252,7 +252,7 @@ impl Renderer {
 fn quad_instances(
     primitives: &[Primitive],
     batches: &[Batch],
-    scissors: &[ScissorRect],
+    scissors: &[PixelRect],
     scale_factor: f32,
 ) -> (Vec<QuadInstance>, Vec<Range<u32>>) {
     let mut instances: Vec<QuadInstance> = scissors

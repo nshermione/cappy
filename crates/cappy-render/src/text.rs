@@ -1,9 +1,7 @@
 //! Text drawing with glyphon: one text renderer per batch, shaped buffers cached across frames.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-
 use cappy_core::{Primitive, TextPrimitive};
+use cappy_text::ShapedTextCache;
 use glyphon::{
     Buffer, Cache, FontSystem, PrepareError, RenderError, Resolution, SwashCache, TextArea,
     TextAtlas, TextBounds, TextRenderer, Viewport,
@@ -11,38 +9,6 @@ use glyphon::{
 
 use crate::FontContext;
 use crate::batch::Batch;
-use crate::shaping::{TextFont, shape_text};
-
-/// Shaped buffers unused for this many paints are dropped.
-const BUFFER_TIME_TO_LIVE: u64 = 600;
-/// Extra wrap width so text measured to an exact pixel width does not wrap when drawn.
-const WRAP_SLACK: f32 = 0.5;
-
-#[derive(Clone, PartialEq, Eq, Hash)]
-struct BufferKey {
-    text: Arc<str>,
-    font_size_bits: u32,
-    line_height_bits: u32,
-    weight: u16,
-    width_bits: u32,
-}
-
-impl BufferKey {
-    fn new(text: &TextPrimitive) -> Self {
-        Self {
-            text: text.text.clone(),
-            font_size_bits: text.font_size.to_bits(),
-            line_height_bits: text.line_height.to_bits(),
-            weight: text.weight,
-            width_bits: text.rect.width.to_bits(),
-        }
-    }
-}
-
-struct CachedBuffer {
-    buffer: Buffer,
-    last_used: u64,
-}
 
 pub(crate) struct TextLayer {
     font_system: FontSystem,
@@ -50,8 +16,7 @@ pub(crate) struct TextLayer {
     viewport: Viewport,
     atlas: TextAtlas,
     renderers: Vec<TextRenderer>,
-    buffers: HashMap<BufferKey, CachedBuffer>,
-    paint_count: u64,
+    buffers: ShapedTextCache,
 }
 
 impl TextLayer {
@@ -68,8 +33,7 @@ impl TextLayer {
             viewport: Viewport::new(device, &cache),
             atlas: TextAtlas::new(device, queue, &cache, format),
             renderers: Vec::new(),
-            buffers: HashMap::new(),
-            paint_count: 0,
+            buffers: ShapedTextCache::new(),
         }
     }
 
@@ -83,7 +47,7 @@ impl TextLayer {
         primitives: &[Primitive],
         batches: &[Batch],
     ) -> Result<(), PrepareError> {
-        self.paint_count += 1;
+        self.buffers.begin_paint();
         self.viewport.update(
             queue,
             Resolution {
@@ -93,7 +57,7 @@ impl TextLayer {
         );
         for batch in batches {
             for text in batch_texts(primitives, batch) {
-                self.ensure_buffer(text);
+                self.buffers.ensure(&mut self.font_system, text);
             }
         }
         while self.renderers.len() < batches.len() {
@@ -106,12 +70,12 @@ impl TextLayer {
             self.renderers.push(renderer);
         }
         for (batch, renderer) in batches.iter().zip(&mut self.renderers) {
+            let buffers = &self.buffers;
             let areas = batch_texts(primitives, batch).map(|text| {
-                text_area(
-                    &self.buffers[&BufferKey::new(text)].buffer,
-                    text,
-                    scale_factor,
-                )
+                let buffer = buffers
+                    .get(text)
+                    .expect("every batch text was shaped above");
+                text_area(buffer, text, scale_factor)
             });
             renderer.prepare(
                 device,
@@ -137,30 +101,7 @@ impl TextLayer {
     /// Releases glyphs and buffers that are no longer needed.
     pub fn finish_paint(&mut self) {
         self.atlas.trim();
-        let paint_count = self.paint_count;
-        self.buffers
-            .retain(|_, cached| paint_count - cached.last_used < BUFFER_TIME_TO_LIVE);
-    }
-
-    fn ensure_buffer(&mut self, text: &TextPrimitive) {
-        let paint_count = self.paint_count;
-        let font_system = &mut self.font_system;
-        self.buffers
-            .entry(BufferKey::new(text))
-            .and_modify(|cached| cached.last_used = paint_count)
-            .or_insert_with(|| CachedBuffer {
-                buffer: shape_text(
-                    font_system,
-                    &text.text,
-                    TextFont {
-                        font_size: text.font_size,
-                        line_height: text.line_height,
-                        weight: text.weight,
-                    },
-                    Some(text.rect.width + WRAP_SLACK),
-                ),
-                last_used: paint_count,
-            });
+        self.buffers.finish_paint();
     }
 }
 

@@ -6,11 +6,21 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
+[features]
+default = ["gpu"]
+# wgpu renderer.
+gpu = ["dep:cappy-render", "dep:pollster"]
+# tiny-skia + softbuffer renderer: no GPU driver, much less memory.
+cpu = ["dep:cappy-render-cpu"]
+
 [dependencies]
 cappy-core.workspace = true
-cappy-render.workspace = true
+cappy-host.workspace = true
+cappy-text.workspace = true
+cappy-render = { workspace = true, optional = true }
+cappy-render-cpu = { workspace = true, optional = true }
 winit.workspace = true
-pollster.workspace = true
+pollster = { workspace = true, optional = true }
 log.workspace = true
 
 [lints]

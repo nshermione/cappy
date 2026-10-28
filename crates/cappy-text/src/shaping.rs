@@ -1,6 +1,6 @@
 //! Text shaping shared by measurement and rendering, so both lay text out identically.
 
-use glyphon::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping, Weight};
+use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping, Weight};
 
 /// Font parameters for one block of text, in logical pixels.
 #[derive(Clone, Copy, Debug, PartialEq)]

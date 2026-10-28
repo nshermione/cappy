@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use cappy_core::{Size, TextMeasureRequest, TextMeasurer};
-use glyphon::FontSystem;
+use cosmic_text::FontSystem;
 
 use crate::FontContext;
 use crate::shaping::{TextFont, shape_text, shaped_extent};

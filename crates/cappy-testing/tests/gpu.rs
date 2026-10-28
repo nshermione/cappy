@@ -1,83 +1,20 @@
 //! Pixel tests on a real or software GPU. Run with `cargo test -p cappy-testing --features gpu-tests`.
 #![cfg(feature = "gpu-tests")]
 
-use std::path::Path;
-use std::sync::{Arc, OnceLock};
+mod common;
 
-use cappy_core::{
-    Color, ColorToken, Damage, Element, FrameInput, Radius, RenderFrame, Signal, Theme, Ui, signal,
-};
-use cappy_dsl::{style, ui};
-use cappy_render::{CosmicTextMeasurer, FontContext};
+use std::path::Path;
+
+use cappy_core::{Damage, Theme, signal};
 use cappy_testing::TestUi;
 use cappy_testing::gpu::{HeadlessRenderer, Image, assert_snapshot};
+use common::{background, counter, fonts, full_repaint, harness, shapes};
 
-const VIEWPORT: FrameInput = FrameInput {
-    physical_width: 320,
-    physical_height: 200,
-    scale_factor: 1.0,
-};
 /// Channel difference allowed between GPUs for anti-aliased edges.
 const SNAPSHOT_TOLERANCE: u8 = 2;
 
-fn fonts() -> &'static FontContext {
-    static FONTS: OnceLock<FontContext> = OnceLock::new();
-    FONTS.get_or_init(FontContext::from_system)
-}
-
 fn renderer() -> HeadlessRenderer {
     HeadlessRenderer::new(fonts()).expect("headless GPU available")
-}
-
-fn harness(root: Element) -> TestUi {
-    let mut ui = Ui::new(root, Theme::light());
-    ui.set_text_measurer(CosmicTextMeasurer::new(fonts()));
-    let mut harness = TestUi::from_ui(ui);
-    harness.resize(VIEWPORT);
-    harness
-}
-
-fn background() -> Color {
-    Theme::light().tokens().colors.background
-}
-
-fn counter(count: Signal<i32>) -> Element {
-    ui! {
-        div(class = "app") {
-            div(class = "row", key = "row") {
-                text(move || format!("Count: {}", count.get()), key = "label")
-                div(class = "btn btn-primary", key = "increment", on_click = move |_| count.update(|n| *n += 1)) {
-                    text("+1")
-                }
-            }
-        }
-    }
-}
-
-fn shapes() -> Element {
-    ui! {
-        div(class = "app", key = "root") {
-            div(class = "row") {
-                div(style = style! { size: 60, background: ColorToken::Primary, radius: Radius::Lg })
-                div(style = style! {
-                    size: 60,
-                    background: ColorToken::Surface,
-                    border_color: ColorToken::Danger,
-                    border_width: 3,
-                    radius: Radius::Sm,
-                })
-                div(style = style! { size: 60, background: Color::hex("#22c55e") })
-            }
-        }
-    }
-}
-
-fn full_repaint(frame: &RenderFrame) -> RenderFrame {
-    RenderFrame {
-        damage: Damage::Full,
-        primitives: Arc::clone(&frame.primitives),
-        ..frame.clone()
-    }
 }
 
 fn probe(image: &Image, harness: &TestUi, key: &str) -> [u8; 4] {

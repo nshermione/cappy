@@ -9,14 +9,20 @@
 //! let ui = Ui::new(div().class("app").child(text("Hello")), Theme::light());
 //! run(WindowOptions::new("Hello"), ui).expect("app failed");
 //! ```
+//!
+//! Features pick the renderer backends compiled in: `gpu` (wgpu, default) and `cpu`
+//! (tiny-skia + softbuffer, far less memory). With both, [`WindowOptions::with_renderer`] or the
+//! `CAPPY_RENDERER=gpu|cpu` environment variable chooses; otherwise the GPU is preferred.
 
+mod renderer;
 mod translate;
 
 use std::fmt;
 use std::sync::Arc;
 
 use cappy_core::{CursorIcon, InputEvent, Ui};
-use cappy_render::{SurfaceError, WindowHost};
+use cappy_host::{RendererError, RendererSelectionError, WindowHost, select_renderer};
+use cappy_text::FontContext;
 use tao::dpi::LogicalSize;
 use tao::event::{ElementState, Event, KeyEvent, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoop, EventLoopBuilder};
@@ -24,21 +30,25 @@ use tao::keyboard::KeyCode;
 use tao::platform::run_return::EventLoopExtRunReturn;
 use tao::window::{Window, WindowBuilder};
 
-pub use cappy_render::WindowOptions;
+pub use cappy_host::{RendererKind, WindowOptions};
+pub use renderer::AVAILABLE_RENDERERS;
 
 const DEBUG_DAMAGE_KEY: KeyCode = KeyCode::F12;
 
 #[derive(Debug)]
 pub enum RunError {
+    /// No usable renderer: an invalid `CAPPY_RENDERER`, or a backend that was not compiled in.
+    SelectRenderer(RendererSelectionError),
     CreateWindow(tao::error::OsError),
-    Surface(SurfaceError),
+    Renderer(RendererError),
 }
 
 impl fmt::Display for RunError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::SelectRenderer(error) => write!(f, "cannot choose a renderer: {error}"),
             Self::CreateWindow(error) => write!(f, "failed to create the window: {error}"),
-            Self::Surface(error) => write!(f, "{error}"),
+            Self::Renderer(error) => write!(f, "{error}"),
         }
     }
 }
@@ -46,8 +56,9 @@ impl fmt::Display for RunError {
 impl std::error::Error for RunError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::SelectRenderer(error) => Some(error),
             Self::CreateWindow(error) => Some(error),
-            Self::Surface(error) => Some(error),
+            Self::Renderer(error) => Some(error),
         }
     }
 }
@@ -57,7 +68,7 @@ impl std::error::Error for RunError {
 struct Wake;
 
 struct Running {
-    // Declared before `window` so the surface is dropped before the window it renders to.
+    // Declared before `window` so the renderer is dropped before the window it renders to.
     host: WindowHost,
     window: Arc<Window>,
 }
@@ -83,6 +94,8 @@ fn start(
     options: &WindowOptions,
     ui: Ui,
 ) -> Result<Running, RunError> {
+    let kind =
+        select_renderer(options.renderer, AVAILABLE_RENDERERS).map_err(RunError::SelectRenderer)?;
     let (width, height) = options.logical_size;
     let window = WindowBuilder::new()
         .with_title(options.title.clone())
@@ -90,13 +103,9 @@ fn start(
         .build(event_loop)
         .map_err(RunError::CreateWindow)?;
     let window = Arc::new(window);
-    let size = window.inner_size();
-    let mut host = pollster::block_on(WindowHost::new(
-        Arc::clone(&window),
-        (size.width, size.height),
-        ui,
-    ))
-    .map_err(RunError::Surface)?;
+    let fonts = FontContext::from_system();
+    let renderer = renderer::open_renderer(kind, &window, &fonts).map_err(RunError::Renderer)?;
+    let mut host = WindowHost::new(renderer, &fonts, ui);
     host.set_debug_damage(options.debug_damage);
     let proxy = event_loop.create_proxy();
     host.set_waker(move || {
@@ -180,7 +189,7 @@ fn redraw(running: &mut Running) -> Result<(), RunError> {
     let result = running
         .host
         .redraw((size.width, size.height), running.window.scale_factor())
-        .map_err(RunError::Surface)?;
+        .map_err(RunError::Renderer)?;
     apply_cursor(&running.window, result.cursor);
     if result.needs_retry() {
         running.window.request_redraw();

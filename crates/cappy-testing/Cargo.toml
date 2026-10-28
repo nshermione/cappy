@@ -1,6 +1,6 @@
 [package]
 name = "cappy-testing"
-description = "Test harness for cappy: headless UI driver and GPU snapshot helpers"
+description = "Test harness for cappy: headless UI driver and GPU / CPU snapshot helpers"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,16 +8,20 @@ authors.workspace = true
 
 [features]
 gpu-tests = ["dep:cappy-render", "dep:wgpu", "dep:pollster", "dep:png"]
+cpu-tests = ["dep:cappy-render-cpu", "dep:cappy-text", "dep:png"]
 
 [dependencies]
 cappy-core.workspace = true
 cappy-render = { workspace = true, optional = true }
+cappy-render-cpu = { workspace = true, optional = true }
+cappy-text = { workspace = true, optional = true }
 wgpu = { workspace = true, optional = true }
 pollster = { workspace = true, optional = true }
 png = { workspace = true, optional = true }
 
 [dev-dependencies]
 cappy-dsl.workspace = true
+cappy-text.workspace = true
 
 [lints]
 workspace = true

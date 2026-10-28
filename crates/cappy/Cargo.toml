@@ -7,22 +7,28 @@ license.workspace = true
 authors.workspace = true
 
 [features]
-default = ["basic"]
+default = ["basic", "gpu"]
 basic = [
     "dep:cappy-core",
     "dep:cappy-style",
     "dep:cappy-layout",
-    "dep:cappy-render",
+    "dep:cappy-text",
+    "dep:cappy-host",
     "dep:cappy-dsl",
     "dep:cappy-macros",
 ]
-full = ["basic", "dep:cappy-components"]
+gpu = ["basic", "dep:cappy-render"]
+cpu = ["basic", "dep:cappy-render-cpu"]
+full = ["basic", "gpu", "dep:cappy-components"]
 
 [dependencies]
 cappy-core = { workspace = true, optional = true }
 cappy-style = { workspace = true, optional = true }
 cappy-layout = { workspace = true, optional = true }
+cappy-text = { workspace = true, optional = true }
+cappy-host = { workspace = true, optional = true }
 cappy-render = { workspace = true, optional = true }
+cappy-render-cpu = { workspace = true, optional = true }
 cappy-dsl = { workspace = true, optional = true }
 cappy-macros = { workspace = true, optional = true }
 cappy-components = { workspace = true, optional = true }

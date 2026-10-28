@@ -1,0 +1,19 @@
+[package]
+name = "cappy-render-cpu"
+description = "CPU renderer (tiny-skia + softbuffer) with damage-region repainting for cappy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+cappy-core.workspace = true
+cappy-text.workspace = true
+cappy-host.workspace = true
+tiny-skia.workspace = true
+softbuffer.workspace = true
+raw-window-handle.workspace = true
+log.workspace = true
+
+[lints]
+workspace = true

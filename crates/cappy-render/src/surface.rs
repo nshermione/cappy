@@ -3,6 +3,7 @@
 use std::fmt;
 
 use cappy_core::{Color, RenderFrame};
+use cappy_host::{PresentOutcome, RendererError, RendererKind, WindowRenderer};
 
 use crate::{FontContext, RenderError, RenderTarget, Renderer, TargetLoad};
 
@@ -49,15 +50,16 @@ impl From<RenderError> for SurfaceError {
     }
 }
 
-/// Result of [`WindowSurface::present`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PresentOutcome {
-    /// The frame is on screen. `repainted` regions were redrawn; zero means a pure re-composite.
-    Presented { repainted: usize },
-    /// No frame could be acquired this time; request another redraw.
-    Retry,
-    /// The window is hidden; wait for it to become visible before redrawing.
-    Occluded,
+/// Opens a GPU surface for `window` as a [`WindowRenderer`].
+pub async fn open_window_renderer(
+    window: impl Into<wgpu::SurfaceTarget<'static>>,
+    physical_size: (u32, u32),
+    fonts: &FontContext,
+) -> Result<Box<dyn WindowRenderer>, RendererError> {
+    let surface = WindowSurface::new(window, physical_size, fonts)
+        .await
+        .map_err(|error| RendererError::new(RendererKind::Gpu, error))?;
+    Ok(Box::new(surface))
 }
 
 pub struct WindowSurface {
@@ -91,6 +93,8 @@ impl WindowSurface {
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("cappy device"),
+                // A UI allocates few, small resources; large pre-allocated blocks only cost RAM.
+                memory_hints: wgpu::MemoryHints::MemoryUsage,
                 ..Default::default()
             })
             .await
@@ -199,6 +203,33 @@ impl WindowSurface {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("cappy frame"),
             })
+    }
+}
+
+impl WindowRenderer for WindowSurface {
+    fn kind(&self) -> RendererKind {
+        RendererKind::Gpu
+    }
+
+    fn resize(&mut self, physical_size: (u32, u32)) {
+        WindowSurface::resize(self, physical_size);
+    }
+
+    fn present(
+        &mut self,
+        frame: &RenderFrame,
+        background: Color,
+    ) -> Result<PresentOutcome, RendererError> {
+        WindowSurface::present(self, frame, background)
+            .map_err(|error| RendererError::new(RendererKind::Gpu, error))
+    }
+
+    fn set_debug_damage(&mut self, enabled: bool) {
+        self.renderer.set_debug_damage(enabled);
+    }
+
+    fn debug_damage(&self) -> bool {
+        self.renderer.debug_damage()
     }
 }
 

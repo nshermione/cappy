@@ -3,9 +3,13 @@
 //! [`Ui::update`], and render the resulting frame.
 //!
 //! Features:
-//! - `basic` (default): reactive core, styles and themes, layout, renderer, `ui!`/`style!`/
-//!   `theme!` macros and derives. Enough to build any component yourself.
-//! - `full`: `basic` plus the built-in component library.
+//! - `basic` (default): reactive core, styles and themes, layout, text, the renderer-independent
+//!   window host, `ui!`/`style!`/`theme!` macros and derives. Enough to build any component
+//!   yourself.
+//! - `gpu` (default): the wgpu renderer, as [`render`].
+//! - `cpu`: the tiny-skia + softbuffer renderer, as [`render_cpu`]. It loads no GPU driver, so it
+//!   needs far less memory.
+//! - `full`: `basic` and `gpu` plus the built-in component library.
 //!
 //! ```
 //! use cappy::prelude::*;
@@ -30,10 +34,29 @@ pub use cappy_dsl::{style, theme, ui};
 #[cfg(feature = "basic")]
 pub use cappy_macros::{ClassName, Props};
 
-/// The wgpu renderer: offscreen damage repainting, compositing and a window-surface helper.
+/// Fonts, shaping and text measurement shared by the renderers.
 #[cfg(feature = "basic")]
+pub mod text {
+    pub use cappy_text::*;
+}
+
+/// The renderer-independent window host: window options, renderer selection and the
+/// [`host::WindowRenderer`] interface backends implement.
+#[cfg(feature = "basic")]
+pub mod host {
+    pub use cappy_host::*;
+}
+
+/// The wgpu renderer: offscreen damage repainting, compositing and a window-surface helper.
+#[cfg(feature = "gpu")]
 pub mod render {
     pub use cappy_render::*;
+}
+
+/// The CPU renderer: tiny-skia damage repainting and a softbuffer window surface.
+#[cfg(feature = "cpu")]
+pub mod render_cpu {
+    pub use cappy_render_cpu::*;
 }
 
 #[cfg(feature = "full")]

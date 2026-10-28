@@ -1,10 +1,11 @@
-//! The window-manager independent half of a desktop host: owns the [`Ui`] and its surface,
+//! The window-manager independent half of a desktop host: owns the [`Ui`] and its renderer,
 //! turns input into redraw requests and redraws into presented frames. Integrations such as
 //! winit and tao only translate their events and forward them here.
 
 use cappy_core::{CursorIcon, FrameInput, InputEvent, Ui, UpdateOutcome};
+use cappy_text::{CosmicTextMeasurer, FontContext};
 
-use crate::{CosmicTextMeasurer, FontContext, PresentOutcome, SurfaceError, WindowSurface};
+use crate::{PresentOutcome, RendererError, RendererKind, WindowRenderer};
 
 const DEFAULT_TITLE: &str = "cappy";
 const DEFAULT_LOGICAL_SIZE: (f64, f64) = (960.0, 640.0);
@@ -16,6 +17,9 @@ pub struct WindowOptions {
     pub logical_size: (f64, f64),
     /// Outline repainted regions; toggled at runtime with F12.
     pub debug_damage: bool,
+    /// Backend to draw with; `None` picks the first one compiled in (GPU before CPU).
+    /// The `CAPPY_RENDERER` environment variable overrides this.
+    pub renderer: Option<RendererKind>,
 }
 
 impl Default for WindowOptions {
@@ -24,6 +28,7 @@ impl Default for WindowOptions {
             title: DEFAULT_TITLE.to_owned(),
             logical_size: DEFAULT_LOGICAL_SIZE,
             debug_damage: false,
+            renderer: None,
         }
     }
 }
@@ -45,6 +50,12 @@ impl WindowOptions {
     #[must_use]
     pub fn with_debug_damage(mut self, enabled: bool) -> Self {
         self.debug_damage = enabled;
+        self
+    }
+
+    #[must_use]
+    pub fn with_renderer(mut self, renderer: RendererKind) -> Self {
+        self.renderer = Some(renderer);
         self
     }
 }
@@ -75,7 +86,7 @@ impl RedrawResult {
 
 pub struct WindowHost {
     ui: Ui,
-    surface: WindowSurface,
+    renderer: Box<dyn WindowRenderer>,
     cursor: CursorIcon,
     /// Size of the last redraw, used to settle input without waiting for a frame.
     last_input: Option<FrameInput>,
@@ -83,22 +94,17 @@ pub struct WindowHost {
 }
 
 impl WindowHost {
-    /// Opens a GPU surface for `window` and attaches `ui`, measuring text with real fonts.
-    pub async fn new(
-        window: impl Into<wgpu::SurfaceTarget<'static>>,
-        physical_size: (u32, u32),
-        mut ui: Ui,
-    ) -> Result<Self, SurfaceError> {
-        let fonts = FontContext::from_system();
-        let surface = WindowSurface::new(window, physical_size, &fonts).await?;
-        ui.set_text_measurer(CosmicTextMeasurer::new(&fonts));
-        Ok(Self {
+    /// Attaches `ui` to `renderer`, measuring text with `fonts` (the fonts the renderer draws).
+    pub fn new(renderer: Box<dyn WindowRenderer>, fonts: &FontContext, mut ui: Ui) -> Self {
+        ui.set_text_measurer(CosmicTextMeasurer::new(fonts));
+        log::info!("cappy window host using the {} renderer", renderer.kind());
+        Self {
             ui,
-            surface,
+            renderer,
             cursor: CursorIcon::Default,
             last_input: None,
             frames: 0,
-        })
+        }
     }
 
     pub fn ui(&self) -> &Ui {
@@ -109,18 +115,22 @@ impl WindowHost {
         &mut self.ui
     }
 
+    pub fn renderer_kind(&self) -> RendererKind {
+        self.renderer.kind()
+    }
+
     /// Lets signal writes from outside the event loop wake the window.
     pub fn set_waker(&mut self, waker: impl Fn() + 'static) {
         self.ui.set_waker(waker);
     }
 
     pub fn set_debug_damage(&mut self, enabled: bool) {
-        self.surface.renderer_mut().set_debug_damage(enabled);
+        self.renderer.set_debug_damage(enabled);
     }
 
     pub fn toggle_debug_damage(&mut self) {
-        let renderer = self.surface.renderer_mut();
-        renderer.set_debug_damage(!renderer.debug_damage());
+        let enabled = self.renderer.debug_damage();
+        self.renderer.set_debug_damage(!enabled);
     }
 
     /// Feeds input and settles the UI right away, so input that changes nothing visible (e.g.
@@ -145,7 +155,7 @@ impl WindowHost {
     }
 
     pub fn resize(&mut self, physical_size: (u32, u32)) {
-        self.surface.resize(physical_size);
+        self.renderer.resize(physical_size);
     }
 
     /// Updates the UI for the current window size and presents a frame. When nothing changed the
@@ -155,7 +165,7 @@ impl WindowHost {
         &mut self,
         physical_size: (u32, u32),
         scale_factor: f64,
-    ) -> Result<RedrawResult, SurfaceError> {
+    ) -> Result<RedrawResult, RendererError> {
         let input = FrameInput::new(physical_size.0, physical_size.1, scale_factor as f32);
         self.last_input = Some(input);
         self.ui.update(input);
@@ -164,7 +174,7 @@ impl WindowHost {
             .prepare_frame()
             .expect("a frame is always available after an update");
         let background = self.ui.theme().tokens().colors.background;
-        let present = self.surface.present(&frame, background)?;
+        let present = self.renderer.present(&frame, background)?;
         self.frames += 1;
         if let PresentOutcome::Presented { repainted } = present {
             log::debug!(

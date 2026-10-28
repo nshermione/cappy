@@ -4,22 +4,15 @@
 
 mod batch;
 mod composite;
-mod font;
 mod gpu_buffer;
-mod measure;
 mod quad;
 mod renderer;
-mod scissor;
-mod shaping;
 mod surface;
 mod text;
-mod window_host;
 
-pub use font::FontContext;
-pub use measure::CosmicTextMeasurer;
 pub use renderer::{RenderError, RenderTarget, Renderer, TargetLoad};
-pub use surface::{PresentOutcome, SurfaceError, WindowSurface};
-pub use window_host::{InputResponse, RedrawResult, WindowHost, WindowOptions};
+pub use surface::{SurfaceError, WindowSurface, open_window_renderer};
 
-pub use glyphon::fontdb;
+pub use cappy_host::{PresentOutcome, WindowRenderer};
+pub use cappy_text::{CosmicTextMeasurer, FontContext, fontdb};
 pub use wgpu;
