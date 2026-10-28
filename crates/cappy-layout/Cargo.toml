@@ -1,0 +1,14 @@
+[package]
+name = "cappy-layout"
+description = "Geometry and taffy-based layout for the cappy GUI framework"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+cappy-style.workspace = true
+taffy.workspace = true
+
+[lints]
+workspace = true

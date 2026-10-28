@@ -1,0 +1,17 @@
+[package]
+name = "cappy-tao"
+description = "tao integration for the cappy GUI framework"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+cappy-core.workspace = true
+cappy-render.workspace = true
+tao.workspace = true
+pollster.workspace = true
+log.workspace = true
+
+[lints]
+workspace = true

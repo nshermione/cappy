@@ -1,0 +1,15 @@
+[package]
+name = "winit-demo"
+description = "cappy playground hosted by winit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+playground-scenes.workspace = true
+cappy-winit.workspace = true
+
+[lints]
+workspace = true

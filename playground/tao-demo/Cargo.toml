@@ -1,0 +1,15 @@
+[package]
+name = "tao-demo"
+description = "cappy playground hosted by tao"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+playground-scenes.workspace = true
+cappy-tao.workspace = true
+
+[lints]
+workspace = true

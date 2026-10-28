@@ -1,0 +1,5 @@
+error: unknown props option; expected `skip`
+ --> tests/compile_fail/props_unknown_option.rs:5:13
+  |
+5 |     #[props(rename = "text")]
+  |             ^^^^^^

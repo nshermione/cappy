@@ -1,0 +1,5 @@
+error: #[derive(Props)] needs named fields to name the setters after
+ --> tests/compile_fail/props_tuple_struct.rs:4:15
+  |
+4 | struct Unnamed(String);
+  |               ^^^^^^^^

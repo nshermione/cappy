@@ -1,0 +1,58 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "macros/*", "integrations/*", "playground/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+authors = ["cappy contributors"]
+
+[workspace.dependencies]
+# Internal crates
+cappy = { path = "crates/cappy", version = "0.1.0", default-features = false }
+cappy-core = { path = "crates/cappy-core", version = "0.1.0" }
+cappy-style = { path = "crates/cappy-style", version = "0.1.0" }
+cappy-layout = { path = "crates/cappy-layout", version = "0.1.0" }
+cappy-render = { path = "crates/cappy-render", version = "0.1.0" }
+cappy-components = { path = "crates/cappy-components", version = "0.1.0" }
+cappy-testing = { path = "crates/cappy-testing", version = "0.1.0" }
+cappy-dsl = { path = "macros/cappy-dsl", version = "0.1.0" }
+cappy-macros = { path = "macros/cappy-macros", version = "0.1.0" }
+cappy-winit = { path = "integrations/cappy-winit", version = "0.1.0" }
+cappy-tao = { path = "integrations/cappy-tao", version = "0.1.0" }
+playground-scenes = { path = "playground/scenes" }
+
+# Rendering, layout and text. wgpu must stay on the version glyphon uses.
+wgpu = "30"
+glyphon = "0.12"
+taffy = "0.15"
+bytemuck = { version = "1", features = ["derive"] }
+
+# Window managers
+winit = "0.30"
+tao = "0.37"
+
+# Utilities
+log = "0.4"
+env_logger = "0.11"
+pollster = "1"
+png = "0.18"
+
+# Proc-macro
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"
+# Testing
+insta = "1"
+trybuild = "1"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+unused_qualifications = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.dev.package."*"]
+opt-level = 2

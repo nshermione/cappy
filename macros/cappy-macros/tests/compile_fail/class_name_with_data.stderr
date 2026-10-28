@@ -1,0 +1,5 @@
+error: #[derive(ClassName)] variants cannot carry data
+ --> tests/compile_fail/class_name_with_data.rs:6:10
+  |
+6 |     Sized(u32),
+  |          ^^^^^

@@ -1,0 +1,18 @@
+[package]
+name = "playground-scenes"
+description = "Shared UI scenes used by every cappy playground host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+cappy = { workspace = true, features = ["basic"] }
+env_logger.workspace = true
+
+[dev-dependencies]
+cappy-testing.workspace = true
+
+[lints]
+workspace = true

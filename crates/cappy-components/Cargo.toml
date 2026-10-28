@@ -1,0 +1,13 @@
+[package]
+name = "cappy-components"
+description = "Built-in components for the cappy GUI framework (planned)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+cappy-core.workspace = true
+
+[lints]
+workspace = true

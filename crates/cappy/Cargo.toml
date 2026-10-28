@@ -1,0 +1,31 @@
+[package]
+name = "cappy"
+description = "GUI framework on top of wgpu with damage-region repainting and themeable styles"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[features]
+default = ["basic"]
+basic = [
+    "dep:cappy-core",
+    "dep:cappy-style",
+    "dep:cappy-layout",
+    "dep:cappy-render",
+    "dep:cappy-dsl",
+    "dep:cappy-macros",
+]
+full = ["basic", "dep:cappy-components"]
+
+[dependencies]
+cappy-core = { workspace = true, optional = true }
+cappy-style = { workspace = true, optional = true }
+cappy-layout = { workspace = true, optional = true }
+cappy-render = { workspace = true, optional = true }
+cappy-dsl = { workspace = true, optional = true }
+cappy-macros = { workspace = true, optional = true }
+cappy-components = { workspace = true, optional = true }
+
+[lints]
+workspace = true
