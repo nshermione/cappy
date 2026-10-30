@@ -1,5 +1,5 @@
 [toolchain]
 # Pinned for reproducible builds; dependencies need at least rustc 1.89 (cosmic-text).
-channel = "1.97.1"
+channel = "1.99.1"
 components = ["rustfmt", "clippy"]
 profile = "minimal"
