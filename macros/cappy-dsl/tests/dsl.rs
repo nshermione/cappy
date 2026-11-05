@@ -65,12 +65,36 @@ fn closure_text_is_reactive() {
     let count = signal(1);
     let mut ui = mounted(ui! {
         div {
-            text(move || format!("Count: {}", count.get()), key = "label")
+            text(:format!("Count: {}", count.get()), key = "label")
         }
     });
     count.set(2);
     ui.update(VIEWPORT);
     assert_eq!(text_of(&ui, "label").as_deref(), Some("Count: 2"));
+}
+
+#[test]
+fn colon_fields_rebind_classes_and_styles() {
+    let active = signal(false);
+    let mut ui = mounted(ui! {
+        div {
+            div(
+                key = "chip",
+                class = "btn",
+                :class = if active.get() { "btn-primary" } else { "" },
+                :style = style! { width: if active.get() { 120 } else { 80 } },
+            )
+        }
+    });
+    let chip = ui.find_by_key("chip").unwrap();
+    assert_eq!(ui.node_rect(chip).unwrap().width, 80.0);
+    active.set(true);
+    ui.update(VIEWPORT);
+    assert_eq!(ui.node_rect(chip).unwrap().width, 120.0);
+    assert_eq!(
+        ui.node_style(chip).unwrap().visual.background,
+        ui.theme().tokens().colors.primary
+    );
 }
 
 #[test]
@@ -103,6 +127,24 @@ fn embedded_expressions_iterators_functions_and_components() {
     assert!(ui.find_by_key("card").is_some());
     let badge = ui.find_by_key("badge").unwrap();
     assert_eq!(ui.node_text(ui.node_children(badge)[0]), Some("new"));
+}
+
+fn label(content: &str) -> Element {
+    text(content).class("label")
+}
+
+#[test]
+fn any_element_function_takes_content_fields_and_comma_separated_children() {
+    let ui = mounted(ui! {
+        div(key = "root") {
+            label("hello", key = "label"),
+            div,
+            { text("embedded") },
+        }
+    });
+    let root = ui.find_by_key("root").unwrap();
+    assert_eq!(ui.node_children(root).len(), 3);
+    assert_eq!(text_of(&ui, "label").as_deref(), Some("hello"));
 }
 
 #[test]

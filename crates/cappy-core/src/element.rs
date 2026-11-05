@@ -7,6 +7,7 @@ use std::sync::Arc;
 use cappy_style::{ClassName, StyleRefinement};
 
 use crate::ClickEvent;
+use crate::binding::{Dynamic, IntoClasses, IntoStyle, IntoText};
 
 pub(crate) type ClickHandler = Box<dyn FnMut(&ClickEvent)>;
 pub(crate) type HoverHandler = Box<dyn FnMut(bool)>;
@@ -38,18 +39,19 @@ pub fn div() -> Element {
     Element::new(ElementContent::Container)
 }
 
-/// A text leaf whose content never changes.
-pub fn text(content: impl Into<Arc<str>>) -> Element {
-    Element::new(ElementContent::StaticText(content.into()))
+/// A text leaf. A string never changes; a [`Dynamic`] closure is recomputed whenever a signal it
+/// reads changes.
+pub fn text(content: impl IntoText) -> Element {
+    content.into_text()
 }
 
 /// A text leaf whose content is recomputed whenever a signal it reads changes.
 pub fn text_dyn(content: impl Fn() -> String + 'static) -> Element {
-    Element::new(ElementContent::DynamicText(Box::new(content)))
+    text(Dynamic(content))
 }
 
 impl Element {
-    fn new(content: ElementContent) -> Self {
+    pub(crate) fn new(content: ElementContent) -> Self {
         Self {
             content,
             key: None,
@@ -68,32 +70,32 @@ impl Element {
     }
 
     /// Adds classes from a space-separated list, e.g. `"btn btn-primary"`, or a single typed
-    /// class from `#[derive(ClassName)]`.
+    /// class from `#[derive(ClassName)]`. A [`Dynamic`] closure is recomputed whenever a signal it
+    /// reads changes; dynamic classes apply after static ones.
     #[must_use]
-    pub fn class(mut self, list: impl AsRef<str>) -> Self {
-        self.classes.extend(ClassName::parse_list(list.as_ref()));
+    pub fn class(mut self, classes: impl IntoClasses) -> Self {
+        classes.add_to(&mut self);
         self
     }
 
     /// Classes recomputed whenever a signal they read changes. Applied after static classes.
     #[must_use]
-    pub fn class_dyn(mut self, classes: impl Fn() -> String + 'static) -> Self {
-        self.class_binding = Some(Box::new(move || ClassName::parse_list(&classes())));
-        self
+    pub fn class_dyn(self, classes: impl Fn() -> String + 'static) -> Self {
+        self.class(Dynamic(classes))
     }
 
-    /// Inline style, layered over the classes.
+    /// Inline style, layered over the classes. A [`Dynamic`] closure is recomputed whenever a
+    /// signal it reads changes and layers over the fixed inline style.
     #[must_use]
-    pub fn style(mut self, refinement: StyleRefinement) -> Self {
-        self.style.merge(&refinement);
+    pub fn style(mut self, style: impl IntoStyle) -> Self {
+        style.add_to(&mut self);
         self
     }
 
     /// Inline style recomputed whenever a signal it reads changes. Layered over `style`.
     #[must_use]
-    pub fn style_dyn(mut self, refinement: impl Fn() -> StyleRefinement + 'static) -> Self {
-        self.style_binding = Some(Box::new(refinement));
-        self
+    pub fn style_dyn(self, refinement: impl Fn() -> StyleRefinement + 'static) -> Self {
+        self.style(Dynamic(refinement))
     }
 
     #[must_use]

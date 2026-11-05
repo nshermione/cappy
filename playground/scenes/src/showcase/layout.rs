@@ -48,10 +48,14 @@ fn header(theme: Signal<Arc<Theme>>, themes: Rc<[Arc<Theme>]>) -> Element {
                 text("Retained UI on wgpu that repaints only what changed", class = Class::Muted)
             }
             div(class = Class::Btn, key = "theme-toggle", on_click = next_theme) {
-                text(move || format!("Theme: {}", theme.with(|current| current.name().to_owned())))
+                text(:format!("Theme: {}", theme.with(|current| current.name().to_owned())))
             }
         }
     }
+}
+
+fn format_counter(count: Signal<i64>) -> String {
+    format!("Count: {}", count.get())
 }
 
 fn counter_card() -> Element {
@@ -59,7 +63,7 @@ fn counter_card() -> Element {
     ui! {
         div(class = Class::Card, class = Class::Grow) {
             text("Counter", class = Class::Subtitle)
-            text(move || format!("Count: {}", count.get()), key = "count", class = Class::Count)
+            text(:format_counter(count), key = "count", class = Class::Count)
             div(class = Class::Row) {
                 div(class = Class::Btn, key = "decrement", on_click = move |_| count.update(|value| *value -= 1)) {
                     text("-1")
@@ -84,7 +88,7 @@ fn tiles_card() -> Element {
             div(class = Class::TileGrid) {
                 { ..tiles }
             }
-            text(move || match selected.get() {
+            text(:match selected.get() {
                 Some(index) => format!("Selected tile {}", index + 1),
                 None => "Click a tile".to_owned(),
             }, class = Class::Muted, key = "selection")
@@ -96,7 +100,7 @@ fn tile(index: usize, selected: Signal<Option<usize>>) -> Element {
     ui! {
         div(
             class = Class::Tile,
-            class_dyn = move || class_when(selected.get() == Some(index), Class::TileSelected),
+            :class = class_when(selected.get() == Some(index), Class::TileSelected),
             key = format!("tile-{index}"),
             on_click = move |_| selected.set(Some(index)),
         ) {
@@ -124,15 +128,15 @@ fn task_row(index: usize, task: &'static str) -> Element {
     let done = signal(false);
     ui! {
         div(class = Class::Row, key = format!("task-{index}"), on_click = move |_| done.update(|value| *value = !*value)) {
-            div(class = Class::Badge, class_dyn = move || class_when(done.get(), Class::BadgeDone)) {
-                text(move || if done.get() { "done" } else { "todo" }.to_owned())
+            div(class = Class::Badge, :class = class_when(done.get(), Class::BadgeDone)) {
+                text(:if done.get() { "done" } else { "todo" }.to_owned())
             }
-            text(task, class_dyn = move || class_when(done.get(), Class::TaskDone))
+            text(task, :class = class_when(done.get(), Class::TaskDone))
         }
     }
 }
 
-/// The class list for a `class_dyn` binding that adds `class` only while `active`.
+/// The class list for a `:class` binding that adds `class` only while `active`.
 fn class_when(active: bool, class: Class) -> String {
     if active {
         class.to_string()

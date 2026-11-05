@@ -17,7 +17,7 @@
 //! let count = signal(0);
 //! let app = ui! {
 //!     div(class = "app") {
-//!         text(move || format!("Clicked {} times", count.get()))
+//!         text(:format!("Clicked {} times", count.get()))
 //!         div(class = "btn btn-primary", on_click = move |_| count.update(|n| *n += 1)) {
 //!             text("Click")
 //!         }
@@ -66,9 +66,9 @@ pub use cappy_components as components;
 #[cfg(feature = "basic")]
 pub mod prelude {
     pub use cappy_core::{
-        Align, Color, ColorToken, Component, Display, Element, FlexDirection, FontSize, FontWeight,
-        FrameInput, Justify, Radius, Signal, Space, StyleRefinement, Theme, Ui, UpdateOutcome, div,
-        hex, percent, signal, text, text_dyn,
+        Align, Color, ColorToken, Component, Display, Dynamic, Element, FlexDirection, FontSize,
+        FontWeight, FrameInput, Justify, Radius, Signal, Space, StyleRefinement, Theme, Ui,
+        UpdateOutcome, div, hex, percent, signal, text, text_dyn,
     };
     pub use cappy_dsl::{style, theme, ui};
     pub use cappy_macros::{ClassName, Props};

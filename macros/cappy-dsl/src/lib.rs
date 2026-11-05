@@ -10,14 +10,14 @@ pub mod __private {
 ///
 /// ```
 /// use cappy_dsl::{style, ui};
-/// use cappy_core::{Space, signal};
+/// use cappy_core::{Space, div, signal, text};
 ///
 /// let count = signal(0);
 /// let tree = ui! {
 ///     div(class = "app") {
-///         text("Counter", class = "title")
+///         text("Counter", class = "title"),
 ///         div(class = "row", style = style! { gap: Space::Sm }) {
-///             text(move || format!("Count: {}", count.get()), key = "label")
+///             text(:format!("Count: {}", count.get()), key = "label"),
 ///             div(class = "btn btn-primary", on_click = move |_| count.update(|n| *n += 1)) {
 ///                 text("+1")
 ///             }
@@ -28,15 +28,21 @@ pub mod __private {
 /// ```
 ///
 /// Nodes:
-/// - `div(attr = value, ...) { children }`; the attributes and the children are both optional.
-/// - `text(content, attr = value, ...)`; a closure such as `move || ...` makes it reactive.
-/// - `name(attr = value, ...) { children }` calls a function `name()` that returns an
-///   [`Element`](cappy_core::Element).
-/// - `@Type(prop = value, ...)` builds `Type::default()` and sets props, e.g. a struct using
+/// - `name(content, field = value, ...) { children }` calls the function `name` in scope, so
+///   `div`, `text` and your own element functions all resolve (and go to definition) the same
+///   way. The leading `content` argument, the fields and the children are all optional.
+/// - `@Type(field = value, ...)` builds `Type::default()` and sets fields, e.g. a struct using
 ///   `#[derive(Props)]` that implements [`Component`](cappy_core::Component).
 /// - `{ expression }` embeds an element; `{ ..iterator }` embeds every element it yields.
 ///
-/// Every `attr = value` calls the builder method `attr(value)`.
+/// Every `field = value` calls the builder method `field(value)`. A leading `:` makes the value
+/// reactive: `:field = value` calls `field(Dynamic(move || value))` and the content `:value`
+/// calls `name(Dynamic(move || value))`, so the value is recomputed whenever a signal it reads
+/// changes. The setter must accept [`Dynamic`](cappy_core::Dynamic), as `text`, `class` and
+/// `style` do.
+///
+/// Children may be separated by commas. Put a comma before a `{ expression }` child that follows
+/// an element with arguments, or it is read as that element's children.
 #[macro_export]
 macro_rules! ui {
     ($($node:tt)+) => {
@@ -47,30 +53,70 @@ macro_rules! ui {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __ui_node {
-    (text ( move || $body:expr $(, $key:ident = $value:expr)* $(,)? )) => {
-        $crate::__private::text_dyn(move || $body)$(.$key($value))*
-    };
-    (text ( || $body:expr $(, $key:ident = $value:expr)* $(,)? )) => {
-        $crate::__private::text_dyn(|| $body)$(.$key($value))*
-    };
-    (text ( $content:expr $(, $key:ident = $value:expr)* $(,)? )) => {
-        $crate::__private::text($content)$(.$key($value))*
-    };
-    (div $(( $($key:ident = $value:expr),* $(,)? ))? $({ $($children:tt)* })?) => {
-        $crate::__ui_children!(
-            $crate::__private::div()$($(.$key($value))*)? ; $($($children)*)?
-        )
-    };
-    (@ $type:ident $(:: $segment:ident)* $(( $($key:ident = $value:expr),* $(,)? ))?) => {
+    (@ $type:ident $(:: $segment:ident)* $(( $($fields:tt)* ))? $(,)?) => {
         $crate::__private::Element::from(
-            <$type $(:: $segment)*>::default()$($(.$key($value))*)?
+            $crate::__ui_args!(@fields [<$type $(:: $segment)*>::default()] $($($fields)*)?)
         )
     };
-    ({ $element:expr }) => {
+    ({ $element:expr } $(,)?) => {
         $crate::__private::Element::from($element)
     };
-    ($name:ident $(( $($key:ident = $value:expr),* $(,)? ))? $({ $($children:tt)* })?) => {
-        $crate::__ui_children!($name()$($(.$key($value))*)? ; $($($children)*)?)
+    ($name:ident $(( $($args:tt)* ))? $({ $($children:tt)* })? $(,)?) => {
+        $crate::__ui_children!(
+            $crate::__ui_args!(@head $name ; $($($args)*)?) ; $($($children)*)?
+        )
+    };
+}
+
+/// Turns an element's argument list into a builder chain. `@head` picks the constructor call
+/// from the optional leading content; `@fields` appends one `field = value` per step.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ui_args {
+    (@head $name:ident ;) => {
+        $name()
+    };
+    (@head $name:ident ; : $field:ident = $($rest:tt)*) => {
+        $crate::__ui_args!(@fields [$name()] : $field = $($rest)*)
+    };
+    (@head $name:ident ; $field:ident = $($rest:tt)*) => {
+        $crate::__ui_args!(@fields [$name()] $field = $($rest)*)
+    };
+    (@head $name:ident ; : $content:expr $(, $($rest:tt)*)?) => {
+        $crate::__ui_args!(
+            @fields [$crate::__ui_bind!(content $name, $content)] $($($rest)*)?
+        )
+    };
+    (@head $name:ident ; $content:expr $(, $($rest:tt)*)?) => {
+        $crate::__ui_args!(@fields [$name($content)] $($($rest)*)?)
+    };
+    (@fields [$($builder:tt)*]) => {
+        $($builder)*
+    };
+    (@fields [$($builder:tt)*] : $field:ident = $value:expr $(, $($rest:tt)*)?) => {
+        $crate::__ui_args!(
+            @fields [$crate::__ui_bind!(field $($builder)*, $field = $value)] $($($rest)*)?
+        )
+    };
+    (@fields [$($builder:tt)*] $field:ident = $value:expr $(, $($rest:tt)*)?) => {
+        $crate::__ui_args!(@fields [$($builder)*.$field($value)] $($($rest)*)?)
+    };
+}
+
+/// Expands the dynamic parts of `ui!`, the ones written with a leading `:`: the value becomes a
+/// [`Dynamic`](cappy_core::Dynamic) closure passed to the same function or setter a static value
+/// would go to, so go to definition lands on that function.
+///
+/// - `content`: `name(:value, ...)` calls `name(Dynamic(move || value))`.
+/// - `field`: `:field = value` calls `.field(Dynamic(move || value))` on the builder so far.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ui_bind {
+    (content $name:ident, $value:expr) => {
+        $name($crate::__private::Dynamic(move || $value))
+    };
+    (field $builder:expr, $field:ident = $value:expr) => {
+        $builder.$field($crate::__private::Dynamic(move || $value))
     };
 }
 
@@ -81,14 +127,14 @@ macro_rules! __ui_children {
     ($parent:expr ;) => {
         $parent
     };
+    ($parent:expr ; , $($rest:tt)*) => {
+        $crate::__ui_children!($parent ; $($rest)*)
+    };
     ($parent:expr ; { .. $children:expr } $($rest:tt)*) => {
         $crate::__ui_children!($parent.children($children) ; $($rest)*)
     };
     ($parent:expr ; { $child:expr } $($rest:tt)*) => {
         $crate::__ui_children!($parent.child($child) ; $($rest)*)
-    };
-    ($parent:expr ; text ( $($args:tt)* ) $($rest:tt)*) => {
-        $crate::__ui_children!($parent.child($crate::__ui_node!(text ( $($args)* ))) ; $($rest)*)
     };
     ($parent:expr ; @ $type:ident $(:: $segment:ident)* ( $($props:tt)* ) $($rest:tt)*) => {
         $crate::__ui_children!(
@@ -98,16 +144,19 @@ macro_rules! __ui_children {
     ($parent:expr ; @ $type:ident $(:: $segment:ident)* $($rest:tt)*) => {
         $crate::__ui_children!($parent.child($crate::__ui_node!(@ $type $(:: $segment)*)) ; $($rest)*)
     };
-    ($parent:expr ; $name:ident ( $($attrs:tt)* ) { $($children:tt)* } $($rest:tt)*) => {
+    ($parent:expr ; $name:ident ( $($args:tt)* ) { $($children:tt)* } $($rest:tt)*) => {
         $crate::__ui_children!(
-            $parent.child($crate::__ui_node!($name ( $($attrs)* ) { $($children)* })) ; $($rest)*
+            $parent.child($crate::__ui_node!($name ( $($args)* ) { $($children)* })) ; $($rest)*
         )
     };
-    ($parent:expr ; $name:ident ( $($attrs:tt)* ) $($rest:tt)*) => {
-        $crate::__ui_children!($parent.child($crate::__ui_node!($name ( $($attrs)* ))) ; $($rest)*)
+    ($parent:expr ; $name:ident ( $($args:tt)* ) $($rest:tt)*) => {
+        $crate::__ui_children!($parent.child($crate::__ui_node!($name ( $($args)* ))) ; $($rest)*)
     };
     ($parent:expr ; $name:ident { $($children:tt)* } $($rest:tt)*) => {
         $crate::__ui_children!($parent.child($crate::__ui_node!($name { $($children)* })) ; $($rest)*)
+    };
+    ($parent:expr ; $name:ident $($rest:tt)*) => {
+        $crate::__ui_children!($parent.child($crate::__ui_node!($name)) ; $($rest)*)
     };
 }
 

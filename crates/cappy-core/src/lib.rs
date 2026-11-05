@@ -2,6 +2,7 @@
 //! damage tracking. Window-manager and GPU agnostic: hosts feed [`InputEvent`]s, call
 //! [`Ui::update`], and hand [`Ui::prepare_frame`] output to a renderer.
 
+mod binding;
 mod damage;
 mod element;
 mod event;
@@ -9,6 +10,7 @@ mod paint;
 mod reactive;
 mod ui;
 
+pub use binding::{Dynamic, IntoClasses, IntoStyle, IntoText};
 pub use damage::{Damage, DamageTracker};
 pub use element::{Component, Element, div, text, text_dyn};
 pub use event::{ButtonState, ClickEvent, CursorIcon, InputEvent, PointerButton};

@@ -5,7 +5,8 @@
 use std::sync::{Arc, OnceLock};
 
 use cappy_core::{
-    Color, ColorToken, Damage, Element, FrameInput, Radius, RenderFrame, Signal, Theme, Ui,
+    Color, ColorToken, Damage, Element, FrameInput, Radius, RenderFrame, Signal, Theme, Ui, div,
+    text,
 };
 use cappy_dsl::{style, ui};
 use cappy_testing::TestUi;
@@ -38,7 +39,7 @@ pub fn counter(count: Signal<i32>) -> Element {
     ui! {
         div(class = "app") {
             div(class = "row", key = "row") {
-                text(move || format!("Count: {}", count.get()), key = "label")
+                text(:format!("Count: {}", count.get()), key = "label")
                 div(class = "btn btn-primary", key = "increment", on_click = move |_| count.update(|n| *n += 1)) {
                     text("+1")
                 }
