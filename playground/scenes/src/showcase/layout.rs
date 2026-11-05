@@ -61,14 +61,14 @@ fn format_counter(count: Signal<i64>) -> String {
 fn counter_card() -> Element {
     let count = signal(0_i64);
     ui! {
-        div(class = Class::Card, class = Class::Grow) {
+        div(class = [Class::Card, Class::Grow]) {
             text("Counter", class = Class::Subtitle)
             text(:format_counter(count), key = "count", class = Class::Count)
             div(class = Class::Row) {
                 div(class = Class::Btn, key = "decrement", on_click = move |_| count.update(|value| *value -= 1)) {
                     text("-1")
                 }
-                div(class = Class::Btn, class = Class::BtnPrimary, key = "increment", on_click = move |_| count.update(|value| *value += 1)) {
+                div(class = [Class::Btn, Class::BtnPrimary], key = "increment", on_click = move |_| count.update(|value| *value += 1)) {
                     text("+1")
                 }
                 div(class = Class::Btn, key = "reset", on_click = move |_| count.set(0)) {
@@ -83,7 +83,7 @@ fn tiles_card() -> Element {
     let selected = signal(None::<usize>);
     let tiles = (0..TILE_COUNT).map(move |index| tile(index, selected));
     ui! {
-        div(class = Class::Card, class = Class::Grow) {
+        div(class = [Class::Card, Class::Grow]) {
             text("Tiles", class = Class::Subtitle)
             div(class = Class::TileGrid) {
                 { ..tiles }

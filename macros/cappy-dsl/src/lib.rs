@@ -41,6 +41,10 @@ pub mod __private {
 /// changes. The setter must accept [`Dynamic`](cappy_core::Dynamic), as `text`, `class` and
 /// `style` do.
 ///
+/// `class` takes one class or a list: `class = [a, b]` is shorthand for `class = a, class = b`,
+/// and `:class = [a, b]` for `:class = a, :class = b`. List items may mix strings and typed
+/// classes.
+///
 /// Children may be separated by commas. Put a comma before a `{ expression }` child that follows
 /// an element with arguments, or it is read as that element's children.
 #[macro_export]
@@ -92,6 +96,12 @@ macro_rules! __ui_args {
     };
     (@fields [$($builder:tt)*]) => {
         $($builder)*
+    };
+    (@fields [$($builder:tt)*] class = [$($class:expr),* $(,)?] $(, $($rest:tt)*)?) => {
+        $crate::__ui_args!(@fields [$($builder)*] $(class = $class,)* $($($rest)*)?)
+    };
+    (@fields [$($builder:tt)*] : class = [$($class:expr),* $(,)?] $(, $($rest:tt)*)?) => {
+        $crate::__ui_args!(@fields [$($builder)*] $(: class = $class,)* $($($rest)*)?)
     };
     (@fields [$($builder:tt)*] : $field:ident = $value:expr $(, $($rest:tt)*)?) => {
         $crate::__ui_args!(

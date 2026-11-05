@@ -97,6 +97,67 @@ fn colon_fields_rebind_classes_and_styles() {
     );
 }
 
+fn assert_classes(element: &Element, expected: &str) {
+    let debug = format!("{element:?}");
+    assert!(
+        debug.contains(&format!("classes: {expected}")),
+        "expected classes {expected} in {debug}"
+    );
+}
+
+#[test]
+fn class_takes_one_value_without_brackets() {
+    assert_classes(&ui! { div(class = "btn") }, r#"["btn"]"#);
+    assert_classes(&ui! { text("Title", class = "title") }, r#"["title"]"#);
+}
+
+#[test]
+fn class_list_adds_every_item() {
+    assert_classes(
+        &ui! { div(class = ["btn", "btn-primary large"]) },
+        r#"["btn", "btn-primary", "large"]"#,
+    );
+    assert_classes(
+        &ui! { div(class = ["card", String::from("raised")], class = "wide") },
+        r#"["card", "raised", "wide"]"#,
+    );
+    assert_classes(&ui! { div(class = []) }, "[]");
+}
+
+#[test]
+fn fields_after_a_class_list_still_apply() {
+    let ui = mounted(ui! {
+        div {
+            div(class = ["card"], key = "box")
+            text("Title", class = ["title", "muted",], key = "title")
+        }
+    });
+    assert!(ui.find_by_key("box").is_some());
+    assert_eq!(text_of(&ui, "title").as_deref(), Some("Title"));
+}
+
+#[test]
+fn colon_class_list_rebinds_every_item() {
+    let active = signal(false);
+    let mut ui = mounted(ui! {
+        div {
+            div(
+                key = "chip",
+                :class = ["btn", if active.get() { "btn-primary" } else { "" }],
+            )
+        }
+    });
+    let chip = ui.find_by_key("chip").unwrap();
+    let idle_background = ui.node_style(chip).unwrap().visual.background;
+    assert_eq!(idle_background, ui.theme().tokens().colors.surface);
+    active.set(true);
+    ui.update(VIEWPORT);
+    assert_eq!(
+        ui.node_style(chip).unwrap().visual.background,
+        ui.theme().tokens().colors.primary
+    );
+}
+
 #[test]
 fn handlers_pass_through_as_attributes() {
     let clicked = signal(false);
