@@ -1,6 +1,6 @@
 [package]
 name = "cappy-macros"
-description = "Procedural macros (derive Props, derive ClassName) for the cappy GUI framework"
+description = "Procedural macros (derive Props, derive ClassName, #[reactive]) for the cappy GUI framework"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -15,6 +15,7 @@ quote.workspace = true
 proc-macro2.workspace = true
 
 [dev-dependencies]
+cappy = { workspace = true, features = ["basic"] }
 cappy-core.workspace = true
 trybuild.workspace = true
 

@@ -2,9 +2,11 @@
 //!
 //! - `#[derive(Props)]` generates builder setters for a component's fields.
 //! - `#[derive(ClassName)]` turns a fieldless enum into typo-proof theme class names.
+//! - `#[reactive]` rewrites a struct in place so each field is tracked and the struct keeps its name.
 
 mod class_name;
 mod props;
+mod reactive;
 
 use proc_macro::TokenStream;
 use syn::{DeriveInput, parse_macro_input};
@@ -60,6 +62,25 @@ pub fn derive_props(input: TokenStream) -> TokenStream {
 pub fn derive_class_name(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     class_name::expand(&input)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+/// Rewrites a struct in place. Each field type `T` becomes its tracked form, and the struct keeps
+/// its name. `new` passes each argument through `reactive`. A field that is already reactive stays
+/// that handle.
+#[proc_macro_attribute]
+pub fn reactive(attr: TokenStream, item: TokenStream) -> TokenStream {
+    if !attr.is_empty() {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "#[reactive] does not take arguments",
+        )
+        .into_compile_error()
+        .into();
+    }
+    let input = parse_macro_input!(item as DeriveInput);
+    reactive::expand(&input)
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }

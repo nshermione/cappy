@@ -21,5 +21,5 @@ pub fn showcase() -> Ui {
         .map(|tokens| Arc::new(style::stylesheet(tokens)))
         .collect();
     let active_theme = signal(Arc::clone(&themes[0]));
-    Ui::with_theme_signal(layout::root(active_theme, themes), active_theme)
+    Ui::with_theme_signal(layout::root(reactive(active_theme), themes), active_theme)
 }

@@ -1,3 +1,4 @@
+use cappy::{Reactive, reactive};
 use cappy_core::{Component, Element, FrameInput, Theme, Ui, div, text};
 use cappy_macros::{ClassName, Props};
 
@@ -82,4 +83,39 @@ fn every_class_exists_in_the_default_theme() {
 fn compile_errors_are_reported_clearly() {
     let cases = trybuild::TestCases::new();
     cases.compile_fail("tests/compile_fail/*.rs");
+}
+
+#[reactive]
+struct CounterState {
+    count: i64,
+}
+
+#[reactive]
+struct AppState {
+    counter: CounterState,
+    name: String,
+}
+
+#[reactive]
+struct Row {
+    count: i64,
+    label: Reactive<String>,
+}
+
+#[test]
+fn nested_reactive_fields_are_independent() {
+    let state = AppState::new(CounterState::new(1), "a".into());
+    state.counter.count.set(2);
+    assert_eq!(state.counter.count.get(), 2);
+    assert_eq!(state.name.get(), "a");
+    assert_eq!(state.counter.count.to_string(), "2");
+}
+
+#[test]
+fn already_reactive_field_keeps_its_handle() {
+    let label = reactive(String::from("hi"));
+    let row = Row::new(1, label);
+    assert_eq!(row.label, label);
+    label.set(String::from("yo"));
+    assert_eq!(row.label.get(), "yo");
 }

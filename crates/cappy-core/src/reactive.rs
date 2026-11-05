@@ -3,6 +3,9 @@
 //! A [`Signal`] is a `Copy` handle to a value stored in a thread-local runtime. Reading a signal
 //! inside a tracked scope subscribes that scope; writing the signal queues every subscriber so the
 //! UI re-evaluates only the bindings that depend on it.
+//!
+//! [`reactive`] turns a primitive into a [`Reactive`] handle. `#[reactive]` on a struct keeps the
+//! struct's name and tracks each field. A value that is already reactive is returned as itself.
 
 use std::any::Any;
 use std::cell::RefCell;
@@ -291,6 +294,148 @@ impl<T: Clone + 'static> Signal<T> {
     }
 }
 
+/// A `Copy` handle whose reads subscribe the current tracking scope.
+///
+/// Built by [`reactive`]. Formatting and `==` against the inner value read it. [`Reactive::set`]
+/// and [`Reactive::update`] write it. The handle does not implement [`Deref`](std::ops::Deref):
+/// the value lives in the thread-local runtime, not inside the handle.
+pub struct Reactive<T: 'static> {
+    inner: Signal<T>,
+}
+
+impl<T: 'static> Clone for Reactive<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T: 'static> Copy for Reactive<T> {}
+
+impl<T: 'static> fmt::Debug for Reactive<T> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Reactive")
+            .field("inner", &self.inner)
+            .finish()
+    }
+}
+
+impl<T: 'static> PartialEq for Reactive<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.inner == other.inner
+    }
+}
+
+impl<T: 'static> Eq for Reactive<T> {}
+
+impl<T: fmt::Display + 'static> fmt::Display for Reactive<T> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.inner.with(|value| fmt::Display::fmt(value, formatter))
+    }
+}
+
+impl<T: PartialEq + 'static> PartialEq<T> for Reactive<T> {
+    fn eq(&self, other: &T) -> bool {
+        self.inner.with(|value| value == other)
+    }
+}
+
+impl<T: 'static> Reactive<T> {
+    /// Reads the value and subscribes the current tracking scope.
+    pub fn with<R>(&self, read: impl FnOnce(&T) -> R) -> R {
+        self.inner.with(read)
+    }
+
+    /// Replaces the value and notifies subscribers.
+    pub fn set(&self, value: T) {
+        self.inner.set(value);
+    }
+
+    /// Mutates the value in place and notifies subscribers.
+    pub fn update(&self, change: impl FnOnce(&mut T)) {
+        self.inner.update(change);
+    }
+}
+
+impl<T: Clone + 'static> Reactive<T> {
+    /// Returns a clone of the value and subscribes the current tracking scope.
+    pub fn get(&self) -> T {
+        self.inner.get()
+    }
+}
+
+/// A value [`reactive`] can turn into a tracked handle, or leave unchanged when it already is one.
+pub trait IntoReactive {
+    /// The tracked form of this value.
+    type Output;
+
+    /// Converts this value into its tracked form.
+    fn into_reactive(self) -> Self::Output;
+}
+
+/// Tracks `value`.
+///
+/// A primitive or [`Option`] becomes one [`Reactive`] handle. A `#[reactive]` struct is already
+/// tracked, so it is returned as itself. [`Reactive`] and [`Signal`] become a [`Reactive`] handle
+/// without wrapping them again.
+pub fn reactive<T: IntoReactive>(value: T) -> T::Output {
+    value.into_reactive()
+}
+
+macro_rules! primitive_reactive {
+    ($($ty:ty),* $(,)?) => {
+        $(
+            impl IntoReactive for $ty {
+                type Output = Reactive<$ty>;
+
+                fn into_reactive(self) -> Self::Output {
+                    Reactive { inner: signal(self) }
+                }
+            }
+        )*
+    };
+}
+
+primitive_reactive!(
+    bool, i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize
+);
+
+impl IntoReactive for String {
+    type Output = Reactive<String>;
+
+    fn into_reactive(self) -> Self::Output {
+        Reactive {
+            inner: signal(self),
+        }
+    }
+}
+
+impl<T: 'static> IntoReactive for Option<T> {
+    type Output = Reactive<Option<T>>;
+
+    fn into_reactive(self) -> Self::Output {
+        Reactive {
+            inner: signal(self),
+        }
+    }
+}
+
+impl<T: 'static> IntoReactive for Reactive<T> {
+    type Output = Self;
+
+    fn into_reactive(self) -> Self::Output {
+        self
+    }
+}
+
+impl<T: 'static> IntoReactive for Signal<T> {
+    type Output = Reactive<T>;
+
+    fn into_reactive(self) -> Self::Output {
+        Reactive { inner: self }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -406,5 +551,53 @@ mod tests {
         let second = signal(2);
         assert_ne!(first, second);
         assert_eq!(second.get(), 2);
+    }
+
+    #[test]
+    fn reactive_primitives_read_and_write() {
+        let count = reactive(1_i64);
+        assert_eq!(count.to_string(), "1");
+        assert!(count == 1);
+        count.set(2);
+        assert_eq!(count.get(), 2);
+        count.update(|value| *value += 1);
+        assert_eq!(format!("{count}"), "3");
+
+        let width = reactive(4_u32);
+        assert_eq!(width.get(), 4);
+
+        let selected = reactive(None::<usize>);
+        selected.set(Some(1));
+        assert_eq!(selected.get(), Some(1));
+    }
+
+    #[test]
+    fn reactive_keeps_an_existing_handle() {
+        let count = reactive(1_i64);
+        assert_eq!(reactive(count), count);
+
+        let inner = signal(String::from("hi"));
+        let wrapped = reactive(inner);
+        wrapped.set(String::from("yo"));
+        assert_eq!(inner.get(), "yo");
+        assert_eq!(reactive(wrapped), wrapped);
+    }
+
+    #[test]
+    fn display_read_tracks_in_a_binding() {
+        use crate::{FrameInput, Theme, Ui, div, text_dyn};
+
+        let count = reactive(1_i64);
+        let mut ui = Ui::new(
+            div().child(text_dyn(move || format!("{count}")).key("label")),
+            Theme::light(),
+        );
+        let viewport = FrameInput::new(320, 240, 1.0);
+        ui.update(viewport);
+        let label = ui.find_by_key("label").unwrap();
+        assert_eq!(ui.node_text(label), Some("1"));
+        count.set(2);
+        ui.update(viewport);
+        assert_eq!(ui.node_text(label), Some("2"));
     }
 }

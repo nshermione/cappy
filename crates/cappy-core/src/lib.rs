@@ -15,7 +15,7 @@ pub use damage::{Damage, DamageTracker};
 pub use element::{Component, Element, div, text, text_dyn};
 pub use event::{ButtonState, ClickEvent, CursorIcon, InputEvent, PointerButton};
 pub use paint::{Primitive, QuadPrimitive, RenderFrame, TextPrimitive};
-pub use reactive::{Signal, signal};
+pub use reactive::{IntoReactive, Reactive, Signal, reactive, signal};
 pub use ui::{FrameInput, NodeId, Ui, UpdateOutcome};
 
 pub use cappy_layout::{

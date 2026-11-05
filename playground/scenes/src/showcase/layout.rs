@@ -17,7 +17,7 @@ const TASKS: [&str; 4] = [
     "Host in winit and tao",
 ];
 
-pub fn root(theme: Signal<Arc<Theme>>, themes: Rc<[Arc<Theme>]>) -> Element {
+pub fn root(theme: Reactive<Arc<Theme>>, themes: Rc<[Arc<Theme>]>) -> Element {
     ui! {
         div(class = Class::App) {
             { header(theme, themes) }
@@ -31,7 +31,7 @@ pub fn root(theme: Signal<Arc<Theme>>, themes: Rc<[Arc<Theme>]>) -> Element {
     }
 }
 
-fn header(theme: Signal<Arc<Theme>>, themes: Rc<[Arc<Theme>]>) -> Element {
+fn header(theme: Reactive<Arc<Theme>>, themes: Rc<[Arc<Theme>]>) -> Element {
     let next_theme = move |_: &ClickEvent| {
         theme.update(|current| {
             let index = themes
@@ -54,24 +54,33 @@ fn header(theme: Signal<Arc<Theme>>, themes: Rc<[Arc<Theme>]>) -> Element {
     }
 }
 
-fn format_counter(count: Signal<i64>) -> String {
-    format!("Count: {}", count.get())
+#[reactive]
+struct CounterState {
+    count: i64,
+}
+
+#[reactive]
+struct AppState {
+    counter: CounterState,
+    version: i64,
 }
 
 fn counter_card() -> Element {
-    let count = signal(0_i64);
+    let app_state = AppState::new(CounterState::new(0), 1);
     ui! {
         div(class = [Class::Card, Class::Grow]) {
             text("Counter", class = Class::Subtitle)
-            text(:format_counter(count), key = "count", class = Class::Count)
+            text(:format!("Count: {}", app_state.counter.count), key = "count", class = Class::Count)
             div(class = Class::Row) {
-                div(class = Class::Btn, key = "decrement", on_click = move |_| count.update(|value| *value -= 1)) {
+                div(class = Class::Btn, key = "decrement", on_click = move |_| app_state.counter.count.update(|value| *value -= 1)) {
                     text("-1")
                 }
-                div(class = [Class::Btn, Class::BtnPrimary], key = "increment", on_click = move |_| count.update(|value| *value += 1)) {
+                div(class = [Class::Btn, Class::BtnPrimary], key = "increment", on_click = move |_| app_state.counter.count.update(|value| *value += 1)) {
                     text("+1")
                 }
-                div(class = Class::Btn, key = "reset", on_click = move |_| count.set(0)) {
+                div(class = Class::Btn, key = "reset", on_click = move |_| {
+                    app_state.counter.count.set(0);
+                }) {
                     text("Reset")
                 }
             }
@@ -80,7 +89,7 @@ fn counter_card() -> Element {
 }
 
 fn tiles_card() -> Element {
-    let selected = signal(None::<usize>);
+    let selected = reactive(None::<usize>);
     let tiles = (0..TILE_COUNT).map(move |index| tile(index, selected));
     ui! {
         div(class = [Class::Card, Class::Grow]) {
@@ -96,7 +105,7 @@ fn tiles_card() -> Element {
     }
 }
 
-fn tile(index: usize, selected: Signal<Option<usize>>) -> Element {
+fn tile(index: usize, selected: Reactive<Option<usize>>) -> Element {
     ui! {
         div(
             class = Class::Tile,
@@ -125,7 +134,7 @@ fn tasks_card() -> Element {
 }
 
 fn task_row(index: usize, task: &'static str) -> Element {
-    let done = signal(false);
+    let done = reactive(false);
     ui! {
         div(class = Class::Row, key = format!("task-{index}"), on_click = move |_| done.update(|value| *value = !*value)) {
             div(class = Class::Badge, :class = class_when(done.get(), Class::BadgeDone)) {

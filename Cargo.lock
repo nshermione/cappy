@@ -386,6 +386,7 @@ dependencies = [
 name = "cappy-macros"
 version = "0.1.0"
 dependencies = [
+ "cappy",
  "cappy-core",
  "proc-macro2",
  "quote",
