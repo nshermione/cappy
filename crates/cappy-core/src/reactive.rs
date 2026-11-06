@@ -8,7 +8,7 @@
 //! struct's name and tracks each field. A value that is already reactive is returned as itself.
 
 use std::any::Any;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::fmt;
 use std::marker::PhantomData;
 use std::rc::{Rc, Weak};
@@ -223,11 +223,6 @@ impl Runtime {
         value
     }
 
-    /// Removes one binding from a signal. A disposed or reused slot is left alone.
-    fn remove_subscriber(&self, index: u32, generation: u32, observer: &Observer) {
-        self.remove_binding(index, generation, observer.queue.as_ptr(), observer.binding);
-    }
-
     fn remove_binding(
         &self,
         index: u32,
@@ -293,12 +288,130 @@ fn detach(observer: &Observer) {
     let Some(queue) = observer.queue.upgrade() else {
         return;
     };
-    let sources = queue.take_sources(observer.binding);
+    detach_binding(queue.as_ref(), observer.binding);
+}
+
+/// Drops every subscription `binding` recorded. A second call does nothing.
+pub(crate) fn detach_binding(queue: &BindingQueue, binding: BindingId) {
+    let sources = queue.take_sources(binding);
+    let queue = queue as *const BindingQueue;
     RUNTIME.with(|runtime| {
         for source in sources {
-            runtime.remove_subscriber(source.index, source.generation, observer);
+            runtime.remove_binding(source.index, source.generation, queue, binding);
         }
     });
+}
+
+/// Signals created while this owner is the innermost one. Disposing the owner frees them.
+#[derive(Clone, Copy)]
+pub(crate) struct OwnerId {
+    index: u32,
+    generation: u32,
+}
+
+struct MountOwner {
+    generation: u32,
+    signals: Vec<SignalKey>,
+}
+
+thread_local! {
+    static OWNERS: RefCell<Vec<Option<MountOwner>>> = const { RefCell::new(Vec::new()) };
+    static OWNER_FREE: RefCell<Vec<u32>> = const { RefCell::new(Vec::new()) };
+    static OWNER_STACK: RefCell<Vec<OwnerId>> = const { RefCell::new(Vec::new()) };
+    static OWNER_GENERATION: Cell<u32> = const { Cell::new(0) };
+}
+
+/// Pushes an owner. Signals created before [`OwnerGuard`] drops are recorded on it.
+pub(crate) fn enter_owner() -> OwnerGuard {
+    let generation = OWNER_GENERATION.with(|next| {
+        let generation = next.get().wrapping_add(1);
+        next.set(generation);
+        generation
+    });
+    let index = OWNERS.with(|owners| {
+        let mut owners = owners.borrow_mut();
+        let owner = MountOwner {
+            generation,
+            signals: Vec::new(),
+        };
+        match OWNER_FREE.with(|free| free.borrow_mut().pop()) {
+            Some(index) => {
+                owners[index as usize] = Some(owner);
+                index
+            }
+            None => {
+                owners.push(Some(owner));
+                u32::try_from(owners.len() - 1).expect("too many owners")
+            }
+        }
+    });
+    let id = OwnerId { index, generation };
+    OWNER_STACK.with(|stack| stack.borrow_mut().push(id));
+    OwnerGuard(id)
+}
+
+fn exit_owner(id: OwnerId) {
+    OWNER_STACK.with(|stack| {
+        let popped = stack.borrow_mut().pop();
+        debug_assert!(popped == Some(id));
+    });
+}
+
+/// Frees every signal this owner still holds. A second call, or a stale id, does nothing.
+pub(crate) fn dispose_owner(id: OwnerId) {
+    let signals = OWNERS.with(|owners| {
+        let mut owners = owners.borrow_mut();
+        let slot = owners.get_mut(id.index as usize)?;
+        if slot.as_ref().is_some_and(|owner| owner.generation != id.generation) {
+            return None;
+        }
+        slot.take().map(|owner| owner.signals)
+    });
+    let Some(signals) = signals else {
+        return;
+    };
+    OWNER_FREE.with(|free| free.borrow_mut().push(id.index));
+    RUNTIME.with(|runtime| {
+        for signal in signals {
+            runtime.dispose(signal.index, signal.generation);
+        }
+    });
+}
+
+fn record_signal(index: u32, generation: u32) {
+    let Some(owner) = OWNER_STACK.with(|stack| stack.borrow().last().copied()) else {
+        return;
+    };
+    OWNERS.with(|owners| {
+        let mut owners = owners.borrow_mut();
+        if let Some(Some(slot)) = owners.get_mut(owner.index as usize)
+            && slot.generation == owner.generation
+        {
+            slot.signals.push(SignalKey { index, generation });
+        }
+    });
+}
+
+/// Pops the owner entered by [`enter_owner`] when dropped. The recorded signals stay until
+/// [`dispose_owner`].
+pub(crate) struct OwnerGuard(OwnerId);
+
+impl OwnerGuard {
+    pub(crate) fn id(&self) -> OwnerId {
+        self.0
+    }
+}
+
+impl Drop for OwnerGuard {
+    fn drop(&mut self) {
+        exit_owner(self.0);
+    }
+}
+
+impl PartialEq for OwnerId {
+    fn eq(&self, other: &Self) -> bool {
+        self.index == other.index && self.generation == other.generation
+    }
 }
 
 struct RestoreObserver(Option<Observer>);
@@ -374,6 +487,7 @@ impl<T: 'static> Signal<T> {
     fn create(value: T, ephemeral: bool) -> Self {
         let (index, generation) =
             RUNTIME.with(|runtime| runtime.create(Box::new(value), ephemeral));
+        record_signal(index, generation);
         Self {
             index,
             generation,
@@ -563,9 +677,9 @@ impl<T: 'static> RetirePlaceholder for Reactive<T> {
 
 /// Tracks `value`.
 ///
-/// A primitive or [`Option`] becomes one [`Reactive`] handle. A `#[reactive]` struct is already
-/// tracked, so it is returned as itself. [`Reactive`] and [`Signal`] become a [`Reactive`] handle
-/// without wrapping them again.
+/// A primitive, [`String`], [`Option`] or [`Vec`] becomes one [`Reactive`] handle. A `#[reactive]`
+/// struct is already tracked, so it is returned as itself. [`Reactive`] and [`Signal`] become a
+/// [`Reactive`] handle without wrapping them again.
 pub fn reactive<T: IntoReactive>(value: T) -> T::Output {
     value.into_reactive()
 }
@@ -606,6 +720,16 @@ impl IntoReactive for String {
     }
 }
 
+impl<T: 'static> IntoReactive for Vec<T> {
+    type Output = Reactive<Vec<T>>;
+
+    fn into_reactive(self) -> Self::Output {
+        Reactive {
+            inner: signal(self),
+        }
+    }
+}
+
 impl<T: 'static> IntoReactive for Option<T> {
     type Output = Reactive<Option<T>>;
 
@@ -634,6 +758,44 @@ impl<T: 'static> IntoReactive for Signal<T> {
     fn into_reactive(self) -> Self::Output {
         Reactive { inner: self }
     }
+}
+
+#[cfg(test)]
+pub(crate) fn live_signal_count() -> usize {
+    RUNTIME.with(|runtime| {
+        runtime
+            .slots
+            .borrow()
+            .iter()
+            .filter(|slot| slot.is_some())
+            .count()
+    })
+}
+
+#[cfg(test)]
+pub(crate) fn signal_is_alive<T: 'static>(signal: Signal<T>) -> bool {
+    RUNTIME.with(|runtime| {
+        runtime
+            .slots
+            .borrow()
+            .get(signal.index as usize)
+            .and_then(|slot| slot.as_ref())
+            .is_some_and(|slot| slot.generation == signal.generation)
+    })
+}
+
+#[cfg(test)]
+pub(crate) fn signal_subscriber_count<T: 'static>(signal: Signal<T>) -> usize {
+    RUNTIME.with(|runtime| {
+        runtime
+            .slots
+            .borrow()
+            .get(signal.index as usize)
+            .and_then(|slot| slot.as_ref())
+            .filter(|slot| slot.generation == signal.generation)
+            .map(|slot| slot.subscribers.len())
+            .unwrap_or(0)
+    })
 }
 
 #[cfg(test)]
@@ -754,6 +916,23 @@ mod tests {
     }
 
     #[test]
+    fn owner_disposes_only_signals_created_inside_it() {
+        let before = live_signal_count();
+        let outer = signal(1);
+        let guard = enter_owner();
+        let inner = signal(2);
+        let owner = guard.id();
+        drop(guard);
+        assert!(signal_is_alive(inner));
+        dispose_owner(owner);
+        dispose_owner(owner);
+        assert!(!signal_is_alive(inner));
+        assert!(signal_is_alive(outer));
+        assert_eq!(outer.get(), 1);
+        assert_eq!(live_signal_count(), before + 1);
+    }
+
+    #[test]
     fn reactive_primitives_read_and_write() {
         let count = reactive(1_i64);
         assert_eq!(count.to_string(), "1");
@@ -768,6 +947,10 @@ mod tests {
 
         let selected = reactive(None::<usize>);
         selected.set(Some(1));
+
+        let items = reactive(vec![1, 2]);
+        items.update(|list| list.push(3));
+        assert_eq!(items.with(|list| list.clone()), vec![1, 2, 3]);
         assert_eq!(selected.get(), Some(1));
     }
 

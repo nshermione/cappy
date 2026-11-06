@@ -2,6 +2,7 @@
 //! damaged regions plus a display list. It knows nothing about windows or GPUs.
 
 mod bindings;
+pub(crate) mod flow;
 mod input;
 mod node;
 mod passes;
@@ -10,9 +11,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cappy_layout::{ApproximateTextMeasurer, LayoutTree, Point, Rect, Size, TextMeasurer};
-use cappy_style::{Style, TextStyle, Theme};
+use cappy_style::{Style, Theme};
 
-use crate::element::{Element, ElementContent};
+use crate::element::Element;
 use crate::paint::{Primitive, RenderFrame};
 use crate::reactive::{BindingQueue, Signal};
 use crate::{CursorIcon, Damage, DamageTracker};
@@ -64,6 +65,7 @@ pub struct Ui {
     nodes: Vec<Node>,
     root: NodeId,
     bindings: Vec<Binding>,
+    flows: Vec<flow::FlowState>,
     queue: Rc<BindingQueue>,
     theme_signal: Signal<Arc<Theme>>,
     /// [`Ui::new`] allocated `theme_signal` and disposes it on drop.
@@ -108,6 +110,7 @@ impl Ui {
             nodes: Vec::new(),
             root: NodeId(0),
             bindings: Vec::new(),
+            flows: Vec::new(),
             queue: Rc::new(BindingQueue::default()),
             theme_signal: theme,
             owns_theme,
@@ -134,7 +137,9 @@ impl Ui {
     pub fn set_text_measurer(&mut self, measurer: impl TextMeasurer + 'static) {
         self.measurer = Box::new(measurer);
         for index in 0..self.nodes.len() {
-            self.sync_text_leaf(NodeId(index as u32));
+            if self.nodes[index].alive {
+                self.sync_text_leaf(NodeId(index as u32));
+            }
         }
     }
 
@@ -227,7 +232,7 @@ impl Ui {
     pub fn find_by_key(&self, key: &str) -> Option<NodeId> {
         self.nodes
             .iter()
-            .position(|node| node.key.as_deref() == Some(key))
+            .position(|node| node.alive && node.key.as_deref() == Some(key))
             .map(|index| NodeId(index as u32))
     }
 
@@ -269,78 +274,11 @@ impl Ui {
             self.layout_dirty = true;
         }
     }
-
-    fn mount(&mut self, element: Element, parent: Option<NodeId>) -> NodeId {
-        let id = NodeId(u32::try_from(self.nodes.len()).expect("too many nodes"));
-        let Element {
-            content,
-            key,
-            classes,
-            class_binding,
-            style,
-            style_binding,
-            stylesheet,
-            on_click,
-            on_hover,
-            children,
-            slot_owner: _,
-            accepts_slots: _,
-        } = element;
-        let (content, text_binding) = match content {
-            ElementContent::Container | ElementContent::Slot { .. } => {
-                (NodeContent::Container, None)
-            }
-            ElementContent::StaticText(text) => (NodeContent::Text(text), None),
-            ElementContent::DynamicText(binding) => (NodeContent::Text("".into()), Some(binding)),
-        };
-        let initial_style = Style::inheriting(TextStyle::from_tokens(self.theme.tokens()));
-        self.nodes.push(Node {
-            parent,
-            children: Vec::new(),
-            key,
-            content,
-            classes,
-            dynamic_classes: Vec::new(),
-            stylesheet,
-            inline_style: style,
-            dynamic_style: Default::default(),
-            style: initial_style,
-            interaction: Default::default(),
-            on_click,
-            on_hover,
-            rect: Rect::ZERO,
-            style_dirty: true,
-            paint_dirty: true,
-        });
-        let layout_style = self.layout_style_of(id);
-        self.layout
-            .insert(id, &layout_style)
-            .expect("inserting a fresh layout node cannot fail");
-        self.sync_text_leaf(id);
-        if let Some(binding) = text_binding {
-            self.add_binding(id, BindingKind::Text(binding));
-        }
-        if let Some(binding) = class_binding {
-            self.add_binding(id, BindingKind::Classes(binding));
-        }
-        if let Some(binding) = style_binding {
-            self.add_binding(id, BindingKind::Style(binding));
-        }
-        let child_ids: Vec<NodeId> = children
-            .into_iter()
-            .filter(|child| !matches!(child.content, ElementContent::Slot { .. }))
-            .map(|child| self.mount(child, Some(id)))
-            .collect();
-        self.layout
-            .set_children(id, &child_ids)
-            .expect("children were just inserted into the layout tree");
-        self.nodes[id.index()].children = child_ids;
-        id
-    }
 }
 
 impl Drop for Ui {
     fn drop(&mut self) {
+        self.dispose_tree();
         if self.owns_theme {
             self.theme_signal.dispose();
         }

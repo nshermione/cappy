@@ -7,6 +7,13 @@ use cappy_style::{ClassName, InteractionState, Style, StyleRefinement, Styleshee
 
 use crate::element::{ClickHandler, HoverHandler};
 
+/// One direct child of a node: a mounted element, or a control-flow block.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum ChildPart {
+    Node(NodeId),
+    Flow(u32),
+}
+
 /// Handle to a mounted node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NodeId(pub(crate) u32);
@@ -37,6 +44,12 @@ pub(crate) struct Node {
     pub(crate) interaction: InteractionState,
     pub(crate) on_click: Option<ClickHandler>,
     pub(crate) on_hover: Option<HoverHandler>,
+    /// Ordered children before flows are flattened into [`Node::children`](Self::children).
+    pub(crate) parts: Vec<ChildPart>,
+    /// `show` is hiding this node, or a parent `show` is.
+    pub(crate) suppressed: bool,
+    pub(crate) alive: bool,
+    pub(crate) bindings: Vec<crate::reactive::BindingId>,
     /// Absolute rectangle in logical pixels from the last layout.
     pub(crate) rect: Rect,
     pub(crate) style_dirty: bool,

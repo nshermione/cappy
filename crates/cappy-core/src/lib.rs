@@ -14,7 +14,9 @@ mod ui;
 
 pub use binding::{Dynamic, IntoClasses, IntoStyle, IntoText};
 pub use damage::{Damage, DamageTracker};
-pub use element::{Component, Element, Slot, div, slot, text, text_dyn};
+pub use element::{
+    Component, Element, Slot, div, for_each, fragment, if_else, show, slot, text, text_dyn,
+};
 pub use event::{ButtonState, ClickEvent, CursorIcon, InputEvent, PointerButton};
 pub use listener::Listener;
 pub use paint::{Primitive, QuadPrimitive, RenderFrame, TextPrimitive};

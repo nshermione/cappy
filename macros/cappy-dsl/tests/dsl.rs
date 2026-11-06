@@ -267,6 +267,63 @@ fn theme_macro_overrides_tokens_and_classes() {
 }
 
 #[test]
+fn control_flow_macros_mount_show_if_and_for() {
+    #[derive(Clone, PartialEq)]
+    struct Row {
+        id: u32,
+        title: String,
+    }
+
+    let open = signal(true);
+    let ready = signal(false);
+    let mode = signal(0);
+    let items = signal(vec![Row {
+        id: 1,
+        title: "row".into(),
+    }]);
+    let mut ui = mounted(ui! {
+        div(key = "root") {
+            show (:open.get()) {
+                text(:format!("open {}", open.get()), key = "panel")
+            }
+            if (:ready.get()) {
+                text("yes", key = "state")
+            } else if (:mode.get() == 1) {
+                text("mid", key = "state")
+            } else {
+                text("no", key = "state")
+            }
+            for (item in :items, key = item.id) {
+                text(:item.with(|row| row.title.clone()), key = "row")
+            }
+        }
+    });
+    assert_eq!(text_of(&ui, "panel").as_deref(), Some("open true"));
+    assert_eq!(text_of(&ui, "state").as_deref(), Some("no"));
+    assert_eq!(text_of(&ui, "row").as_deref(), Some("row"));
+
+    mode.set(1);
+    ui.update(VIEWPORT);
+    assert_eq!(text_of(&ui, "state").as_deref(), Some("mid"));
+
+    ready.set(true);
+    ui.update(VIEWPORT);
+    assert_eq!(text_of(&ui, "state").as_deref(), Some("yes"));
+
+    open.set(false);
+    ui.update(VIEWPORT);
+    assert!(ui.find_by_key("panel").is_some());
+    assert_eq!(text_of(&ui, "panel").as_deref(), Some("open false"));
+
+    items.set(vec![Row {
+        id: 1,
+        title: "next".into(),
+    }]);
+    ui.update(VIEWPORT);
+    assert_eq!(text_of(&ui, "row").as_deref(), Some("next"));
+}
+
+#[test]
 fn theme_macro_extends_another_theme() {
     let dimmed = theme! {
         extends: Theme::dark(),

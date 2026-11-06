@@ -43,6 +43,13 @@ pub use cappy_macros::slot_self;
 /// - `slot(field)` inside a component's `render` places that `#[slot]` field. It reads
 ///   `self.field`.
 /// - `{ expression }` embeds an element; `{ ..iterator }` embeds every element it yields.
+/// - `show (:cond) { ... }` keeps its nodes and hides them while `cond` is false.
+/// - `if (:cond) { ... } else { ... }` disposes the branch that is not selected, including
+///   nested `show`, `if` and `for`. `else` may be omitted or written `else if`.
+/// - `for (item in :list, key = item.field) { ... }` repeats the block, keeping a row when its
+///   key stays. `item` in the block is the row signal.
+/// - `slot(field)` stays outside `show`, `if` and `for`. A parent fills slots before mount, and
+///   those blocks build their contents at mount.
 ///
 /// Every `field = value` calls the builder method `field(value)`. A leading `:` makes the value
 /// reactive: `:field = value` calls `field(Dynamic(move || value))` and the content `:value`
@@ -66,6 +73,24 @@ macro_rules! ui {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __ui_node {
+    (show ( : $cond:expr ) { $($body:tt)* } $(,)?) => {
+        $crate::__ui_show_expr!(: $cond ; $($body)*)
+    };
+    (show ( $cond:expr ) { $($body:tt)* } $(,)?) => {
+        $crate::__ui_show_expr!(: $cond ; $($body)*)
+    };
+    (if ( : $cond:expr ) { $($then:tt)* } $($rest:tt)*) => {
+        $crate::__ui_if_root!(move || $cond ; move || $crate::__ui_fragment!($($then)*) ; $($rest)*)
+    };
+    (if ( $cond:expr ) { $($then:tt)* } $($rest:tt)*) => {
+        $crate::__ui_if_root!(move || $cond ; move || $crate::__ui_fragment!($($then)*) ; $($rest)*)
+    };
+    (for ( $item:ident in : $source:expr , key = $key:ident . $($field:ident).+ ) { $($body:tt)* } $(,)?) => {
+        $crate::__ui_for_expr!($item ; $source ; $key ; path $($field).+ ; $($body)*)
+    };
+    (for ( $item:ident in : $source:expr , key = $key:ident ) { $($body:tt)* } $(,)?) => {
+        $crate::__ui_for_expr!($item ; $source ; $key ; self ; $($body)*)
+    };
     (@ $type:ident $(:: $segment:ident)* $(( $($fields:tt)* ))? $({ $($children:tt)* })? $(,)?) => {
         $crate::__ui_component!(
             $type $(:: $segment)* ;
@@ -343,60 +368,254 @@ macro_rules! __ui_bind {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __ui_children {
-    ($parent:expr ;) => {
-        $parent
+    ($parent:expr ; $($body:tt)*) => {{
+        let mut __cappy_nodes: ::std::vec::Vec<$crate::__private::Element> = ::std::vec::Vec::new();
+        $crate::__ui_collect!(__cappy_nodes ; $($body)*);
+        __cappy_nodes
+            .into_iter()
+            .fold($parent, |parent, child| parent.child(child))
+    }};
+}
+
+/// Pushes each child element into `$nodes`.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ui_collect {
+    ($nodes:ident ;) => {};
+    ($nodes:ident ; , $($rest:tt)*) => {
+        $crate::__ui_collect!($nodes ; $($rest)*)
     };
-    ($parent:expr ; , $($rest:tt)*) => {
-        $crate::__ui_children!($parent ; $($rest)*)
+    ($nodes:ident ; { .. $children:expr } $($rest:tt)*) => {
+        $nodes.extend($children.into_iter().map($crate::__private::Element::from));
+        $crate::__ui_collect!($nodes ; $($rest)*)
     };
-    ($parent:expr ; { .. $children:expr } $($rest:tt)*) => {
-        $crate::__ui_children!($parent.children($children) ; $($rest)*)
+    ($nodes:ident ; { $child:expr } $($rest:tt)*) => {
+        $nodes.push($crate::__private::Element::from($child));
+        $crate::__ui_collect!($nodes ; $($rest)*)
     };
-    ($parent:expr ; { $child:expr } $($rest:tt)*) => {
-        $crate::__ui_children!($parent.child($child) ; $($rest)*)
+    ($nodes:ident ; show ( : $cond:expr ) { $($body:tt)* } $($rest:tt)*) => {
+        $nodes.push($crate::__ui_show_expr!(: $cond ; $($body)*));
+        $crate::__ui_collect!($nodes ; $($rest)*)
     };
-    ($parent:expr ; $ctor:ident ( $field:ident ) { $($children:tt)* } $($rest:tt)*) => {
-        $crate::__ui_children!(
-            $parent.child($crate::__ui_node!($ctor ( $field ) { $($children)* })) ;
+    ($nodes:ident ; show ( $cond:expr ) { $($body:tt)* } $($rest:tt)*) => {
+        $nodes.push($crate::__ui_show_expr!(: $cond ; $($body)*));
+        $crate::__ui_collect!($nodes ; $($rest)*)
+    };
+    ($nodes:ident ; if ( : $cond:expr ) { $($then:tt)* } $($rest:tt)*) => {
+        $crate::__ui_if_chain!(
+            @start $nodes ;
+            move || $cond ;
+            move || $crate::__ui_fragment!($($then)*) ;
             $($rest)*
         )
     };
-    ($parent:expr ; $ctor:ident ( $field:ident ) $($rest:tt)*) => {
-        $crate::__ui_slot_child!($parent ; $ctor ; $field ; $($rest)*)
-    };
-    ($parent:expr ; @ $type:ident $(:: $segment:ident)* ( $($props:tt)* ) { $($children:tt)* } $($rest:tt)*) => {
-        $crate::__ui_children!(
-            $parent.child($crate::__ui_node!(@ $type $(:: $segment)* ( $($props)* ) { $($children)* })) ;
+    ($nodes:ident ; if ( $cond:expr ) { $($then:tt)* } $($rest:tt)*) => {
+        $crate::__ui_if_chain!(
+            @start $nodes ;
+            move || $cond ;
+            move || $crate::__ui_fragment!($($then)*) ;
             $($rest)*
         )
     };
-    ($parent:expr ; @ $type:ident $(:: $segment:ident)* ( $($props:tt)* ) $($rest:tt)*) => {
-        $crate::__ui_children!(
-            $parent.child($crate::__ui_node!(@ $type $(:: $segment)* ( $($props)* ))) ; $($rest)*
+    ($nodes:ident ; for ( $item:ident in : $source:expr , key = $key:ident . $($field:ident).+ ) { $($body:tt)* } $($rest:tt)*) => {
+        $nodes.push($crate::__ui_for_expr!($item ; $source ; $key ; path $($field).+ ; $($body)*));
+        $crate::__ui_collect!($nodes ; $($rest)*)
+    };
+    ($nodes:ident ; for ( $item:ident in : $source:expr , key = $key:ident ) { $($body:tt)* } $($rest:tt)*) => {
+        $nodes.push($crate::__ui_for_expr!($item ; $source ; $key ; self ; $($body)*));
+        $crate::__ui_collect!($nodes ; $($rest)*)
+    };
+    ($nodes:ident ; $ctor:ident ( $field:ident ) { $($children:tt)* } $($rest:tt)*) => {
+        $nodes.push($crate::__ui_node!($ctor ( $field ) { $($children)* }));
+        $crate::__ui_collect!($nodes ; $($rest)*)
+    };
+    ($nodes:ident ; $ctor:ident ( $field:ident ) $($rest:tt)*) => {
+        $crate::__ui_collect_slot!($nodes ; $ctor ; $field ; $($rest)*)
+    };
+    ($nodes:ident ; @ $type:ident $(:: $segment:ident)* ( $($props:tt)* ) { $($children:tt)* } $($rest:tt)*) => {
+        $nodes.push($crate::__ui_node!(@ $type $(:: $segment)* ( $($props)* ) { $($children)* }));
+        $crate::__ui_collect!($nodes ; $($rest)*)
+    };
+    ($nodes:ident ; @ $type:ident $(:: $segment:ident)* ( $($props:tt)* ) $($rest:tt)*) => {
+        $nodes.push($crate::__ui_node!(@ $type $(:: $segment)* ( $($props)* )));
+        $crate::__ui_collect!($nodes ; $($rest)*)
+    };
+    ($nodes:ident ; @ $type:ident $(:: $segment:ident)* { $($children:tt)* } $($rest:tt)*) => {
+        $nodes.push($crate::__ui_node!(@ $type $(:: $segment)* { $($children)* }));
+        $crate::__ui_collect!($nodes ; $($rest)*)
+    };
+    ($nodes:ident ; @ $type:ident $(:: $segment:ident)* $($rest:tt)*) => {
+        $nodes.push($crate::__ui_node!(@ $type $(:: $segment)*));
+        $crate::__ui_collect!($nodes ; $($rest)*)
+    };
+    ($nodes:ident ; $name:ident ( $($args:tt)* ) { $($children:tt)* } $($rest:tt)*) => {
+        $nodes.push($crate::__ui_node!($name ( $($args)* ) { $($children)* }));
+        $crate::__ui_collect!($nodes ; $($rest)*)
+    };
+    ($nodes:ident ; $name:ident ( $($args:tt)* ) $($rest:tt)*) => {
+        $nodes.push($crate::__ui_node!($name ( $($args)* )));
+        $crate::__ui_collect!($nodes ; $($rest)*)
+    };
+    ($nodes:ident ; $name:ident { $($children:tt)* } $($rest:tt)*) => {
+        $nodes.push($crate::__ui_node!($name { $($children)* }));
+        $crate::__ui_collect!($nodes ; $($rest)*)
+    };
+    ($nodes:ident ; $name:ident $($rest:tt)*) => {
+        $nodes.push($crate::__ui_node!($name));
+        $crate::__ui_collect!($nodes ; $($rest)*)
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ui_collect_slot {
+    ($nodes:ident ; $ctor:ident ; $field:ident ; $($rest:tt)*) => {
+        $crate::__ui_collect_slot!(@is $nodes ; $ctor ; $field ; $ctor ; $($rest)*)
+    };
+    (@is $nodes:ident ; slot ; $field:ident ; $ctor:ident ; $($rest:tt)*) => {
+        $nodes.push($ctor($crate::slot_self!($field)));
+        $crate::__ui_collect!($nodes ; $($rest)*)
+    };
+    (@is $nodes:ident ; $other:ident ; $field:ident ; $ctor:ident ; $($rest:tt)*) => {
+        $nodes.push($crate::__ui_node!($ctor ( $field )));
+        $crate::__ui_collect!($nodes ; $($rest)*)
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ui_fragment {
+    ($($body:tt)*) => {{
+        let mut __cappy_nodes: ::std::vec::Vec<$crate::__private::Element> = ::std::vec::Vec::new();
+        $crate::__ui_collect!(__cappy_nodes ; $($body)*);
+        $crate::__private::fragment(__cappy_nodes)
+    }};
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ui_show_expr {
+    (: $cond:expr ; $($body:tt)*) => {
+        $crate::__private::show(move || $cond, move || $crate::__ui_fragment!($($body)*))
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ui_for_expr {
+    ($item:ident ; $source:expr ; $key:ident ; self ; $($body:tt)*) => {
+        $crate::__private::for_each(
+            move |visit| {
+                $source.with(|list| {
+                    for item in list.iter() {
+                        visit(item);
+                    }
+                });
+            },
+            |$key| $key,
+            move |$item| $crate::__ui_fragment!($($body)*),
         )
     };
-    ($parent:expr ; @ $type:ident $(:: $segment:ident)* { $($children:tt)* } $($rest:tt)*) => {
-        $crate::__ui_children!(
-            $parent.child($crate::__ui_node!(@ $type $(:: $segment)* { $($children)* })) ;
+    ($item:ident ; $source:expr ; $key:ident ; path $($field:ident).+ ; $($body:tt)*) => {
+        $crate::__private::for_each(
+            move |visit| {
+                $source.with(|list| {
+                    for item in list.iter() {
+                        visit(item);
+                    }
+                });
+            },
+            |$key| &$key$(.$field)+,
+            move |$item| $crate::__ui_fragment!($($body)*),
+        )
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ui_if_root {
+    ($cond:expr ; $then:expr ; $($rest:tt)*) => {{
+        let mut __cappy_nodes: ::std::vec::Vec<$crate::__private::Element> = ::std::vec::Vec::new();
+        $crate::__ui_if_chain!(@start __cappy_nodes ; $cond ; $then ; $($rest)*);
+        $crate::__private::fragment(__cappy_nodes)
+    }};
+}
+
+/// Parses `else` / `else if` and pushes one `if_else` element, then the following siblings.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ui_if_chain {
+    (@start $nodes:ident ; $cond:expr ; $then:expr ; $($rest:tt)*) => {
+        $crate::__ui_if_chain!(@more $nodes ; [{$cond ; $then}] ; $($rest)*)
+    };
+    (@more $nodes:ident ; [$($frames:tt)*] ; else if ( : $cond:expr ) { $($body:tt)* } $($rest:tt)*) => {
+        $crate::__ui_if_chain!(
+            @more $nodes ;
+            [$($frames)* {move || $cond ; move || $crate::__ui_fragment!($($body)*)}] ;
             $($rest)*
         )
     };
-    ($parent:expr ; @ $type:ident $(:: $segment:ident)* $($rest:tt)*) => {
-        $crate::__ui_children!($parent.child($crate::__ui_node!(@ $type $(:: $segment)*)) ; $($rest)*)
-    };
-    ($parent:expr ; $name:ident ( $($args:tt)* ) { $($children:tt)* } $($rest:tt)*) => {
-        $crate::__ui_children!(
-            $parent.child($crate::__ui_node!($name ( $($args)* ) { $($children)* })) ; $($rest)*
+    (@more $nodes:ident ; [$($frames:tt)*] ; else if ( $cond:expr ) { $($body:tt)* } $($rest:tt)*) => {
+        $crate::__ui_if_chain!(
+            @more $nodes ;
+            [$($frames)* {move || $cond ; move || $crate::__ui_fragment!($($body)*)}] ;
+            $($rest)*
         )
     };
-    ($parent:expr ; $name:ident ( $($args:tt)* ) $($rest:tt)*) => {
-        $crate::__ui_children!($parent.child($crate::__ui_node!($name ( $($args)* ))) ; $($rest)*)
+    (@more $nodes:ident ; [$($frames:tt)*] ; else { $($body:tt)* } $($rest:tt)*) => {
+        $crate::__ui_if_fold!(
+            $nodes ;
+            [$($frames)*] ;
+            move || $crate::__ui_fragment!($($body)*) ;
+            $($rest)*
+        )
     };
-    ($parent:expr ; $name:ident { $($children:tt)* } $($rest:tt)*) => {
-        $crate::__ui_children!($parent.child($crate::__ui_node!($name { $($children)* })) ; $($rest)*)
+    (@more $nodes:ident ; [$($frames:tt)*] ; $($rest:tt)*) => {
+        $crate::__ui_if_fold!(
+            $nodes ;
+            [$($frames)*] ;
+            || $crate::__private::fragment(::std::vec::Vec::<$crate::__private::Element>::new()) ;
+            $($rest)*
+        )
     };
-    ($parent:expr ; $name:ident $($rest:tt)*) => {
-        $crate::__ui_children!($parent.child($crate::__ui_node!($name)) ; $($rest)*)
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ui_if_fold {
+    ($nodes:ident ; [$($frames:tt)*] ; $else_branch:expr ; $($rest:tt)*) => {
+        $crate::__ui_if_fold!(@rev $nodes ; [] [$($frames)*] ; $else_branch ; $($rest)*)
+    };
+    (@rev $nodes:ident ; [$($rev:tt)*] [] ; $else_branch:expr ; $($rest:tt)*) => {
+        $crate::__ui_if_fold!(@nest $nodes ; $else_branch ; [$($rev)*] ; $($rest)*)
+    };
+    (@rev $nodes:ident ; [$($rev:tt)*] [{$cond:expr ; $then:expr} $($more:tt)*] ; $else_branch:expr ; $($rest:tt)*) => {
+        $crate::__ui_if_fold!(
+            @rev $nodes ;
+            [{$cond ; $then} $($rev)*] [$($more)*] ;
+            $else_branch ;
+            $($rest)*
+        )
+    };
+    (@nest $nodes:ident ; $else_branch:expr ; [{$cond:expr ; $then:expr}] ; $($rest:tt)*) => {
+        $nodes.push($crate::__private::if_else($cond, $then, $else_branch));
+        $crate::__ui_collect!($nodes ; $($rest)*)
+    };
+    (@nest $nodes:ident ; $else_branch:expr ; [{$cond:expr ; $then:expr} $($more:tt)+] ; $($rest:tt)*) => {
+        $crate::__ui_if_fold!(
+            @wrap $nodes ;
+            $crate::__private::if_else($cond, $then, $else_branch) ;
+            [$($more)+] ;
+            $($rest)*
+        )
+    };
+    (@wrap $nodes:ident ; $inner:expr ; [{$cond:expr ; $then:expr} $($more:tt)*] ; $($rest:tt)*) => {
+        $crate::__ui_if_fold!(
+            @nest $nodes ;
+            move || $inner ;
+            [{$cond ; $then} $($more)*] ;
+            $($rest)*
+        )
     };
 }
 

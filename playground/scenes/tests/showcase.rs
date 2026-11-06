@@ -60,12 +60,68 @@ fn selecting_a_tile_updates_the_caption() {
 #[test]
 fn tasks_toggle_between_todo_and_done() {
     let mut harness = harness();
-    harness.click("task-1");
+    harness.click("task-title-1");
     harness.update();
     let row = harness.node("task-1");
     let badge = harness.ui().node_children(row)[0];
     let label = harness.ui().node_children(badge)[0];
     assert_eq!(harness.ui().node_text(label), Some("done"));
+}
+
+#[test]
+fn show_keeps_its_count_and_if_starts_over() {
+    let mut harness = harness();
+    harness.click("show-increment");
+    harness.update();
+    assert_eq!(harness.text("show-count"), "Kept: 1");
+    let kept = harness.node("show-count");
+
+    harness.click("show-toggle");
+    harness.update();
+    assert_eq!(harness.node("show-count"), kept);
+    assert_eq!(harness.rect("show-count").width, 0.0);
+    assert_eq!(harness.text("show-count"), "Kept: 1");
+
+    harness.click("show-toggle");
+    harness.update();
+    assert_eq!(harness.node("show-count"), kept);
+    assert_eq!(harness.text("show-count"), "Kept: 1");
+    assert!(harness.rect("show-count").width > 0.0);
+
+    harness.click("branch-increment");
+    harness.update();
+    assert_eq!(harness.text("branch-count"), "Draft: 1");
+    harness.click("branch-toggle");
+    harness.update();
+    assert_eq!(harness.text("branch-count"), "Sent: 0");
+    harness.click("branch-toggle");
+    harness.update();
+    assert_eq!(harness.text("branch-count"), "Draft: 0");
+}
+
+#[test]
+fn for_keeps_a_task_row_when_it_moves() {
+    let mut harness = harness();
+    harness.click("task-title-1");
+    harness.update();
+    harness.click("task-up-1");
+    harness.update();
+
+    let tasks = harness.node("tasks");
+    let children = harness.ui().node_children(tasks);
+    assert_eq!(children[0], harness.node("task-1"));
+    let badge = harness.ui().node_children(children[0])[0];
+    let label = harness.ui().node_children(badge)[0];
+    assert_eq!(harness.ui().node_text(label), Some("done"));
+
+    harness.click("add-task");
+    harness.update();
+    assert_eq!(harness.text("task-title-4"), "Added 4");
+
+    harness.click("task-drop-0");
+    harness.update();
+    assert!(harness.ui().find_by_key("task-0").is_none());
+    assert_eq!(harness.text("task-title-1"), "Stay idle when nothing changes");
 }
 
 #[test]

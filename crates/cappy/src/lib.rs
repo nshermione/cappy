@@ -68,8 +68,8 @@ pub mod prelude {
     pub use cappy_core::{
         Align, Color, ColorToken, Component, Display, Dynamic, Element, FlexDirection, FontSize,
         FontWeight, FrameInput, IntoReactive, Justify, Radius, Reactive, Signal, Slot, Space,
-        StyleRefinement, Stylesheet, Theme, Ui, UpdateOutcome, div, hex, percent, reactive, signal,
-        slot, text, text_dyn,
+        StyleRefinement, Stylesheet, Theme, Ui, UpdateOutcome, div, for_each, fragment, hex,
+        if_else, percent, reactive, show, signal, slot, text, text_dyn,
     };
     pub use cappy_dsl::{style, theme, ui};
     pub use cappy_macros::{ClassName, Props, component, reactive, stylesheet};

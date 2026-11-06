@@ -47,6 +47,9 @@ impl Ui {
     /// The root fills the viewport unless its style gives it an explicit size.
     pub(super) fn layout_style_of(&self, node: NodeId) -> LayoutStyle {
         let mut style = self.nodes[node.index()].style.layout.clone();
+        if self.nodes[node.index()].suppressed {
+            style.display = Display::None;
+        }
         if node == self.root {
             for extent in [&mut style.width, &mut style.height] {
                 if *extent == Extent::Auto {
@@ -158,7 +161,7 @@ impl Ui {
         let mut stack = vec![self.root];
         while let Some(id) = stack.pop() {
             let node = &self.nodes[id.index()];
-            if node.style.layout.display == Display::None {
+            if !node.alive || node.suppressed || node.style.layout.display == Display::None {
                 continue;
             }
             let visual = &node.style.visual;

@@ -47,7 +47,10 @@ impl Ui {
 
     fn is_hit(&self, id: NodeId, point: Point) -> bool {
         let node = &self.nodes[id.index()];
-        node.style.layout.display != Display::None && node.rect.contains(point)
+        node.alive
+            && !node.suppressed
+            && node.style.layout.display != Display::None
+            && node.rect.contains(point)
     }
 
     pub(super) fn refresh_hover(&mut self) {
@@ -59,13 +62,23 @@ impl Ui {
             return;
         }
         let previous = std::mem::replace(&mut self.hovered, path.clone());
-        for id in previous.iter().filter(|id| !path.contains(id)) {
-            self.set_interaction(*id, |state| state.hovered = false);
-            self.call_hover_handler(*id, false);
+        let left: Vec<NodeId> = previous
+            .iter()
+            .copied()
+            .filter(|id| !path.contains(id) && self.nodes[id.index()].alive)
+            .collect();
+        let entered: Vec<NodeId> = path
+            .iter()
+            .copied()
+            .filter(|id| !previous.contains(id))
+            .collect();
+        for id in left {
+            self.set_interaction(id, |state| state.hovered = false);
+            self.call_hover_handler(id, false);
         }
-        for id in path.iter().filter(|id| !previous.contains(id)) {
-            self.set_interaction(*id, |state| state.hovered = true);
-            self.call_hover_handler(*id, true);
+        for id in entered {
+            self.set_interaction(id, |state| state.hovered = true);
+            self.call_hover_handler(id, true);
         }
     }
 
@@ -99,7 +112,7 @@ impl Ui {
         }
     }
 
-    fn set_interaction(&mut self, id: NodeId, change: impl FnOnce(&mut InteractionState)) {
+    pub(super) fn set_interaction(&mut self, id: NodeId, change: impl FnOnce(&mut InteractionState)) {
         let node = &mut self.nodes[id.index()];
         let before = node.interaction;
         change(&mut node.interaction);

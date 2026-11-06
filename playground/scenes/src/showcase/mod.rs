@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use cappy::prelude::*;
 
-/// Header with a theme switcher, a counter, selectable tiles and a task list.
+/// Header with a theme switcher, a counter (`show` / `if`), selectable tiles and a keyed task list.
 pub fn showcase() -> Ui {
     // Test workers reuse threads, so a previous scene can leave this singleton dirty.
     counter::Counter::singleton().reset();

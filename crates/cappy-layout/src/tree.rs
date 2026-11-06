@@ -91,6 +91,16 @@ impl<K: Copy + Eq + Hash + fmt::Debug> LayoutTree<K> {
         self.taffy.mark_dirty(node).map_err(engine_error)
     }
 
+    /// Drops `key` after it has been unlinked from its parent. Children should already be gone.
+    pub fn remove(&mut self, key: K) -> Result<(), LayoutError> {
+        let node = self
+            .nodes
+            .remove(&key)
+            .ok_or_else(|| LayoutError::UnknownNode(format!("{key:?}")))?;
+        self.taffy.remove(node).map_err(engine_error)?;
+        Ok(())
+    }
+
     pub fn set_children(&mut self, key: K, children: &[K]) -> Result<(), LayoutError> {
         let node = self.node(key)?;
         let child_nodes = children
@@ -428,6 +438,21 @@ mod tests {
             tree.local_rect(2).unwrap(),
             Rect::new(50.0, 0.0, 50.0, 10.0)
         );
+    }
+
+    #[test]
+    fn remove_drops_the_node() {
+        let mut tree = LayoutTree::new();
+        tree.insert(0, &fixed(10.0, 10.0)).unwrap();
+        tree.insert(1, &fixed(4.0, 4.0)).unwrap();
+        tree.set_children(0, &[1]).unwrap();
+        tree.set_children(0, &[]).unwrap();
+        tree.remove(1).unwrap();
+        assert!(matches!(
+            tree.local_rect(1),
+            Err(LayoutError::UnknownNode(_))
+        ));
+        tree.remove(1).unwrap_err();
     }
 
     #[test]

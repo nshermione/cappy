@@ -1,5 +1,7 @@
-//! Declarative description of a UI tree. An [`Element`] is mounted into a [`crate::Ui`] once;
-//! afterwards only its reactive bindings re-run.
+//! Declarative description of a UI tree. An [`Element`] is mounted into a [`crate::Ui`] once.
+//! Text, class and style bindings keep running after that. [`show`](crate::show), [`if_else`]
+//! and [`for_each`] can still change structure: `show` only hides, and `if_else` / `for_each`
+//! dispose the parts they remove.
 
 use std::fmt;
 use std::marker::PhantomData;
@@ -24,6 +26,10 @@ pub(crate) enum ElementContent {
     Slot {
         index: u16,
     },
+    /// Several elements spliced into the parent, with no node of their own.
+    Fragment(Vec<Element>),
+    /// `show`, `if` / `else` or `for`. The runtime splices the result into the parent.
+    Flow(crate::ui::flow::FlowSpec),
 }
 
 /// Identity of one `#[slot]` field. The component stores the marker, not the child, so it stays
@@ -101,6 +107,73 @@ pub fn text_dyn(content: impl Fn() -> String + 'static) -> Element {
 #[must_use]
 pub fn slot<C, T>(slot: Slot<C, T>) -> Element {
     Element::new(ElementContent::Slot { index: slot.index })
+}
+
+/// Splices `children` into the parent. The fragment itself is not a layout node.
+#[must_use]
+pub fn fragment(children: impl IntoIterator<Item = impl Into<Element>>) -> Element {
+    Element::new(ElementContent::Fragment(
+        children.into_iter().map(Into::into).collect(),
+    ))
+}
+
+/// Mounts `view` once. When `when` is false the nodes stay, with their signals and bindings, but
+/// layout treats them as [`Display::None`](cappy_style::Display::None).
+///
+/// `when` is the only value this node tracks. `view` runs outside that tracking, so signals it
+/// reads subscribe on their own bindings. Hiding does not dispose anything. A parent `if_else` or
+/// `for_each` that drops this `show` disposes it, hidden or not. Keep [`slot`] out of `view`:
+/// slots are filled before mount.
+#[must_use]
+pub fn show(
+    when: impl Fn() -> bool + 'static,
+    view: impl Fn() -> Element + 'static,
+) -> Element {
+    Element::new(ElementContent::Flow(crate::ui::flow::show_spec(when, view)))
+}
+
+/// Keeps the branch `when` selects and disposes the other one, including every nested `show`,
+/// `for_each` and `if_else`. Coming back mounts that branch again.
+///
+/// `when` is the only value this node tracks. Both builders run outside that tracking.
+/// Keep [`slot`] out of either branch: slots are filled before mount.
+#[must_use]
+pub fn if_else(
+    when: impl Fn() -> bool + 'static,
+    then_branch: impl Fn() -> Element + 'static,
+    else_branch: impl Fn() -> Element + 'static,
+) -> Element {
+    Element::new(ElementContent::Flow(crate::ui::flow::branch_spec(
+        when,
+        then_branch,
+        else_branch,
+    )))
+}
+
+/// Repeats `view` for each item `read` visits. Rows with the same key are kept: their node and
+/// the signal passed to `view` stay, and the signal updates only when the item is not equal.
+/// A missing key is disposed, including anything nested in that row.
+///
+/// `read` must visit items while it still holds them, usually from [`Signal::with`](crate::Signal::with).
+/// `key_of` borrows the key from the item. A duplicate key panics. Keep [`slot`] out of `view`:
+/// slots are filled before mount.
+///
+/// # Panics
+/// Panics when two items in one pass share a key.
+#[must_use]
+pub fn for_each<T, K>(
+    read: impl Fn(&mut dyn FnMut(&T)) + 'static,
+    key_of: impl for<'a> Fn(&'a T) -> &'a K + 'static,
+    view: impl Fn(crate::Signal<T>) -> Element + 'static,
+) -> Element
+where
+    T: Clone + PartialEq + 'static,
+    K: ToOwned + Eq + std::hash::Hash + ?Sized + 'static,
+    K::Owned: Clone + Eq + std::hash::Hash + std::borrow::Borrow<K> + 'static,
+{
+    Element::new(ElementContent::Flow(crate::ui::flow::repeat_spec(
+        read, key_of, view,
+    )))
 }
 
 impl Element {
@@ -310,6 +383,8 @@ impl fmt::Debug for Element {
             ElementContent::StaticText(text) => format!("text({text:?})"),
             ElementContent::DynamicText(_) => "text(<dynamic>)".to_owned(),
             ElementContent::Slot { index } => format!("slot({index})"),
+            ElementContent::Fragment(children) => format!("fragment({})", children.len()),
+            ElementContent::Flow(_) => "flow".to_owned(),
         };
         f.debug_struct("Element")
             .field("kind", &kind)

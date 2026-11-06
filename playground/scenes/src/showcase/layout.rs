@@ -102,6 +102,66 @@ fn counter_card() -> Element {
     }
 }
 
+/// Hides the counter. The `+1` made before hiding is still there when it comes back.
+fn show_row() -> Element {
+    let open = reactive(true);
+    let toggle = move |_: &ClickEvent| open.update(|value| *value = !*value);
+    ui! {
+        div(class = ThemeClass::Row) {
+            div(class = ThemeClass::Btn, key = "show-toggle", on_click = toggle) {
+                text(:if open.get() { "Hide kept" } else { "Show kept" }.to_owned())
+            }
+            show (:open.get()) {
+                { kept_count() }
+            }
+        }
+    }
+}
+
+fn kept_count() -> Element {
+    let count = reactive(0i64);
+    let increment = move |_: &ClickEvent| count.update(|value| *value += 1);
+    ui! {
+        div(class = ThemeClass::Row, key = "kept-count") {
+            text(:format!("Kept: {count}"), key = "show-count")
+            div(class = ThemeClass::Btn, key = "show-increment", on_click = increment) {
+                text("+1")
+            }
+        }
+    }
+}
+
+/// Switching branches throws the counter away. Coming back starts at zero.
+fn branch_row() -> Element {
+    let sent = reactive(false);
+    let toggle = move |_: &ClickEvent| sent.update(|value| *value = !*value);
+    ui! {
+        div(class = ThemeClass::Row) {
+            div(class = ThemeClass::Btn, key = "branch-toggle", on_click = toggle) {
+                text(:if sent.get() { "To draft" } else { "To sent" }.to_owned())
+            }
+            if (:sent.get()) {
+                { branch_count("Sent") }
+            } else {
+                { branch_count("Draft") }
+            }
+        }
+    }
+}
+
+fn branch_count(name: &'static str) -> Element {
+    let count = reactive(0i64);
+    let increment = move |_: &ClickEvent| count.update(|value| *value += 1);
+    ui! {
+        div(class = ThemeClass::Row, key = "branch") {
+            text(:format!("{name}: {count}"), key = "branch-count")
+            div(class = ThemeClass::Btn, key = "branch-increment", on_click = increment) {
+                text("+1")
+            }
+        }
+    }
+}
+
 fn tiles_card() -> Element {
     let selected = reactive(None::<usize>);
     let tiles = (0..TILE_COUNT).map(move |index| tile(index, selected));
@@ -134,31 +194,88 @@ fn tile(index: usize, selected: Reactive<Option<usize>>) -> Element {
 }
 
 fn tasks_card() -> Element {
-    let rows = TASKS
-        .iter()
-        .enumerate()
-        .map(|(index, task)| task_row(index, task));
+    let tasks = reactive(
+        TASKS
+            .iter()
+            .enumerate()
+            .map(|(index, title)| Task {
+                id: index as u64,
+                title: (*title).to_owned(),
+            })
+            .collect::<Vec<_>>(),
+    );
+    let next_id = reactive(TASKS.len() as u64);
+    let add = move |_: &ClickEvent| {
+        let id = next_id.get();
+        next_id.update(|value| *value += 1);
+        tasks.update(|list| {
+            list.push(Task {
+                id,
+                title: format!("Added {id}"),
+            });
+        });
+    };
     ui! {
         div(class = ThemeClass::Card) {
-            text("Phase 1 checklist", class = ThemeClass::Subtitle)
-            div(class = ThemeClass::Column) {
-                { ..rows }
+            div(class = ThemeClass::Row) {
+                text("Phase 1 checklist", class = ThemeClass::Subtitle)
+                div(class = ThemeClass::Btn, key = "add-task", on_click = add) {
+                    text("Add")
+                }
+            }
+            text("show keeps its count while hidden. if starts over.", class = ThemeClass::Muted),
+            { show_row() }
+            { branch_row() }
+            div(class = ThemeClass::Column, key = "tasks") {
+                for (task in :tasks, key = task.id) {
+                    { task_row(tasks, reactive(task)) }
+                }
             }
         }
     }
 }
 
-fn task_row(index: usize, task: &'static str) -> Element {
+fn task_row(tasks: Reactive<Vec<Task>>, task: Reactive<Task>) -> Element {
     let done = reactive(false);
+    let id = task.with(|row| row.id);
     let toggle = move |_: &ClickEvent| done.update(|value| *value = !*value);
+    let move_up = move |_: &ClickEvent| {
+        tasks.update(|list| {
+            let Some(index) = list.iter().position(|row| row.id == id) else {
+                return;
+            };
+            if index > 0 {
+                list.swap(index - 1, index);
+            }
+        });
+    };
+    let remove = move |_: &ClickEvent| {
+        tasks.update(|list| list.retain(|row| row.id != id));
+    };
     ui! {
-        div(class = ThemeClass::Row, key = format!("task-{index}"), on_click = toggle) {
+        div(class = ThemeClass::Row, key = format!("task-{id}"), on_click = toggle) {
             div(class = ThemeClass::Badge, :class = class_when(done.get(), Class::BadgeDone)) {
                 text(:if done.get() { "done" } else { "todo" }.to_owned())
             }
-            text(task, :class = class_when(done.get(), Class::TaskDone))
+            text(
+                :task.with(|row| row.title.clone()),
+                :class = class_when(done.get(), Class::TaskDone),
+                key = format!("task-title-{id}"),
+            ),
+            div(class = ThemeClass::Btn, key = format!("task-up-{id}"), on_click = move_up) {
+                text("Up")
+            }
+            div(class = ThemeClass::Btn, key = format!("task-drop-{id}"), on_click = remove) {
+                text("Drop")
+            }
         }
     }
+}
+
+#[derive(Clone, PartialEq)]
+struct Task {
+    id: u64,
+    title: String,
 }
 
 /// The class list for a `:class` binding that adds `class` only while `active`.
