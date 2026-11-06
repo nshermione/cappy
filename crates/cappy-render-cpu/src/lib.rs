@@ -5,8 +5,8 @@
 //! price of CPU time per repainted pixel. Text is shaped by the same cosmic-text code as the GPU
 //! renderer, so layout is identical.
 //!
-//! Known difference from the GPU renderer: tiny-skia blends sRGB-encoded values while wgpu
-//! blends in linear light, so anti-aliased edges and translucent colors differ slightly.
+//! Known difference from the GPU renderer: tiny-skia blends quad edges in sRGB, while wgpu blends
+//! them in linear light. Glyph coverage is blended in linear light, matching glyphon.
 
 mod blend;
 mod overlay;

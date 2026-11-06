@@ -29,6 +29,45 @@ pub(crate) fn over(source: [u8; 4], destination: [u8; 4]) -> [u8; 4] {
     })
 }
 
+/// Blends straight sRGB `color` over `destination` using `coverage` in linear light.
+///
+/// This matches glyphon's mask shader on an sRGB target: the text color is linearized, coverage
+/// scales its alpha, and the blend result is encoded back to sRGB. Partial coverage therefore
+/// stays lighter than an sRGB-space blend, so glyph edges stay as thin as the GPU's.
+pub(crate) fn blend_linear_coverage(destination: &mut [u8], color: [u8; 4], coverage: u8) {
+    if coverage == 0 || color[3] == 0 {
+        return;
+    }
+    let src_a = (f32::from(color[3]) / 255.0) * (f32::from(coverage) / 255.0);
+    let keep = 1.0 - src_a;
+    let out_a = src_a + (f32::from(destination[3]) / 255.0) * keep;
+    for channel in 0..3 {
+        let blended =
+            srgb_to_linear(color[channel]) * src_a + srgb_to_linear(destination[channel]) * keep;
+        destination[channel] = linear_to_srgb(blended);
+    }
+    destination[3] = (out_a * 255.0).round().clamp(0.0, 255.0) as u8;
+}
+
+fn srgb_to_linear(channel: u8) -> f32 {
+    let encoded = f32::from(channel) / 255.0;
+    if encoded <= 0.04045 {
+        encoded / 12.92
+    } else {
+        ((encoded + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+fn linear_to_srgb(linear: f32) -> u8 {
+    let linear = linear.clamp(0.0, 1.0);
+    let encoded = if linear <= 0.003_130_8 {
+        linear * 12.92
+    } else {
+        1.055 * linear.powf(1.0 / 2.4) - 0.055
+    };
+    (encoded * 255.0).round().clamp(0.0, 255.0) as u8
+}
+
 /// Blends premultiplied `source` over the RGBA pixel stored in `destination`.
 pub(crate) fn blend_into(destination: &mut [u8], source: [u8; 4]) {
     if source == [0; 4] {
@@ -81,6 +120,33 @@ mod tests {
     fn half_transparent_white_over_black() {
         let half_white = premultiply([255, 255, 255, 128]);
         assert_eq!(over(half_white, [0, 0, 0, 255]), [128, 128, 128, 255]);
+    }
+
+    #[test]
+    fn half_coverage_black_on_white_stays_lighter_than_an_srgb_blend() {
+        let mut pixel = [255, 255, 255, 255];
+        blend_linear_coverage(&mut pixel, [0, 0, 0, 255], 128);
+        assert!(
+            pixel[0] > 160,
+            "linear blend of half coverage is a light gray"
+        );
+        assert_eq!(pixel[0], pixel[1]);
+        assert_eq!(pixel[1], pixel[2]);
+        assert_eq!(pixel[3], 255);
+    }
+
+    #[test]
+    fn full_coverage_replaces_the_pixel() {
+        let mut pixel = [255, 255, 255, 255];
+        blend_linear_coverage(&mut pixel, [10, 20, 30, 255], 255);
+        assert_eq!(pixel, [10, 20, 30, 255]);
+    }
+
+    #[test]
+    fn zero_coverage_leaves_the_pixel() {
+        let mut pixel = [1, 2, 3, 255];
+        blend_linear_coverage(&mut pixel, [0, 0, 0, 255], 0);
+        assert_eq!(pixel, [1, 2, 3, 255]);
     }
 
     #[test]

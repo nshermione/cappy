@@ -6,7 +6,7 @@ use cappy_text::cosmic_text::{FontSystem, SwashCache, SwashContent, SwashImage};
 use cappy_text::{FontContext, ShapedTextCache};
 use tiny_skia::PixmapMut;
 
-use crate::blend::{blend_into, premultiply, scale};
+use crate::blend::{blend_into, blend_linear_coverage, premultiply, scale};
 
 const BYTES_PER_PIXEL: usize = 4;
 
@@ -66,7 +66,7 @@ impl TextPainter {
             .buffers
             .get(text)
             .expect("the buffer was shaped just above");
-        let color = premultiply(text.color.to_rgba8());
+        let color = text.color.to_rgba8();
         let left = text.rect.x * scale_factor;
         let top = text.rect.y * scale_factor;
         let target_width = target.width() as usize;
@@ -76,7 +76,7 @@ impl TextPainter {
             for glyph in run.glyphs {
                 let physical = glyph.physical((left, top), scale_factor);
                 let glyph_color = glyph.color_opt.map_or(color, |custom| {
-                    premultiply([custom.r(), custom.g(), custom.b(), custom.a()])
+                    [custom.r(), custom.g(), custom.b(), custom.a()]
                 });
                 let Some(image) = self
                     .swash_cache
@@ -138,37 +138,35 @@ fn draw_glyph(target: GlyphTarget<'_>, image: &SwashImage, position: (i32, i32),
     for pixel_y in visible.top..visible.bottom {
         for pixel_x in visible.left..visible.right {
             let texel = ((pixel_y - y) * glyph_width + (pixel_x - x)) as usize;
-            let source = glyph_texel(image, texel, color);
             let offset = (pixel_y as usize * target.width + pixel_x as usize) * BYTES_PER_PIXEL;
-            blend_into(&mut target.pixels[offset..offset + BYTES_PER_PIXEL], source);
+            let pixel = &mut target.pixels[offset..offset + BYTES_PER_PIXEL];
+            match image.content {
+                SwashContent::Mask => blend_linear_coverage(pixel, color, image.data[texel]),
+                SwashContent::SubpixelMask => {
+                    let start = texel * BYTES_PER_PIXEL;
+                    let coverage = image.data[start..start + 3]
+                        .iter()
+                        .copied()
+                        .max()
+                        .unwrap_or(0);
+                    blend_linear_coverage(pixel, color, coverage);
+                }
+                SwashContent::Color => blend_into(pixel, glyph_texel(image, texel, color)),
+            }
         }
     }
 }
 
-/// The premultiplied color a glyph texel contributes, tinted by the text `color`.
+/// Premultiplied color of one color-glyph texel, scaled by the text alpha in `color`.
 fn glyph_texel(image: &SwashImage, texel: usize, color: [u8; 4]) -> [u8; 4] {
-    match image.content {
-        SwashContent::Mask => scale(color, image.data[texel]),
-        SwashContent::Color => {
-            let start = texel * BYTES_PER_PIXEL;
-            let rgba = [
-                image.data[start],
-                image.data[start + 1],
-                image.data[start + 2],
-                image.data[start + 3],
-            ];
-            scale(premultiply(rgba), color[3])
-        }
-        SwashContent::SubpixelMask => {
-            let start = texel * BYTES_PER_PIXEL;
-            let coverage = image.data[start..start + 3]
-                .iter()
-                .copied()
-                .max()
-                .unwrap_or(0);
-            scale(color, coverage)
-        }
-    }
+    let start = texel * BYTES_PER_PIXEL;
+    let rgba = [
+        image.data[start],
+        image.data[start + 1],
+        image.data[start + 2],
+        image.data[start + 3],
+    ];
+    scale(premultiply(rgba), color[3])
 }
 
 #[cfg(test)]
