@@ -26,13 +26,6 @@ stylesheet! {
     }
 }
 
-impl Badge {
-    fn press(&self) {
-        self.hits.update(|hits| *hits += 1);
-        self.on_click.emit(self.label.get());
-    }
-}
-
 impl Component for Badge {
     fn stylesheet() -> &'static Stylesheet {
         Class::sheet()
@@ -41,8 +34,19 @@ impl Component for Badge {
     fn render(self) -> Element {
         ui! {
             div(class = Class::Root, on_click = move |_| self.press()) {
-                text(:format!("{} ({})", self.label, self.hits))
+                text(:self.formatted_text())
             }
         }
+    }
+}
+
+impl Badge {
+    fn press(&self) {
+        self.hits.update(|hits| *hits += 1);
+        self.on_click.emit(self.label.get());
+    }
+
+    fn formatted_text(&self) -> String {
+        format!("{} ({})", self.label, self.hits)
     }
 }

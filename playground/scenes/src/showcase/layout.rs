@@ -34,6 +34,7 @@ pub fn root(theme: Reactive<Arc<Theme>>, themes: Rc<[Arc<Theme>]>) -> Element {
 }
 
 fn header(theme: Reactive<Arc<Theme>>, themes: Rc<[Arc<Theme>]>) -> Element {
+    let theme_name = move || theme.with(|current| current.name().to_owned());
     let next_theme = move |_: &ClickEvent| {
         theme.update(|current| {
             let index = themes
@@ -51,7 +52,7 @@ fn header(theme: Reactive<Arc<Theme>>, themes: Rc<[Arc<Theme>]>) -> Element {
             }
             { demo_badge() }
             div(class = ThemeClass::Btn, key = "theme-toggle", on_click = next_theme) {
-                text(:format!("Theme: {}", theme.with(|current| current.name().to_owned())))
+                text(:format!("Theme: {}", theme_name()))
             }
         }
     }
@@ -70,31 +71,29 @@ struct AppState {
 
 fn demo_badge() -> Element {
     let label = reactive(String::from("Badge"));
+    let mark_clicked = move |value: &String| label.set(format!("{value}!"));
     ui! {
-        @Badge(
-            label = label,
-            on_click = move |value: &String| label.set(format!("{value}!")),
-            key = "demo-badge",
-        )
+        @Badge(label = label, on_click = mark_clicked, key = "demo-badge")
     }
 }
 
 fn counter_card() -> Element {
     let app_state = AppState::new(CounterState::new(0), 1);
+    let decrement = move |_: &ClickEvent| app_state.counter.count.update(|value| *value -= 1);
+    let increment = move |_: &ClickEvent| app_state.counter.count.update(|value| *value += 1);
+    let reset = move |_: &ClickEvent| app_state.counter.count.set(0);
     ui! {
         div(class = [ThemeClass::Card, Class::Grow]) {
             text("Counter", class = ThemeClass::Subtitle)
             text(:format!("Count: {}", app_state.counter.count), key = "count", class = Class::Count)
             div(class = ThemeClass::Row) {
-                div(class = ThemeClass::Btn, key = "decrement", on_click = move |_| app_state.counter.count.update(|value| *value -= 1)) {
+                div(class = ThemeClass::Btn, key = "decrement", on_click = decrement) {
                     text("-1")
                 }
-                div(class = [ThemeClass::Btn, ThemeClass::BtnPrimary], key = "increment", on_click = move |_| app_state.counter.count.update(|value| *value += 1)) {
+                div(class = [ThemeClass::Btn, ThemeClass::BtnPrimary], key = "increment", on_click = increment) {
                     text("+1")
                 }
-                div(class = ThemeClass::Btn, key = "reset", on_click = move |_| {
-                    app_state.counter.count.set(0);
-                }) {
+                div(class = ThemeClass::Btn, key = "reset", on_click = reset) {
                     text("Reset")
                 }
             }
@@ -120,12 +119,13 @@ fn tiles_card() -> Element {
 }
 
 fn tile(index: usize, selected: Reactive<Option<usize>>) -> Element {
+    let select = move |_: &ClickEvent| selected.set(Some(index));
     ui! {
         div(
             class = ThemeClass::Tile,
             :class = class_when(selected.get() == Some(index), Class::TileSelected),
             key = format!("tile-{index}"),
-            on_click = move |_| selected.set(Some(index)),
+            on_click = select,
         ) {
             text(format!("Tile {}", index + 1))
         }
@@ -149,8 +149,9 @@ fn tasks_card() -> Element {
 
 fn task_row(index: usize, task: &'static str) -> Element {
     let done = reactive(false);
+    let toggle = move |_: &ClickEvent| done.update(|value| *value = !*value);
     ui! {
-        div(class = ThemeClass::Row, key = format!("task-{index}"), on_click = move |_| done.update(|value| *value = !*value)) {
+        div(class = ThemeClass::Row, key = format!("task-{index}"), on_click = toggle) {
             div(class = ThemeClass::Badge, :class = class_when(done.get(), Class::BadgeDone)) {
                 text(:if done.get() { "done" } else { "todo" }.to_owned())
             }
