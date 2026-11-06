@@ -19,7 +19,7 @@ pub use event::{ButtonState, ClickEvent, CursorIcon, InputEvent, PointerButton};
 pub use listener::Listener;
 pub use paint::{Primitive, QuadPrimitive, RenderFrame, TextPrimitive};
 pub use prop::{ByHandle, ByValue, PropInput};
-pub use reactive::{IntoReactive, Reactive, Signal, reactive, signal};
+pub use reactive::{IntoReactive, Reactive, RetirePlaceholder, Signal, reactive, signal};
 pub use ui::{FrameInput, NodeId, Ui, UpdateOutcome};
 
 pub use cappy_layout::{

@@ -75,21 +75,6 @@ impl Runtime {
     }
 }
 
-// #region agent log
-#[cfg(test)]
-pub(crate) fn debug_listener_occupancy() -> (usize, usize) {
-    RUNTIME.with(|runtime| {
-        let slots = runtime.slots.borrow();
-        let with_handler = slots
-            .iter()
-            .flatten()
-            .filter(|slot| slot.handler.is_some())
-            .count();
-        (slots.len(), with_handler)
-    })
-}
-// #endregion
-
 /// A `Copy` handle for one component event.
 ///
 /// `T` is the payload type. The closure is stored beside the handle, not inside it. [`Listener::emit`]

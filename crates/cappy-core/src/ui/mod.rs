@@ -66,6 +66,8 @@ pub struct Ui {
     bindings: Vec<Binding>,
     queue: Rc<BindingQueue>,
     theme_signal: Signal<Arc<Theme>>,
+    /// [`Ui::new`] allocated `theme_signal` and disposes it on drop.
+    owns_theme: bool,
     theme: Arc<Theme>,
     layout: LayoutTree<NodeId>,
     measurer: Box<dyn TextMeasurer>,
@@ -83,12 +85,24 @@ pub struct Ui {
 
 impl Ui {
     /// Mounts `root` with a fixed theme. Use [`Ui::set_theme`] or [`Ui::theme_signal`] to switch.
+    ///
+    /// The theme signal created here is disposed when this `Ui` drops.
     pub fn new(root: impl Into<Element>, theme: Theme) -> Self {
-        Self::with_theme_signal(root, Signal::new(Arc::new(theme)))
+        Self::with_owned_theme(root, Signal::new(Arc::new(theme)), true)
     }
 
     /// Mounts `root` and follows `theme`: setting the signal restyles the whole UI.
+    ///
+    /// `theme` stays alive after this `Ui` drops. The caller owns that signal.
     pub fn with_theme_signal(root: impl Into<Element>, theme: Signal<Arc<Theme>>) -> Self {
+        Self::with_owned_theme(root, theme, false)
+    }
+
+    fn with_owned_theme(
+        root: impl Into<Element>,
+        theme: Signal<Arc<Theme>>,
+        owns_theme: bool,
+    ) -> Self {
         let initial_theme = theme.get_untracked();
         let mut ui = Self {
             nodes: Vec::new(),
@@ -96,6 +110,7 @@ impl Ui {
             bindings: Vec::new(),
             queue: Rc::new(BindingQueue::default()),
             theme_signal: theme,
+            owns_theme,
             theme: initial_theme,
             layout: LayoutTree::new(),
             measurer: Box::new(ApproximateTextMeasurer::default()),
@@ -133,6 +148,11 @@ impl Ui {
         &self.theme
     }
 
+    /// The theme this UI follows.
+    ///
+    /// When the UI was built with [`Ui::new`], the signal is disposed as the `Ui` drops, and any
+    /// copy kept outside panics on the next read. A signal passed to [`Ui::with_theme_signal`]
+    /// is not disposed.
     pub fn theme_signal(&self) -> Signal<Arc<Theme>> {
         self.theme_signal
     }
@@ -316,6 +336,14 @@ impl Ui {
             .expect("children were just inserted into the layout tree");
         self.nodes[id.index()].children = child_ids;
         id
+    }
+}
+
+impl Drop for Ui {
+    fn drop(&mut self) {
+        if self.owns_theme {
+            self.theme_signal.dispose();
+        }
     }
 }
 

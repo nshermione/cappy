@@ -252,7 +252,14 @@ fn field_init(field: &Field, kind: &FieldKind, default_value: bool) -> TokenStre
     match kind {
         FieldKind::Event => quote!(#name: ::cappy::Listener::empty()),
         FieldKind::Slot(index) => quote!(#name: ::cappy::Slot::new(#index)),
-        FieldKind::State | FieldKind::Prop if default_value => {
+        FieldKind::Prop if default_value => {
+            quote!(
+                #name: <#ty as ::cappy::IntoReactive>::into_prop_default(
+                    <#ty as ::core::default::Default>::default()
+                )
+            )
+        }
+        FieldKind::State if default_value => {
             quote!(#name: ::cappy::reactive(<#ty as ::core::default::Default>::default()))
         }
         FieldKind::State | FieldKind::Prop => quote!(#name: ::cappy::reactive(#name)),
@@ -275,7 +282,11 @@ fn setter(field: &Field, kind: &FieldKind) -> Option<TokenStream> {
             where
                 __Value: ::cappy::PropInput<#ty, __Marker>,
             {
+                let previous = self.#name;
                 ::cappy::PropInput::apply(value, &mut self.#name);
+                if previous != self.#name {
+                    ::cappy::RetirePlaceholder::dispose_if_placeholder(previous);
+                }
                 self
             }
         }),

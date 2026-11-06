@@ -17,11 +17,22 @@ use std::rc::{Rc, Weak};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct BindingId(pub(crate) u32);
 
+/// One signal a binding read the last time it ran.
+#[derive(Clone, Copy)]
+struct SignalKey {
+    index: u32,
+    generation: u32,
+}
+
 /// Bindings whose dependencies changed and must be re-evaluated.
+///
+/// `sources` records the signals each binding subscribed to. The next run detaches those
+/// subscriptions before reading again, and dropping the queue detaches whatever is left.
 #[derive(Default)]
 pub(crate) struct BindingQueue {
     pending: RefCell<Vec<BindingId>>,
     waker: RefCell<Option<Rc<dyn Fn()>>>,
+    sources: RefCell<Vec<Vec<SignalKey>>>,
 }
 
 impl BindingQueue {
@@ -53,6 +64,45 @@ impl BindingQueue {
                 waker();
             }
         }
+    }
+
+    fn record(&self, binding: BindingId, index: u32, generation: u32) {
+        let mut sources = self.sources.borrow_mut();
+        let slot = binding.0 as usize;
+        if sources.len() <= slot {
+            sources.resize_with(slot + 1, Vec::new);
+        }
+        let signals = &mut sources[slot];
+        if signals
+            .iter()
+            .any(|source| source.index == index && source.generation == generation)
+        {
+            return;
+        }
+        signals.push(SignalKey { index, generation });
+    }
+
+    fn take_sources(&self, binding: BindingId) -> Vec<SignalKey> {
+        let mut sources = self.sources.borrow_mut();
+        sources
+            .get_mut(binding.0 as usize)
+            .map(std::mem::take)
+            .unwrap_or_default()
+    }
+}
+
+impl Drop for BindingQueue {
+    fn drop(&mut self) {
+        let sources = std::mem::take(&mut *self.sources.borrow_mut());
+        let queue = self as *const Self;
+        RUNTIME.with(|runtime| {
+            for (binding, signals) in sources.into_iter().enumerate() {
+                let binding = BindingId(u32::try_from(binding).expect("too many bindings"));
+                for source in signals {
+                    runtime.remove_binding(source.index, source.generation, queue, binding);
+                }
+            }
+        });
     }
 }
 
@@ -90,6 +140,8 @@ type SharedValue = Rc<RefCell<Box<dyn Any>>>;
 
 struct SignalSlot {
     generation: u32,
+    /// Created for a component prop default. A setter disposes it when another handle replaces it.
+    ephemeral: bool,
     value: SharedValue,
     subscribers: Vec<Observer>,
 }
@@ -110,7 +162,7 @@ const DEAD_SIGNAL: &str =
     "signal was disposed, or used on a thread other than the one that created it";
 
 impl Runtime {
-    fn create(&self, value: Box<dyn Any>) -> (u32, u32) {
+    fn create(&self, value: Box<dyn Any>, ephemeral: bool) -> (u32, u32) {
         let generation = {
             let mut next = self.next_generation.borrow_mut();
             *next = next.wrapping_add(1);
@@ -118,6 +170,7 @@ impl Runtime {
         };
         let slot = SignalSlot {
             generation,
+            ephemeral,
             value: Rc::new(RefCell::new(value)),
             subscribers: Vec::new(),
         };
@@ -151,8 +204,8 @@ impl Runtime {
         } else {
             None
         };
-        self.with_slot(index, generation, |slot| {
-            if let Some(observer) = observer
+        let value = self.with_slot(index, generation, |slot| {
+            if let Some(observer) = observer.clone()
                 && !slot
                     .subscribers
                     .iter()
@@ -161,7 +214,58 @@ impl Runtime {
                 slot.subscribers.push(observer);
             }
             slot.value.clone()
-        })
+        });
+        if let Some(observer) = observer
+            && let Some(queue) = observer.queue.upgrade()
+        {
+            queue.record(observer.binding, index, generation);
+        }
+        value
+    }
+
+    /// Removes one binding from a signal. A disposed or reused slot is left alone.
+    fn remove_subscriber(&self, index: u32, generation: u32, observer: &Observer) {
+        self.remove_binding(index, generation, observer.queue.as_ptr(), observer.binding);
+    }
+
+    fn remove_binding(
+        &self,
+        index: u32,
+        generation: u32,
+        queue: *const BindingQueue,
+        binding: BindingId,
+    ) {
+        let mut slots = self.slots.borrow_mut();
+        let Some(slot) = slots.get_mut(index as usize).and_then(Option::as_mut) else {
+            return;
+        };
+        if slot.generation != generation {
+            return;
+        }
+        slot.subscribers
+            .retain(|existing| existing.binding != binding || existing.queue.as_ptr() != queue);
+    }
+
+    fn dispose_if_placeholder(&self, index: u32, generation: u32) {
+        let ephemeral = self
+            .slots
+            .borrow()
+            .get(index as usize)
+            .and_then(Option::as_ref)
+            .is_some_and(|slot| slot.generation == generation && slot.ephemeral);
+        if ephemeral {
+            self.dispose(index, generation);
+        }
+    }
+
+    fn hold(&self, index: u32, generation: u32) {
+        let mut slots = self.slots.borrow_mut();
+        let Some(slot) = slots.get_mut(index as usize).and_then(Option::as_mut) else {
+            return;
+        };
+        if slot.generation == generation {
+            slot.ephemeral = false;
+        }
     }
 
     fn subscribers(&self, index: u32, generation: u32) -> Vec<Observer> {
@@ -184,50 +288,37 @@ impl Runtime {
     }
 }
 
-// #region agent log
-#[cfg(test)]
-pub(crate) fn debug_signal_occupancy() -> (usize, usize, usize) {
+/// Drops the subscriptions this binding recorded last time, before `scope` reads again.
+fn detach(observer: &Observer) {
+    let Some(queue) = observer.queue.upgrade() else {
+        return;
+    };
+    let sources = queue.take_sources(observer.binding);
     RUNTIME.with(|runtime| {
-        let slots = runtime.slots.borrow();
-        let occupied = slots.iter().filter(|slot| slot.is_some()).count();
-        let free = runtime.free_slots.borrow().len();
-        (occupied, slots.len(), free)
-    })
+        for source in sources {
+            runtime.remove_subscriber(source.index, source.generation, observer);
+        }
+    });
 }
 
-#[cfg(test)]
-pub(crate) fn debug_signal_alive<T: 'static>(signal: Signal<T>) -> bool {
-    RUNTIME.with(|runtime| {
-        runtime
-            .slots
-            .borrow()
-            .get(signal.index as usize)
-            .and_then(|slot| slot.as_ref())
-            .is_some_and(|slot| slot.generation == signal.generation)
-    })
-}
+struct RestoreObserver(Option<Observer>);
 
-#[cfg(test)]
-pub(crate) fn debug_subscriber_count<T: 'static>(signal: Signal<T>) -> usize {
-    RUNTIME.with(|runtime| {
-        runtime
-            .slots
-            .borrow()
-            .get(signal.index as usize)
-            .and_then(|slot| slot.as_ref())
-            .filter(|slot| slot.generation == signal.generation)
-            .map(|slot| slot.subscribers.len())
-            .unwrap_or(0)
-    })
+impl Drop for RestoreObserver {
+    fn drop(&mut self) {
+        let previous = self.0.take();
+        RUNTIME.with(|runtime| *runtime.current_observer.borrow_mut() = previous);
+    }
 }
-// #endregion
 
 /// Runs `scope` with `observer` as the current subscriber, restoring the previous one afterwards.
+///
+/// Subscriptions from the previous run of this binding are removed first. Reads inside `scope`
+/// subscribe again, so a signal the binding no longer reads loses this observer.
 pub(crate) fn track<R>(observer: Observer, scope: impl FnOnce() -> R) -> R {
+    detach(&observer);
     let previous = RUNTIME.with(|runtime| runtime.current_observer.replace(Some(observer)));
-    let result = scope();
-    RUNTIME.with(|runtime| *runtime.current_observer.borrow_mut() = previous);
-    result
+    let _restore = RestoreObserver(previous);
+    scope()
 }
 
 /// A reactive value. Cheap to copy; all copies refer to the same value.
@@ -272,7 +363,17 @@ pub fn signal<T: 'static>(value: T) -> Signal<T> {
 
 impl<T: 'static> Signal<T> {
     pub fn new(value: T) -> Self {
-        let (index, generation) = RUNTIME.with(|runtime| runtime.create(Box::new(value)));
+        Self::create(value, false)
+    }
+
+    /// A prop default. The component setter disposes it when another handle replaces it.
+    fn placeholder(value: T) -> Self {
+        Self::create(value, true)
+    }
+
+    fn create(value: T, ephemeral: bool) -> Self {
+        let (index, generation) =
+            RUNTIME.with(|runtime| runtime.create(Box::new(value), ephemeral));
         Self {
             index,
             generation,
@@ -310,8 +411,19 @@ impl<T: 'static> Signal<T> {
     }
 
     /// Frees the value. Using any copy of this signal afterwards panics.
+    ///
+    /// A second call on any copy is a no-op: the slot is already on the free list, and a new
+    /// signal that reused the index has a different generation.
     pub fn dispose(self) {
         RUNTIME.with(|runtime| runtime.dispose(self.index, self.generation));
+    }
+
+    fn dispose_if_placeholder(self) {
+        RUNTIME.with(|runtime| runtime.dispose_if_placeholder(self.index, self.generation));
+    }
+
+    fn hold(self) {
+        RUNTIME.with(|runtime| runtime.hold(self.index, self.generation));
     }
 
     fn read_value<R>(&self, track: bool, read: impl FnOnce(&T) -> R) -> R {
@@ -379,6 +491,24 @@ impl<T: PartialEq + 'static> PartialEq<T> for Reactive<T> {
 }
 
 impl<T: 'static> Reactive<T> {
+    /// A component prop default. The setter disposes this signal when another handle replaces it.
+    /// [`ByValue`](crate::ByValue) keeps the signal and clears that mark.
+    #[must_use]
+    pub fn placeholder(value: T) -> Self {
+        Self {
+            inner: Signal::placeholder(value),
+        }
+    }
+
+    /// Frees this signal when it is still a [`placeholder`](Self::placeholder).
+    pub fn dispose_if_placeholder(self) {
+        self.inner.dispose_if_placeholder();
+    }
+
+    pub(crate) fn hold(&self) {
+        self.inner.hold();
+    }
+
     /// Reads the value and subscribes the current tracking scope.
     pub fn with<R>(&self, read: impl FnOnce(&T) -> R) -> R {
         self.inner.with(read)
@@ -409,6 +539,26 @@ pub trait IntoReactive {
 
     /// Converts this value into its tracked form.
     fn into_reactive(self) -> Self::Output;
+
+    /// Prop default. Primitives, [`String`] and [`Option`] allocate a placeholder the setter can
+    /// dispose when it switches the prop to another handle. Other values use [`into_reactive`](Self::into_reactive).
+    fn into_prop_default(self) -> Self::Output
+    where
+        Self: Sized,
+    {
+        self.into_reactive()
+    }
+}
+
+/// Drops a prop placeholder after a setter replaces it with a different handle.
+pub trait RetirePlaceholder {
+    fn dispose_if_placeholder(self);
+}
+
+impl<T: 'static> RetirePlaceholder for Reactive<T> {
+    fn dispose_if_placeholder(self) {
+        Reactive::dispose_if_placeholder(self);
+    }
 }
 
 /// Tracks `value`.
@@ -429,6 +579,10 @@ macro_rules! primitive_reactive {
                 fn into_reactive(self) -> Self::Output {
                     Reactive { inner: signal(self) }
                 }
+
+                fn into_prop_default(self) -> Self::Output {
+                    Reactive::placeholder(self)
+                }
             }
         )*
     };
@@ -446,6 +600,10 @@ impl IntoReactive for String {
             inner: signal(self),
         }
     }
+
+    fn into_prop_default(self) -> Self::Output {
+        Reactive::placeholder(self)
+    }
 }
 
 impl<T: 'static> IntoReactive for Option<T> {
@@ -455,6 +613,10 @@ impl<T: 'static> IntoReactive for Option<T> {
         Reactive {
             inner: signal(self),
         }
+    }
+
+    fn into_prop_default(self) -> Self::Output {
+        Reactive::placeholder(self)
     }
 }
 
@@ -621,155 +783,160 @@ mod tests {
         assert_eq!(reactive(wrapped), wrapped);
     }
 
-    // #region agent log
-    fn agent_log(hypothesis_id: &str, message: &str, data: String) {
-        use std::io::Write;
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_millis())
-            .unwrap_or(0);
-        let line = format!(
-            "{{\"sessionId\":\"c37ca8\",\"runId\":\"probe\",\"hypothesisId\":\"{hypothesis_id}\",\"location\":\"cappy-core/src/reactive.rs\",\"message\":{message_json},\"data\":{data},\"timestamp\":{timestamp}}}\n",
-            message_json = format!("\"{}\"", message.replace('"', "'")),
-        );
-        if let Ok(mut file) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(r"d:\projects\rs-gui\.cursor\debug-c37ca8.log")
-        {
-            let _ = file.write_all(line.as_bytes());
+    fn occupied_slots() -> usize {
+        RUNTIME.with(|runtime| {
+            runtime
+                .slots
+                .borrow()
+                .iter()
+                .filter(|slot| slot.is_some())
+                .count()
+        })
+    }
+
+    fn signal_alive<T: 'static>(signal: Signal<T>) -> bool {
+        RUNTIME.with(|runtime| {
+            runtime
+                .slots
+                .borrow()
+                .get(signal.index as usize)
+                .and_then(|slot| slot.as_ref())
+                .is_some_and(|slot| slot.generation == signal.generation)
+        })
+    }
+
+    fn subscriber_count<T: 'static>(signal: Signal<T>) -> usize {
+        RUNTIME.with(|runtime| {
+            runtime
+                .slots
+                .borrow()
+                .get(signal.index as usize)
+                .and_then(|slot| slot.as_ref())
+                .filter(|slot| slot.generation == signal.generation)
+                .map(|slot| slot.subscribers.len())
+                .unwrap_or(0)
+        })
+    }
+
+    /// The component setter: by-value writes through, by-handle replaces and retires a placeholder.
+    fn apply_prop<T, Value, Marker>(slot: &mut Reactive<T>, value: Value)
+    where
+        T: 'static + PartialEq,
+        Value: crate::PropInput<T, Marker>,
+        Reactive<T>: PartialEq,
+    {
+        let previous = *slot;
+        value.apply(slot);
+        if previous != *slot {
+            previous.dispose_if_placeholder();
         }
     }
 
     #[test]
-    fn memory_probe_dynamic_slots() {
-        let (occupied_before, _, _) = debug_signal_occupancy();
-        {
-            let _dropped = signal(String::from("temporary"));
-        }
-        let (occupied_after_drop, _, _) = debug_signal_occupancy();
-        let kept = signal(1);
-        kept.dispose();
-        let (occupied_after_dispose, _, free_after_dispose) = debug_signal_occupancy();
-        agent_log(
-            "A",
-            "signal drop vs dispose",
-            format!(
-                "{{\"occupiedBefore\":{occupied_before},\"occupiedAfterDrop\":{occupied_after_drop},\"dropRetained\":{},\"occupiedAfterDispose\":{occupied_after_dispose},\"freeAfterDispose\":{free_after_dispose}}}",
-                occupied_after_drop == occupied_before + 1
-            ),
-        );
-
-        let (listeners_before, handlers_before) = crate::listener::debug_listener_occupancy();
-        {
-            let listener = crate::Listener::<String>::empty();
-            listener.set(|value| {
-                let _kept = value.clone();
-            });
-        }
-        let (listeners_after, handlers_after) = crate::listener::debug_listener_occupancy();
-        agent_log(
-            "B",
-            "listener drop keeps slot and handler",
-            format!(
-                "{{\"slotsBefore\":{listeners_before},\"slotsAfter\":{listeners_after},\"handlersBefore\":{handlers_before},\"handlersAfter\":{handlers_after}}}"
-            ),
-        );
-
-        let (before_prop, _, _) = debug_signal_occupancy();
-        let mut slot = reactive(String::from("default-prop"));
-        let orphan = slot.inner;
-        let parent = reactive(String::from("parent"));
-        crate::PropInput::<String, crate::ByHandle>::apply(parent, &mut slot);
-        let orphan_alive = debug_signal_alive(orphan);
-        let (after_prop, _, _) = debug_signal_occupancy();
-        agent_log(
-            "C",
-            "by-handle prop replace",
-            format!(
-                "{{\"occupiedBefore\":{before_prop},\"occupiedAfter\":{after_prop},\"orphanAlive\":{orphan_alive},\"slotNowAliasesParent\":{}}}",
-                slot.inner == parent.inner
-            ),
-        );
-
+    fn binding_drops_signals_it_stops_reading() {
         let binding_queue = queue();
         let flag = signal(true);
         let left = signal(1);
         let right = signal(2);
-        let eval = || {
+        let run = || {
             track(Observer::new(&binding_queue, BindingId(1)), || {
                 if flag.get() { left.get() } else { right.get() }
             });
         };
-        eval();
-        let left_after_first = debug_subscriber_count(left);
-        let right_after_first = debug_subscriber_count(right);
+        run();
+        assert_eq!(subscriber_count(flag), 1);
+        assert_eq!(subscriber_count(left), 1);
+        assert_eq!(subscriber_count(right), 0);
         flag.set(false);
-        eval();
-        let left_after_second = debug_subscriber_count(left);
-        let right_after_second = debug_subscriber_count(right);
-        agent_log(
-            "D",
-            "binding does not unsubscribe",
-            format!(
-                "{{\"leftAfterFirst\":{left_after_first},\"rightAfterFirst\":{right_after_first},\"leftAfterSecond\":{left_after_second},\"rightAfterSecond\":{right_after_second}}}"
-            ),
-        );
+        run();
+        assert_eq!(subscriber_count(flag), 1);
+        assert_eq!(subscriber_count(left), 0);
+        assert_eq!(subscriber_count(right), 1);
+    }
 
+    #[test]
+    fn dropping_the_queue_detaches_subscribers() {
         let watched = signal(0);
         {
-            let ephemeral = queue();
-            track(Observer::new(&ephemeral, BindingId(7)), || watched.get());
+            let binding_queue = queue();
+            track(Observer::new(&binding_queue, BindingId(7)), || {
+                watched.get()
+            });
+            assert_eq!(subscriber_count(watched), 1);
         }
-        let subscribers_after_queue_drop = debug_subscriber_count(watched);
-        watched.set(1);
-        let subscribers_after_write = debug_subscriber_count(watched);
-        agent_log(
-            "E",
-            "dead observers linger until write",
-            format!(
-                "{{\"afterQueueDrop\":{subscribers_after_queue_drop},\"afterWrite\":{subscribers_after_write}}}"
-            ),
-        );
-
-        let (before_ui, _, _) = debug_signal_occupancy();
-        let theme_signal;
-        {
-            let ui = crate::Ui::new(crate::div(), crate::Theme::light());
-            theme_signal = ui.theme_signal();
-        }
-        let (after_ui_drop, _, _) = debug_signal_occupancy();
-        agent_log(
-            "G",
-            "Ui::new theme signal survives Ui drop",
-            format!(
-                "{{\"occupiedBefore\":{before_ui},\"occupiedAfter\":{after_ui_drop},\"themeAliveAfterDrop\":{}}}",
-                debug_signal_alive(theme_signal)
-            ),
-        );
-
-        let cycled = queue();
-        let captured = Rc::clone(&cycled);
-        cycled.set_waker(Some(Rc::new(move || {
-            let _pin = &captured;
-        })));
-        let cycled_weak = Rc::downgrade(&cycled);
-        drop(cycled);
-        let plain = queue();
-        plain.set_waker(Some(Rc::new(|| {})));
-        let plain_weak = Rc::downgrade(&plain);
-        drop(plain);
-        agent_log(
-            "F",
-            "waker capture cycle",
-            format!(
-                "{{\"capturingWakerStrongCount\":{},\"plainWakerStrongCount\":{}}}",
-                cycled_weak.strong_count(),
-                plain_weak.strong_count()
-            ),
-        );
+        assert_eq!(subscriber_count(watched), 0);
     }
-    // #endregion
+
+    #[test]
+    fn placeholder_replaced_by_a_handle_returns_its_slot() {
+        let before = occupied_slots();
+        let mut slot = Reactive::placeholder(String::new());
+        let placeholder = slot.inner;
+        let parent = reactive(String::from("parent"));
+        apply_prop(&mut slot, parent);
+        assert_eq!(slot, parent);
+        assert!(!signal_alive(placeholder));
+        assert!(signal_alive(parent.inner));
+        assert_eq!(occupied_slots(), before + 1);
+
+        let reused = signal(String::from("next"));
+        assert_eq!(reused.index, placeholder.index);
+        assert_ne!(reused.generation, placeholder.generation);
+    }
+
+    #[test]
+    fn by_value_keeps_the_placeholder_slot() {
+        let mut slot = Reactive::placeholder(String::new());
+        let placeholder = slot.inner;
+        apply_prop(&mut slot, "once");
+        assert_eq!(slot.get(), "once");
+        assert!(signal_alive(placeholder));
+
+        let parent = reactive(String::from("parent"));
+        apply_prop(&mut slot, parent);
+        assert_eq!(slot, parent);
+        assert!(signal_alive(placeholder));
+        assert!(signal_alive(parent.inner));
+    }
+
+    #[test]
+    fn disposing_a_signal_twice_is_a_no_op() {
+        let value = signal(1);
+        let before = occupied_slots();
+        value.dispose();
+        value.dispose();
+        assert!(!signal_alive(value));
+        assert_eq!(occupied_slots(), before - 1);
+    }
+
+    #[test]
+    fn ui_new_disposes_its_theme_signal() {
+        use crate::{Theme, Ui, div};
+
+        let before = occupied_slots();
+        let theme = {
+            let ui = Ui::new(div(), Theme::light());
+            let theme = ui.theme_signal();
+            assert!(signal_alive(theme));
+            assert_eq!(occupied_slots(), before + 1);
+            theme
+        };
+        assert!(!signal_alive(theme));
+        assert_eq!(occupied_slots(), before);
+    }
+
+    #[test]
+    fn with_theme_signal_keeps_the_caller_signal() {
+        use std::sync::Arc;
+
+        use crate::{Theme, Ui, div};
+
+        let theme = signal(Arc::new(Theme::light()));
+        let before = occupied_slots();
+        drop(Ui::with_theme_signal(div(), theme));
+        assert!(signal_alive(theme));
+        assert_eq!(occupied_slots(), before);
+    }
 
     #[test]
     fn display_read_tracks_in_a_binding() {

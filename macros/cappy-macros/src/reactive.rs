@@ -194,6 +194,10 @@ pub(crate) fn tracked_impls(
                 *self
             }
         }
+
+        impl #impl_generics ::cappy::RetirePlaceholder for #name #type_generics #where_clause {
+            fn dispose_if_placeholder(self) {}
+        }
     }
 }
 

@@ -32,6 +32,7 @@ where
 {
     fn apply(self, slot: &mut Reactive<T>) {
         slot.set(self.into());
+        slot.hold();
     }
 }
 
