@@ -378,7 +378,7 @@ fn prepare_frame_before_update_is_none() {
 }
 
 #[test]
-fn component_stylesheet_stays_on_its_element() {
+fn component_stylesheet_covers_the_rendered_tree() {
     use std::sync::LazyLock;
 
     use crate::Component;
@@ -396,6 +396,14 @@ fn component_stylesheet_stays_on_its_element() {
         &SHEET
     }
 
+    fn own_sheet() -> &'static Stylesheet {
+        static SHEET: LazyLock<Stylesheet> = LazyLock::new(|| {
+            Stylesheet::default()
+                .with_class("card", StyleRefinement::default().background(Color::WHITE))
+        });
+        &SHEET
+    }
+
     struct Panel;
 
     impl Component for Panel {
@@ -404,10 +412,10 @@ fn component_stylesheet_stays_on_its_element() {
         }
 
         fn render(self) -> Element {
-            div()
-                .class("card")
-                .key("panel")
-                .child(div().class("card").key("inner"))
+            div().class("card").key("panel").children([
+                div().class("card").key("inner"),
+                div().class("card").key("own").stylesheet(own_sheet()),
+            ])
         }
     }
 
@@ -415,6 +423,8 @@ fn component_stylesheet_stays_on_its_element() {
     assert!(!ui.theme().has_class("panel-skin"));
     let panel = ui.node_style(ui.find_by_key("panel").unwrap()).unwrap();
     let inner = ui.node_style(ui.find_by_key("inner").unwrap()).unwrap();
+    let own = ui.node_style(ui.find_by_key("own").unwrap()).unwrap();
     assert_eq!(panel.visual.background, Color::BLACK);
-    assert_eq!(inner.visual.background, ui.theme().tokens().colors.surface);
+    assert_eq!(inner.visual.background, Color::BLACK);
+    assert_eq!(own.visual.background, Color::WHITE);
 }

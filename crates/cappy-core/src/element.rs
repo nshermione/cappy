@@ -170,8 +170,9 @@ impl fmt::Debug for Element {
 
 /// A reusable piece of UI that renders to an [`Element`].
 ///
-/// [`stylesheet`](Component::stylesheet) is resolved only on the element `render` returns.
-/// It is not registered on the theme and child elements do not see it.
+/// [`stylesheet`](Component::stylesheet) is stamped onto every node `render` returns that does not
+/// already carry a sheet. It is not registered on the theme. A class the sheet does not define
+/// still resolves against the theme. [`Stylesheet::empty`] is not stamped.
 pub trait Component {
     fn render(self) -> Element;
 
@@ -182,7 +183,21 @@ pub trait Component {
 
 impl<C: Component> From<C> for Element {
     fn from(component: C) -> Self {
-        component.render().stylesheet(C::stylesheet())
+        let mut element = component.render();
+        let sheet = C::stylesheet();
+        if !std::ptr::eq(sheet, Stylesheet::empty()) {
+            stamp_stylesheet(&mut element, sheet);
+        }
+        element
+    }
+}
+
+fn stamp_stylesheet(element: &mut Element, sheet: &'static Stylesheet) {
+    if element.stylesheet.is_none() {
+        element.stylesheet = Some(sheet);
+    }
+    for child in &mut element.children {
+        stamp_stylesheet(child, sheet);
     }
 }
 

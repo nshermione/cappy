@@ -1,0 +1,5 @@
+error: `class` is reserved for the root element
+ --> tests/compile_fail/component_reserved_field.rs:5:5
+  |
+5 |     class: String,
+  |     ^^^^^

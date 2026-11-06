@@ -1,0 +1,5 @@
+error: a field cannot be both #[prop] and #[event]
+ --> tests/compile_fail/component_prop_and_event.rs:7:5
+  |
+7 |     on_click: String,
+  |     ^^^^^^^^

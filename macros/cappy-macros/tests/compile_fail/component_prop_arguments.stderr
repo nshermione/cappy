@@ -1,0 +1,5 @@
+error: #[prop] does not take arguments
+ --> tests/compile_fail/component_prop_arguments.rs:5:7
+  |
+5 |     #[prop(skip)]
+  |       ^^^^

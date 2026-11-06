@@ -8,6 +8,7 @@ use cappy::Class as ThemeClass;
 use cappy::ClickEvent;
 use cappy::prelude::*;
 
+use super::badge::Badge;
 use super::style::Class;
 
 const TILE_COUNT: usize = 6;
@@ -48,6 +49,7 @@ fn header(theme: Reactive<Arc<Theme>>, themes: Rc<[Arc<Theme>]>) -> Element {
                 text("cappy playground", class = ThemeClass::Title)
                 text("Retained UI on wgpu that repaints only what changed", class = ThemeClass::Muted)
             }
+            { demo_badge() }
             div(class = ThemeClass::Btn, key = "theme-toggle", on_click = next_theme) {
                 text(:format!("Theme: {}", theme.with(|current| current.name().to_owned())))
             }
@@ -64,6 +66,17 @@ struct CounterState {
 struct AppState {
     counter: CounterState,
     version: i64,
+}
+
+fn demo_badge() -> Element {
+    let label = reactive(String::from("Badge"));
+    ui! {
+        @Badge(
+            label = label,
+            on_click = move |value: &String| label.set(format!("{value}!")),
+            key = "demo-badge",
+        )
+    }
 }
 
 fn counter_card() -> Element {

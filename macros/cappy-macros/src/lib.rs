@@ -4,8 +4,11 @@
 //! - `#[derive(ClassName)]` turns a fieldless enum into typo-proof theme class names.
 //! - `stylesheet!` defines those class names together with their style rules.
 //! - `#[reactive]` rewrites a struct in place so each field is tracked and the struct keeps its name.
+//! - `#[component]` is a reactive struct whose plain fields are state, `#[prop]` fields are inputs
+//!   and `#[event]` fields are listeners.
 
 mod class_name;
+mod component;
 mod props;
 mod reactive;
 mod stylesheet;
@@ -71,6 +74,8 @@ pub fn derive_class_name(input: TokenStream) -> TokenStream {
 /// Rewrites a struct in place. Each field type `T` becomes its tracked form, and the struct keeps
 /// its name. `new` passes each argument through `reactive`. A field that is already reactive stays
 /// that handle.
+///
+/// A `#[component]` struct is already tracked. Remove `#[reactive]` from it.
 #[proc_macro_attribute]
 pub fn reactive(attr: TokenStream, item: TokenStream) -> TokenStream {
     if !attr.is_empty() {
@@ -83,6 +88,27 @@ pub fn reactive(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
     let input = parse_macro_input!(item as DeriveInput);
     reactive::expand(&input)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+/// A single-file component. Plain fields become reactive state, `#[prop]` fields are parent
+/// inputs, and `#[event]` fields are listeners. The macro implements [`Default`](core::default::Default).
+/// Do not also derive `Default` or apply `#[reactive]`. `render` stays a handwritten `Component` impl.
+///
+/// `class`, `style` and `key` are reserved for the root element.
+#[proc_macro_attribute]
+pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
+    if !attr.is_empty() {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "#[component] does not take arguments",
+        )
+        .into_compile_error()
+        .into();
+    }
+    let input = parse_macro_input!(item as DeriveInput);
+    component::expand(&input)
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }

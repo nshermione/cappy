@@ -87,7 +87,8 @@ impl ClassRule {
 }
 
 /// Named classes with `:hover` and `:active` variants. A [`Theme`] shares one of these with every
-/// node. A component may carry its own, and that sheet applies only to the component's element.
+/// node. A component may carry its own. That sheet is stamped onto the rendered tree. A class it
+/// does not define falls through to the theme.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Stylesheet {
     classes: HashMap<String, ClassRule>,

@@ -32,7 +32,7 @@ pub use cappy_core::*;
 #[cfg(feature = "basic")]
 pub use cappy_dsl::{style, theme, ui};
 #[cfg(feature = "basic")]
-pub use cappy_macros::{ClassName, Props, reactive, stylesheet};
+pub use cappy_macros::{ClassName, Props, component, reactive, stylesheet};
 
 /// Fonts, shaping and text measurement shared by the renderers.
 #[cfg(feature = "basic")]
@@ -72,5 +72,5 @@ pub mod prelude {
         text, text_dyn,
     };
     pub use cappy_dsl::{style, theme, ui};
-    pub use cappy_macros::{ClassName, Props, reactive, stylesheet};
+    pub use cappy_macros::{ClassName, Props, component, reactive, stylesheet};
 }

@@ -3,8 +3,10 @@
 //! - [`theme`]: design tokens (colors, spacing, radius, font sizes), the only thing that differs
 //!   between themes;
 //! - [`style`]: the stylesheet, i.e. the classes the layout uses, applied to every theme;
-//! - [`layout`]: the node tree, its state and its event handlers, with no styling of its own.
+//! - [`layout`]: the node tree, its state and its event handlers, with no styling of its own;
+//! - [`badge`]: a single-file component with its own state, props, event and sheet.
 
+mod badge;
 mod layout;
 mod style;
 mod theme;

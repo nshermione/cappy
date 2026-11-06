@@ -1,0 +1,5 @@
+error: #[component] only supports structs with named fields
+ --> tests/compile_fail/component_on_enum.rs:4:6
+  |
+4 | enum Badge {
+  |      ^^^^^

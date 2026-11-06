@@ -190,6 +190,24 @@ fn embedded_expressions_iterators_functions_and_components() {
     assert_eq!(ui.node_text(ui.node_children(badge)[0]), Some("new"));
 }
 
+#[test]
+fn component_root_keeps_host_attributes_and_appended_children() {
+    assert_classes(
+        &ui! { @Badge(label = "new", class = ["wrap", "wide"]) },
+        r#"["badge", "wrap", "wide"]"#,
+    );
+    let ui = mounted(ui! {
+        @Badge(label = "new", class = "wrap", key = "hosted") {
+            text("extra", key = "extra")
+        }
+    });
+    assert!(ui.find_by_key("badge").is_none());
+    let hosted = ui.find_by_key("hosted").unwrap();
+    assert_eq!(ui.node_children(hosted).len(), 2);
+    assert_eq!(ui.node_text(ui.node_children(hosted)[0]), Some("new"));
+    assert_eq!(text_of(&ui, "extra").as_deref(), Some("extra"));
+}
+
 fn label(content: &str) -> Element {
     text(content).class("label")
 }

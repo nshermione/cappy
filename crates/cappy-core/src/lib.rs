@@ -6,7 +6,9 @@ mod binding;
 mod damage;
 mod element;
 mod event;
+mod listener;
 mod paint;
+mod prop;
 mod reactive;
 mod ui;
 
@@ -14,7 +16,9 @@ pub use binding::{Dynamic, IntoClasses, IntoStyle, IntoText};
 pub use damage::{Damage, DamageTracker};
 pub use element::{Component, Element, div, text, text_dyn};
 pub use event::{ButtonState, ClickEvent, CursorIcon, InputEvent, PointerButton};
+pub use listener::Listener;
 pub use paint::{Primitive, QuadPrimitive, RenderFrame, TextPrimitive};
+pub use prop::{ByHandle, ByValue, PropInput};
 pub use reactive::{IntoReactive, Reactive, Signal, reactive, signal};
 pub use ui::{FrameInput, NodeId, Ui, UpdateOutcome};
 

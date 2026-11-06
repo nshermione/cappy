@@ -31,8 +31,10 @@ pub mod __private {
 /// - `name(content, field = value, ...) { children }` calls the function `name` in scope, so
 ///   `div`, `text` and your own element functions all resolve (and go to definition) the same
 ///   way. The leading `content` argument, the fields and the children are all optional.
-/// - `@Type(field = value, ...)` builds `Type::default()` and sets fields, e.g. a struct using
-///   `#[derive(Props)]` that implements [`Component`](cappy_core::Component).
+/// - `@Type(field = value, ...) { children }` builds `Type::default()` and sets fields, e.g. a
+///   struct using `#[derive(Props)]` or `#[component]` that implements
+///   [`Component`](cappy_core::Component). `class`, `style` and `key` are applied to the element
+///   `render` returns. Children are appended to that root.
 /// - `{ expression }` embeds an element; `{ ..iterator }` embeds every element it yields.
 ///
 /// Every `field = value` calls the builder method `field(value)`. A leading `:` makes the value
@@ -57,9 +59,13 @@ macro_rules! ui {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __ui_node {
-    (@ $type:ident $(:: $segment:ident)* $(( $($fields:tt)* ))? $(,)?) => {
-        $crate::__private::Element::from(
-            $crate::__ui_args!(@fields [<$type $(:: $segment)*>::default()] $($($fields)*)?)
+    (@ $type:ident $(:: $segment:ident)* $(( $($fields:tt)* ))? $({ $($children:tt)* })? $(,)?) => {
+        $crate::__ui_component!(
+            $type $(:: $segment)* ;
+            props [] ;
+            host [] ;
+            children [ $($($children)*)? ] ;
+            $($($fields)*)?
         )
     };
     ({ $element:expr } $(,)?) => {
@@ -68,6 +74,182 @@ macro_rules! __ui_node {
     ($name:ident $(( $($args:tt)* ))? $({ $($children:tt)* })? $(,)?) => {
         $crate::__ui_children!(
             $crate::__ui_args!(@head $name ; $($($args)*)?) ; $($($children)*)?
+        )
+    };
+}
+
+/// Splits `@Type` arguments. `class`, `style` and `key` stay on the element `render` returns.
+/// Every other field is a setter on the component. Children are appended to that root.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ui_component {
+    (
+        $type:ident $(:: $segment:ident)* ;
+        props [ $($props:tt)* ] ;
+        host [ $($host:tt)* ] ;
+        children [ $($children:tt)* ] ;
+        class = [ $($class:expr),* $(,)? ] $(, $($rest:tt)*)?
+    ) => {
+        $crate::__ui_component!(
+            $type $(:: $segment)* ;
+            props [ $($props)* ] ;
+            host [ $($host)* class = [ $($class),* ], ] ;
+            children [ $($children)* ] ;
+            $($($rest)*)?
+        )
+    };
+    (
+        $type:ident $(:: $segment:ident)* ;
+        props [ $($props:tt)* ] ;
+        host [ $($host:tt)* ] ;
+        children [ $($children:tt)* ] ;
+        : class = [ $($class:expr),* $(,)? ] $(, $($rest:tt)*)?
+    ) => {
+        $crate::__ui_component!(
+            $type $(:: $segment)* ;
+            props [ $($props)* ] ;
+            host [ $($host)* : class = [ $($class),* ], ] ;
+            children [ $($children)* ] ;
+            $($($rest)*)?
+        )
+    };
+    (
+        $type:ident $(:: $segment:ident)* ;
+        props [ $($props:tt)* ] ;
+        host [ $($host:tt)* ] ;
+        children [ $($children:tt)* ] ;
+        class = $value:expr $(, $($rest:tt)*)?
+    ) => {
+        $crate::__ui_component!(
+            $type $(:: $segment)* ;
+            props [ $($props)* ] ;
+            host [ $($host)* class = $value, ] ;
+            children [ $($children)* ] ;
+            $($($rest)*)?
+        )
+    };
+    (
+        $type:ident $(:: $segment:ident)* ;
+        props [ $($props:tt)* ] ;
+        host [ $($host:tt)* ] ;
+        children [ $($children:tt)* ] ;
+        : class = $value:expr $(, $($rest:tt)*)?
+    ) => {
+        $crate::__ui_component!(
+            $type $(:: $segment)* ;
+            props [ $($props)* ] ;
+            host [ $($host)* : class = $value, ] ;
+            children [ $($children)* ] ;
+            $($($rest)*)?
+        )
+    };
+    (
+        $type:ident $(:: $segment:ident)* ;
+        props [ $($props:tt)* ] ;
+        host [ $($host:tt)* ] ;
+        children [ $($children:tt)* ] ;
+        style = $value:expr $(, $($rest:tt)*)?
+    ) => {
+        $crate::__ui_component!(
+            $type $(:: $segment)* ;
+            props [ $($props)* ] ;
+            host [ $($host)* style = $value, ] ;
+            children [ $($children)* ] ;
+            $($($rest)*)?
+        )
+    };
+    (
+        $type:ident $(:: $segment:ident)* ;
+        props [ $($props:tt)* ] ;
+        host [ $($host:tt)* ] ;
+        children [ $($children:tt)* ] ;
+        : style = $value:expr $(, $($rest:tt)*)?
+    ) => {
+        $crate::__ui_component!(
+            $type $(:: $segment)* ;
+            props [ $($props)* ] ;
+            host [ $($host)* : style = $value, ] ;
+            children [ $($children)* ] ;
+            $($($rest)*)?
+        )
+    };
+    (
+        $type:ident $(:: $segment:ident)* ;
+        props [ $($props:tt)* ] ;
+        host [ $($host:tt)* ] ;
+        children [ $($children:tt)* ] ;
+        key = $value:expr $(, $($rest:tt)*)?
+    ) => {
+        $crate::__ui_component!(
+            $type $(:: $segment)* ;
+            props [ $($props)* ] ;
+            host [ $($host)* key = $value, ] ;
+            children [ $($children)* ] ;
+            $($($rest)*)?
+        )
+    };
+    (
+        $type:ident $(:: $segment:ident)* ;
+        props [ $($props:tt)* ] ;
+        host [ $($host:tt)* ] ;
+        children [ $($children:tt)* ] ;
+        : key = $value:expr $(, $($rest:tt)*)?
+    ) => {
+        $crate::__ui_component!(
+            $type $(:: $segment)* ;
+            props [ $($props)* ] ;
+            host [ $($host)* : key = $value, ] ;
+            children [ $($children)* ] ;
+            $($($rest)*)?
+        )
+    };
+    (
+        $type:ident $(:: $segment:ident)* ;
+        props [ $($props:tt)* ] ;
+        host [ $($host:tt)* ] ;
+        children [ $($children:tt)* ] ;
+        : $field:ident = $value:expr $(, $($rest:tt)*)?
+    ) => {
+        $crate::__ui_component!(
+            $type $(:: $segment)* ;
+            props [ $($props)* : $field = $value, ] ;
+            host [ $($host)* ] ;
+            children [ $($children)* ] ;
+            $($($rest)*)?
+        )
+    };
+    (
+        $type:ident $(:: $segment:ident)* ;
+        props [ $($props:tt)* ] ;
+        host [ $($host:tt)* ] ;
+        children [ $($children:tt)* ] ;
+        $field:ident = $value:expr $(, $($rest:tt)*)?
+    ) => {
+        $crate::__ui_component!(
+            $type $(:: $segment)* ;
+            props [ $($props)* $field = $value, ] ;
+            host [ $($host)* ] ;
+            children [ $($children)* ] ;
+            $($($rest)*)?
+        )
+    };
+    (
+        $type:ident $(:: $segment:ident)* ;
+        props [ $($props:tt)* ] ;
+        host [ $($host:tt)* ] ;
+        children [ $($children:tt)* ] ;
+    ) => {
+        $crate::__ui_children!(
+            $crate::__ui_args!(
+                @fields
+                [
+                    $crate::__private::Element::from(
+                        $crate::__ui_args!(@fields [<$type $(:: $segment)*>::default()] $($props)*)
+                    )
+                ]
+                $($host)*
+            ) ;
+            $($children)*
         )
     };
 }
@@ -146,9 +328,21 @@ macro_rules! __ui_children {
     ($parent:expr ; { $child:expr } $($rest:tt)*) => {
         $crate::__ui_children!($parent.child($child) ; $($rest)*)
     };
+    ($parent:expr ; @ $type:ident $(:: $segment:ident)* ( $($props:tt)* ) { $($children:tt)* } $($rest:tt)*) => {
+        $crate::__ui_children!(
+            $parent.child($crate::__ui_node!(@ $type $(:: $segment)* ( $($props)* ) { $($children)* })) ;
+            $($rest)*
+        )
+    };
     ($parent:expr ; @ $type:ident $(:: $segment:ident)* ( $($props:tt)* ) $($rest:tt)*) => {
         $crate::__ui_children!(
             $parent.child($crate::__ui_node!(@ $type $(:: $segment)* ( $($props)* ))) ; $($rest)*
+        )
+    };
+    ($parent:expr ; @ $type:ident $(:: $segment:ident)* { $($children:tt)* } $($rest:tt)*) => {
+        $crate::__ui_children!(
+            $parent.child($crate::__ui_node!(@ $type $(:: $segment)* { $($children)* })) ;
+            $($rest)*
         )
     };
     ($parent:expr ; @ $type:ident $(:: $segment:ident)* $($rest:tt)*) => {
