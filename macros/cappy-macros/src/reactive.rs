@@ -2,7 +2,7 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{Data, DeriveInput, Field, Fields, Generics, Ident, spanned::Spanned};
 
-pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
+pub fn expand(input: &DeriveInput, singleton: bool) -> syn::Result<TokenStream> {
     if let Some(attr) = input
         .attrs
         .iter()
@@ -37,6 +37,8 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         })
         .collect();
     let tracked = tracked_impls(name, &generics, &copy_types);
+    let generic = !input.generics.params.is_empty();
+    let singleton = singleton.then(|| singleton_method(name, generic, &fields, &copy_types));
 
     Ok(quote! {
         #(#attrs)*
@@ -50,10 +52,87 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
                     #(#field_inits,)*
                 }
             }
+
+            #singleton
         }
 
         #tracked
     })
+}
+
+/// `singleton()` for `#[reactive(singleton)]`. The thread-local lives inside the function, so its
+/// name cannot leak into the module or collide with another struct.
+fn singleton_method(
+    name: &Ident,
+    generic: bool,
+    fields: &[&Field],
+    copy_types: &[TokenStream],
+) -> TokenStream {
+    let defaults = fields
+        .iter()
+        .map(|_| quote!(::core::default::Default::default()));
+    let mut bounds = Vec::new();
+    for field in fields {
+        let ty = &field.ty;
+        bounds.push(quote!(#ty: ::core::default::Default));
+    }
+    for ty in copy_types {
+        bounds.push(quote!(#ty: ::core::marker::Copy));
+    }
+    // A nested static cannot name `Self` or an outer type parameter. A concrete struct can name
+    // itself. A generic one keeps one map inside the function and selects its own entry.
+    if generic {
+        bounds.push(quote!(Self: 'static));
+    }
+    let where_clause = if bounds.is_empty() {
+        quote!()
+    } else {
+        quote!(where #(#bounds,)*)
+    };
+    let body = if generic {
+        quote! {
+            thread_local! {
+                static SHARED: ::std::cell::RefCell<
+                    ::std::collections::HashMap<
+                        ::std::any::TypeId,
+                        ::std::boxed::Box<dyn ::std::any::Any>,
+                    >,
+                > = ::std::cell::RefCell::new(::std::collections::HashMap::new());
+            }
+            SHARED.with(|slot| {
+                let mut values = slot.borrow_mut();
+                let id = ::std::any::TypeId::of::<Self>();
+                if let Some(existing) = values.get(&id) {
+                    return *existing
+                        .downcast_ref::<Self>()
+                        .expect("singleton stored under its own type");
+                }
+                let created = Self::new(#(#defaults),*);
+                values.insert(id, ::std::boxed::Box::new(created));
+                created
+            })
+        }
+    } else {
+        quote! {
+            thread_local! {
+                static SHARED: ::std::cell::Cell<Option<#name>> =
+                    const { ::std::cell::Cell::new(None) };
+            }
+            SHARED.with(|slot| {
+                if let Some(existing) = slot.get() {
+                    return existing;
+                }
+                let created = Self::new(#(#defaults),*);
+                slot.set(Some(created));
+                created
+            })
+        }
+    };
+    quote! {
+        pub fn singleton() -> Self #where_clause {
+            #body
+        }
+    }
 }
 
 pub(crate) fn named_fields<'a>(

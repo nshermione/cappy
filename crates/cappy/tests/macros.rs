@@ -127,6 +127,50 @@ impl Component for Badge {
     }
 }
 
+#[reactive(singleton)]
+struct SharedCount {
+    count: i64,
+}
+
+#[reactive(singleton)]
+struct SharedName {
+    name: String,
+}
+
+#[reactive(singleton)]
+struct Pair<T> {
+    value: T,
+}
+
+#[test]
+fn singleton_is_shared_and_new_is_separate() {
+    let shared = SharedCount::singleton();
+    shared.count.set(0);
+    let again = SharedCount::singleton();
+    shared.count.set(4);
+    assert_eq!(again.count.get(), 4);
+
+    let local = SharedCount::new(1);
+    assert_eq!(local.count.get(), 1);
+    local.count.set(9);
+    assert_eq!(shared.count.get(), 4);
+
+    let name = SharedName::singleton();
+    name.name.set(String::from("a"));
+    assert_eq!(SharedName::singleton().name.get(), "a");
+    assert_eq!(SharedName::new(String::from("b")).name.get(), "b");
+    assert_eq!(shared.count.get(), 4);
+    shared.count.set(0);
+
+    let ints = Pair::<i64>::singleton();
+    ints.value.set(3);
+    assert_eq!(Pair::<i64>::singleton().value.get(), 3);
+    assert!(!Pair::<bool>::singleton().value.get());
+    assert_eq!(Pair::new(9_i64).value.get(), 9);
+    assert_eq!(ints.value.get(), 3);
+    ints.value.set(0);
+}
+
 #[test]
 fn reactive_component_label_updates_after_mount() {
     let badge = Badge::new(String::from("new"));

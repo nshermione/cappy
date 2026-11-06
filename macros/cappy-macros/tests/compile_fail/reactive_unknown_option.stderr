@@ -1,0 +1,5 @@
+error: unknown #[reactive] option; expected `singleton`
+ --> tests/compile_fail/reactive_unknown_option.rs:3:12
+  |
+3 | #[reactive(other)]
+  |            ^^^^^

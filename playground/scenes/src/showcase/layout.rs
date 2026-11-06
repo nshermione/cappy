@@ -9,6 +9,7 @@ use cappy::ClickEvent;
 use cappy::prelude::*;
 
 use super::badge::Badge;
+use super::counter::Counter;
 use super::style::Class;
 
 const TILE_COUNT: usize = 6;
@@ -58,17 +59,6 @@ fn header(theme: Reactive<Arc<Theme>>, themes: Rc<[Arc<Theme>]>) -> Element {
     }
 }
 
-#[reactive]
-struct CounterState {
-    count: i64,
-}
-
-#[reactive]
-struct AppState {
-    counter: CounterState,
-    version: i64,
-}
-
 fn demo_badge() -> Element {
     let label = reactive(String::from("Badge"));
     let mark_clicked = move |value: &String| label.set(format!("{value}!"));
@@ -78,14 +68,19 @@ fn demo_badge() -> Element {
 }
 
 fn counter_card() -> Element {
-    let app_state = AppState::new(CounterState::new(0), 1);
-    let decrement = move |_: &ClickEvent| app_state.counter.count.update(|value| *value -= 1);
-    let increment = move |_: &ClickEvent| app_state.counter.count.update(|value| *value += 1);
-    let reset = move |_: &ClickEvent| app_state.counter.count.set(0);
+    let shared = Counter::singleton();
+    let mirror = Counter::singleton();
+    let local = Counter::new(0);
+    let decrement = move |_: &ClickEvent| shared.decrement();
+    let increment = move |_: &ClickEvent| shared.increment();
+    let reset = move |_: &ClickEvent| shared.reset();
+    let increment_local = move |_: &ClickEvent| local.increment();
     ui! {
         div(class = [ThemeClass::Card, Class::Grow]) {
             text("Counter", class = ThemeClass::Subtitle)
-            text(:format!("Count: {}", app_state.counter.count), key = "count", class = Class::Count)
+            text(:format!("Count: {}", shared.count), key = "count", class = Class::Count)
+            text(:format!("Count: {}", mirror.count), key = "count-mirror", class = ThemeClass::Muted)
+            text(:format!("Local: {}", local.count), key = "count-local", class = ThemeClass::Muted)
             div(class = ThemeClass::Row) {
                 div(class = ThemeClass::Btn, key = "decrement", on_click = decrement) {
                     text("-1")
@@ -95,6 +90,9 @@ fn counter_card() -> Element {
                 }
                 div(class = ThemeClass::Btn, key = "reset", on_click = reset) {
                     text("Reset")
+                }
+                div(class = ThemeClass::Btn, key = "local-increment", on_click = increment_local) {
+                    text("Local +1")
                 }
             }
         }

@@ -4,6 +4,7 @@
 //! - `#[derive(ClassName)]` turns a fieldless enum into typo-proof theme class names.
 //! - `stylesheet!` defines those class names together with their style rules.
 //! - `#[reactive]` rewrites a struct in place so each field is tracked and the struct keeps its name.
+//!   `#[reactive(singleton)]` also adds one thread-local `singleton()`.
 //! - `#[component]` is a reactive struct whose plain fields are state, `#[prop]` fields are inputs
 //!   and `#[event]` fields are listeners.
 
@@ -14,7 +15,7 @@ mod reactive;
 mod stylesheet;
 
 use proc_macro::TokenStream;
-use syn::{DeriveInput, parse_macro_input};
+use syn::{DeriveInput, Ident, parse_macro_input};
 
 /// Generates a chainable setter per named field: `fn field(self, value: impl Into<T>) -> Self`.
 /// For `Option<T>` fields the setter takes `impl Into<T>` and stores `Some`.
@@ -75,21 +76,36 @@ pub fn derive_class_name(input: TokenStream) -> TokenStream {
 /// its name. `new` passes each argument through `reactive`. A field that is already reactive stays
 /// that handle.
 ///
+/// `#[reactive(singleton)]` also adds `singleton()`: one value per thread, stored inside that
+/// function, starting from [`Default`](core::default::Default) for each field. The struct must
+/// stay [`Copy`](core::marker::Copy), which it does when every tracked field is.
+///
 /// A `#[component]` struct is already tracked. Remove `#[reactive]` from it.
 #[proc_macro_attribute]
 pub fn reactive(attr: TokenStream, item: TokenStream) -> TokenStream {
-    if !attr.is_empty() {
-        return syn::Error::new(
-            proc_macro2::Span::call_site(),
-            "#[reactive] does not take arguments",
-        )
-        .into_compile_error()
-        .into();
-    }
+    let singleton = match singleton_attribute(attr) {
+        Ok(singleton) => singleton,
+        Err(error) => return error.into_compile_error().into(),
+    };
     let input = parse_macro_input!(item as DeriveInput);
-    reactive::expand(&input)
+    reactive::expand(&input, singleton)
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
+}
+
+/// `#[reactive]` or `#[reactive(singleton)]`. Anything else is a compile error.
+fn singleton_attribute(attr: TokenStream) -> syn::Result<bool> {
+    if attr.is_empty() {
+        return Ok(false);
+    }
+    let ident = syn::parse::<Ident>(attr)?;
+    if ident == "singleton" {
+        return Ok(true);
+    }
+    Err(syn::Error::new(
+        ident.span(),
+        "unknown #[reactive] option; expected `singleton`",
+    ))
 }
 
 /// A single-file component. Plain fields become reactive state, `#[prop]` fields are parent

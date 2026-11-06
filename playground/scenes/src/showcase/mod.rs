@@ -4,9 +4,11 @@
 //!   between themes;
 //! - [`style`]: the stylesheet, i.e. the classes the layout uses, applied to every theme;
 //! - [`layout`]: the node tree, its state and its event handlers, with no styling of its own;
+//! - [`counter`]: a composable with one thread-local singleton and separate `new` instances;
 //! - [`badge`]: a single-file component with its own state, props, event and sheet.
 
 mod badge;
+mod counter;
 mod layout;
 mod style;
 mod theme;
@@ -18,6 +20,8 @@ use cappy::prelude::*;
 
 /// Header with a theme switcher, a counter, selectable tiles and a task list.
 pub fn showcase() -> Ui {
+    // Test workers reuse threads, so a previous scene can leave this singleton dirty.
+    counter::Counter::singleton().reset();
     let themes: Rc<[Arc<Theme>]> = theme::themes()
         .into_iter()
         .map(|tokens| Arc::new(style::stylesheet(tokens)))

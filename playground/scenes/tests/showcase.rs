@@ -14,9 +14,17 @@ fn counter_buttons_change_the_count() {
     harness.click("decrement");
     harness.update();
     assert_eq!(harness.text("count"), "Count: 1");
+    assert_eq!(harness.text("count-mirror"), "Count: 1");
+    assert_eq!(harness.text("count-local"), "Local: 0");
     harness.click("reset");
     harness.update();
     assert_eq!(harness.text("count"), "Count: 0");
+    assert_eq!(harness.text("count-mirror"), "Count: 0");
+    harness.click("local-increment");
+    harness.update();
+    assert_eq!(harness.text("count"), "Count: 0");
+    assert_eq!(harness.text("count-mirror"), "Count: 0");
+    assert_eq!(harness.text("count-local"), "Local: 1");
 }
 
 #[test]
