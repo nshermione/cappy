@@ -15,12 +15,31 @@ pub(crate) enum ChildPart {
 }
 
 /// Handle to a mounted node.
+///
+/// `generation` changes when the slot is recycled, so a handle from a disposed node does not
+/// refer to whatever is mounted there later.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct NodeId(pub(crate) u32);
+pub struct NodeId {
+    index: u32,
+    generation: u32,
+}
 
 impl NodeId {
+    pub(crate) fn new(index: u32, generation: u32) -> Self {
+        Self { index, generation }
+    }
+
+    /// Node `index` at generation 0. Valid until that slot is recycled.
+    pub(crate) fn from_index(index: u32) -> Self {
+        Self::new(index, 0)
+    }
+
     pub(crate) fn index(self) -> usize {
-        self.0 as usize
+        self.index as usize
+    }
+
+    pub(crate) fn generation(self) -> u32 {
+        self.generation
     }
 }
 
@@ -49,6 +68,8 @@ pub(crate) struct Node {
     /// `show` is hiding this node, or a parent `show` is.
     pub(crate) suppressed: bool,
     pub(crate) alive: bool,
+    /// Bumped when this slot is mounted again after dispose.
+    pub(crate) generation: u32,
     pub(crate) bindings: Vec<crate::reactive::BindingId>,
     /// Absolute rectangle in logical pixels from the last layout.
     pub(crate) rect: Rect,

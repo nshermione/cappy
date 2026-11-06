@@ -22,7 +22,7 @@ pub use listener::Listener;
 pub use paint::{Primitive, QuadPrimitive, RenderFrame, TextPrimitive};
 pub use prop::{ByHandle, ByValue, PropInput};
 pub use reactive::{IntoReactive, Reactive, RetirePlaceholder, Signal, reactive, signal};
-pub use ui::{FrameInput, NodeId, Ui, UpdateOutcome};
+pub use ui::{FrameInput, NodeId, ResourceCensus, Ui, UpdateOutcome};
 
 pub use cappy_layout::{
     ApproximateTextMeasurer, Point, Rect, Size, TextMeasureRequest, TextMeasurer,

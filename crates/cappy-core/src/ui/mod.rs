@@ -21,6 +21,37 @@ use bindings::{Binding, BindingKind};
 pub use node::NodeId;
 use node::{Node, NodeContent};
 
+/// How many slots cappy still holds. [`Ui::resources`] fills one of these.
+///
+/// Length is the slots in use (including disposed slots not yet released). Capacity is the
+/// memory reserved for them. A value that returns to an earlier snapshot released what it created.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ResourceCensus {
+    pub nodes: usize,
+    pub node_capacity: usize,
+    pub bindings: usize,
+    pub binding_capacity: usize,
+    pub flows: usize,
+    pub flow_capacity: usize,
+    pub layout_nodes: usize,
+    pub layout_capacity: usize,
+    /// Taffy slots reserved, including ones `remove` has not given back yet.
+    pub layout_retained: usize,
+    pub binding_sources: usize,
+    pub binding_source_capacity: usize,
+    pub subscriptions: usize,
+    pub display_list: usize,
+    pub display_list_capacity: usize,
+    pub signal_slots: usize,
+    pub signal_capacity: usize,
+    pub live_signals: usize,
+    pub signal_subscribers: usize,
+    pub owners: usize,
+    pub owner_capacity: usize,
+    pub live_owners: usize,
+    pub text_measurements: usize,
+}
+
 /// Size and scale of the surface the UI is drawn on.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FrameInput {
@@ -63,8 +94,12 @@ impl UpdateOutcome {
 
 pub struct Ui {
     nodes: Vec<Node>,
+    /// Indexes of disposed nodes, reused by the next mount.
+    free_nodes: Vec<u32>,
     root: NodeId,
     bindings: Vec<Binding>,
+    /// Indexes of disposed bindings, reused by the next allocation.
+    free_bindings: Vec<u32>,
     flows: Vec<flow::FlowState>,
     queue: Rc<BindingQueue>,
     theme_signal: Signal<Arc<Theme>>,
@@ -108,8 +143,10 @@ impl Ui {
         let initial_theme = theme.get_untracked();
         let mut ui = Self {
             nodes: Vec::new(),
-            root: NodeId(0),
+            free_nodes: Vec::new(),
+            root: NodeId::from_index(0),
             bindings: Vec::new(),
+            free_bindings: Vec::new(),
             flows: Vec::new(),
             queue: Rc::new(BindingQueue::default()),
             theme_signal: theme,
@@ -138,7 +175,8 @@ impl Ui {
         self.measurer = Box::new(measurer);
         for index in 0..self.nodes.len() {
             if self.nodes[index].alive {
-                self.sync_text_leaf(NodeId(index as u32));
+                let id = NodeId::new(index as u32, self.nodes[index].generation);
+                self.sync_text_leaf(id);
             }
         }
     }
@@ -186,6 +224,7 @@ impl Ui {
         self.run_layout();
         self.collect_paint_damage();
         self.rebuild_display_list();
+        self.reclaim_unused();
         if self.damage.is_empty() {
             UpdateOutcome::Idle
         } else {
@@ -213,7 +252,7 @@ impl Ui {
         let over_clickable = self
             .hovered
             .iter()
-            .any(|id| self.nodes[id.index()].on_click.is_some());
+            .any(|id| self.is_current(*id) && self.nodes[id.index()].on_click.is_some());
         if over_clickable {
             CursorIcon::Pointer
         } else {
@@ -229,33 +268,37 @@ impl Ui {
         &self.display_list
     }
 
+    fn node(&self, id: NodeId) -> Option<&Node> {
+        self.nodes
+            .get(id.index())
+            .filter(|node| node.generation == id.generation())
+    }
+
     pub fn find_by_key(&self, key: &str) -> Option<NodeId> {
         self.nodes
             .iter()
             .position(|node| node.alive && node.key.as_deref() == Some(key))
-            .map(|index| NodeId(index as u32))
+            .map(|index| NodeId::new(index as u32, self.nodes[index].generation))
     }
 
     pub fn node_rect(&self, id: NodeId) -> Option<Rect> {
-        self.nodes.get(id.index()).map(|node| node.rect)
+        self.node(id).map(|node| node.rect)
     }
 
     pub fn node_style(&self, id: NodeId) -> Option<&Style> {
-        self.nodes.get(id.index()).map(|node| &node.style)
+        self.node(id).map(|node| &node.style)
     }
 
     pub fn node_text(&self, id: NodeId) -> Option<&str> {
-        self.nodes.get(id.index()).and_then(Node::text)
+        self.node(id).and_then(Node::text)
     }
 
     pub fn node_children(&self, id: NodeId) -> &[NodeId] {
-        self.nodes
-            .get(id.index())
-            .map_or(&[], |node| &node.children)
+        self.node(id).map_or(&[], |node| &node.children)
     }
 
     pub fn node_parent(&self, id: NodeId) -> Option<NodeId> {
-        self.nodes.get(id.index()).and_then(|node| node.parent)
+        self.node(id).and_then(|node| node.parent)
     }
 
     fn logical_viewport(&self) -> Size {
@@ -272,6 +315,82 @@ impl Ui {
         self.damage.add_full();
         if previous.map(|viewport| viewport.logical_size()) != Some(input.logical_size()) {
             self.layout_dirty = true;
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn node_slots(&self) -> usize {
+        self.nodes.len()
+    }
+
+    #[cfg(test)]
+    pub(super) fn binding_slots(&self) -> usize {
+        self.bindings.len()
+    }
+
+    /// Releases arena slots that a dispose left at the end, so a shrink returns that memory.
+    fn reclaim_unused(&mut self) {
+        while self.nodes.last().is_some_and(|node| !node.alive) {
+            self.nodes.pop();
+        }
+        let node_len = self.nodes.len() as u32;
+        self.free_nodes.retain(|index| *index < node_len);
+        self.nodes.shrink_to_fit();
+        self.free_nodes.shrink_to_fit();
+
+        while self.bindings.last().is_some_and(|binding| binding.disposed) {
+            self.bindings.pop();
+        }
+        let binding_len = self.bindings.len() as u32;
+        self.free_bindings.retain(|index| *index < binding_len);
+        self.bindings.shrink_to_fit();
+        self.free_bindings.shrink_to_fit();
+        self.queue.shrink_sources(self.bindings.len());
+
+        self.reclaim_disposed_flows();
+        self.layout.compact();
+        self.layout.shrink_to_fit();
+        let hovered = std::mem::take(&mut self.hovered);
+        self.hovered = hovered
+            .into_iter()
+            .filter(|id| self.is_current(*id))
+            .collect();
+        self.hovered.shrink_to_fit();
+        if self.pressed.is_some_and(|id| !self.is_current(id)) {
+            self.pressed = None;
+        }
+        crate::reactive::reclaim_unused_slots();
+    }
+
+    /// Counts every arena this UI and the thread-local reactive runtime still hold.
+    ///
+    /// Take a snapshot, run the operation, and compare. The reactive fields cover the whole
+    /// thread, so compare two snapshots from the same thread.
+    pub fn resources(&self) -> ResourceCensus {
+        let runtime = crate::reactive::runtime_census();
+        ResourceCensus {
+            nodes: self.nodes.len(),
+            node_capacity: self.nodes.capacity(),
+            bindings: self.bindings.len(),
+            binding_capacity: self.bindings.capacity(),
+            flows: self.flows.len(),
+            flow_capacity: self.flows.capacity(),
+            layout_nodes: self.layout.node_count(),
+            layout_capacity: self.layout.node_capacity(),
+            layout_retained: self.layout.retained_slots(),
+            binding_sources: self.queue.source_slots(),
+            binding_source_capacity: self.queue.source_capacity(),
+            subscriptions: self.queue.subscription_count(),
+            display_list: self.display_list.len(),
+            display_list_capacity: self.display_list.capacity(),
+            signal_slots: runtime.signal_slots,
+            signal_capacity: runtime.signal_capacity,
+            live_signals: runtime.live_signals,
+            signal_subscribers: runtime.signal_subscribers,
+            owners: runtime.owners,
+            owner_capacity: runtime.owner_capacity,
+            live_owners: runtime.live_owners,
+            text_measurements: self.measurer.cached_measurements(),
         }
     }
 }

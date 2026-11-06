@@ -71,9 +71,14 @@ impl TextMeasurer for CosmicTextMeasurer {
         let size = self.measure_uncached(request, max_width);
         if self.cache.len() >= MAX_CACHED_MEASUREMENTS {
             self.cache.clear();
+            self.cache.shrink_to_fit();
         }
         self.cache.insert(key, size);
         size
+    }
+
+    fn cached_measurements(&self) -> usize {
+        self.cache.len()
     }
 }
 

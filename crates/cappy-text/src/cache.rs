@@ -8,8 +8,10 @@ use cosmic_text::{Buffer, FontSystem};
 
 use crate::shaping::{TextFont, shape_text};
 
-/// Shaped buffers unused for this many paints are dropped.
-const BUFFER_TIME_TO_LIVE: u64 = 600;
+/// Shaped buffers unused since the previous paint are dropped. A hidden or removed label
+/// therefore releases its buffer on the frame that stops drawing it. Idle frames do not
+/// paint, so a long time-to-live would keep that buffer until hundreds of later paints.
+const BUFFER_TIME_TO_LIVE: u64 = 1;
 /// Extra wrap width so text measured to an exact pixel width does not wrap when drawn.
 const WRAP_SLACK: f32 = 0.5;
 
@@ -90,6 +92,7 @@ impl ShapedTextCache {
         let paint_count = self.paint_count;
         self.buffers
             .retain(|_, cached| paint_count - cached.last_used < BUFFER_TIME_TO_LIVE);
+        self.buffers.shrink_to_fit();
     }
 
     pub fn len(&self) -> usize {

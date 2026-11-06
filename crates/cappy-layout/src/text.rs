@@ -16,6 +16,11 @@ pub struct TextMeasureRequest<'a> {
 pub trait TextMeasurer {
     /// Size of the laid-out text. With `max_width`, text wraps at word boundaries.
     fn measure(&mut self, request: &TextMeasureRequest<'_>, max_width: Option<f32>) -> Size;
+
+    /// Cached measurements this measurer is still holding.
+    fn cached_measurements(&self) -> usize {
+        0
+    }
 }
 
 /// Deterministic measurer that treats every character as `font_size * advance_ratio` wide.

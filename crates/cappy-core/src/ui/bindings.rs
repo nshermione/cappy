@@ -22,6 +22,7 @@ pub(super) enum BindingKind {
 pub(super) struct Binding {
     pub(super) node: NodeId,
     pub(super) kind: BindingKind,
+    pub(super) generation: u32,
     pub(super) disposed: bool,
 }
 
@@ -31,12 +32,27 @@ const MAX_BINDING_PASSES: usize = 16;
 
 impl Ui {
     pub(super) fn alloc_binding(&mut self, node: NodeId, kind: BindingKind) -> BindingId {
-        let id = BindingId(u32::try_from(self.bindings.len()).expect("too many bindings"));
-        self.bindings.push(Binding {
-            node,
-            kind,
-            disposed: false,
-        });
+        let id = if let Some(index) = self.free_bindings.pop() {
+            let generation = self.bindings[index as usize]
+                .generation
+                .wrapping_add(1);
+            self.bindings[index as usize] = Binding {
+                node,
+                kind,
+                generation,
+                disposed: false,
+            };
+            BindingId::new(index, generation)
+        } else {
+            let index = u32::try_from(self.bindings.len()).expect("too many bindings");
+            self.bindings.push(Binding {
+                node,
+                kind,
+                generation: 0,
+                disposed: false,
+            });
+            BindingId::new(index, 0)
+        };
         self.nodes[node.index()].bindings.push(id);
         id
     }
@@ -48,13 +64,16 @@ impl Ui {
 
     /// Detaches subscribers and drops the closure. A queued run then does nothing.
     pub(super) fn retire_binding(&mut self, id: BindingId) {
-        let binding = &mut self.bindings[id.0 as usize];
-        if binding.disposed {
+        let Some(binding) = self.bindings.get_mut(id.slot()) else {
+            return;
+        };
+        if binding.disposed || binding.generation != id.generation() {
             return;
         }
         binding.disposed = true;
         binding.kind = BindingKind::Disposed;
         detach_binding(&self.queue, id);
+        self.free_bindings.push(id.slot() as u32);
     }
 
     pub(super) fn process_bindings(&mut self) {
@@ -70,11 +89,14 @@ impl Ui {
     }
 
     fn evaluate_binding(&mut self, id: BindingId) {
-        if self.bindings[id.0 as usize].disposed {
+        let Some(binding) = self.bindings.get(id.slot()) else {
+            return;
+        };
+        if binding.disposed || binding.generation != id.generation() {
             return;
         }
         let observer = Observer::new(&self.queue, id);
-        let node = self.bindings[id.0 as usize].node;
+        let node = binding.node;
         enum Step {
             Text(String),
             Classes(Vec<cappy_style::ClassName>),
@@ -82,7 +104,7 @@ impl Ui {
             Theme(Arc<Theme>),
             Flow(FlowId),
         }
-        let step = match &self.bindings[id.0 as usize].kind {
+        let step = match &self.bindings[id.slot()].kind {
             BindingKind::Text(compute) => Step::Text(track(observer, compute)),
             BindingKind::Classes(compute) => Step::Classes(track(observer, compute)),
             BindingKind::Style(compute) => Step::Style(Box::new(track(observer, compute))),
@@ -120,7 +142,11 @@ impl Ui {
         }
         self.theme = theme;
         for index in 0..self.nodes.len() {
-            self.mark_style_dirty(NodeId(index as u32));
+            if !self.nodes[index].alive {
+                continue;
+            }
+            let id = NodeId::new(index as u32, self.nodes[index].generation);
+            self.mark_style_dirty(id);
         }
         self.damage.add_full();
     }

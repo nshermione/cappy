@@ -46,8 +46,11 @@ impl Ui {
     }
 
     fn is_hit(&self, id: NodeId, point: Point) -> bool {
-        let node = &self.nodes[id.index()];
-        node.alive
+        let Some(node) = self.nodes.get(id.index()) else {
+            return false;
+        };
+        node.generation == id.generation()
+            && node.alive
             && !node.suppressed
             && node.style.layout.display != Display::None
             && node.rect.contains(point)
@@ -65,7 +68,7 @@ impl Ui {
         let left: Vec<NodeId> = previous
             .iter()
             .copied()
-            .filter(|id| !path.contains(id) && self.nodes[id.index()].alive)
+            .filter(|id| !path.contains(id) && self.is_current(*id))
             .collect();
         let entered: Vec<NodeId> = path
             .iter()
@@ -88,7 +91,7 @@ impl Ui {
             .iter()
             .rev()
             .copied()
-            .find(|id| self.nodes[id.index()].on_click.is_some());
+            .find(|id| self.is_current(*id) && self.nodes[id.index()].on_click.is_some());
         if let Some(id) = target {
             self.pressed = Some(id);
             self.set_interaction(id, |state| state.pressed = true);
@@ -99,6 +102,9 @@ impl Ui {
         let Some(id) = self.pressed.take() else {
             return;
         };
+        if !self.is_current(id) {
+            return;
+        }
         self.set_interaction(id, |state| state.pressed = false);
         if self.hovered.contains(&id) {
             let event = ClickEvent {
@@ -112,7 +118,16 @@ impl Ui {
         }
     }
 
+    pub(super) fn is_current(&self, id: NodeId) -> bool {
+        self.nodes
+            .get(id.index())
+            .is_some_and(|node| node.alive && node.generation == id.generation())
+    }
+
     pub(super) fn set_interaction(&mut self, id: NodeId, change: impl FnOnce(&mut InteractionState)) {
+        if !self.is_current(id) {
+            return;
+        }
         let node = &mut self.nodes[id.index()];
         let before = node.interaction;
         change(&mut node.interaction);
@@ -122,6 +137,9 @@ impl Ui {
     }
 
     fn call_hover_handler(&mut self, id: NodeId, hovered: bool) {
+        if !self.is_current(id) {
+            return;
+        }
         let node = &mut self.nodes[id.index()];
         if let Some(mut handler) = node.on_hover.take() {
             handler(hovered);

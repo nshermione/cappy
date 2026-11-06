@@ -48,6 +48,8 @@ fn engine_error(error: taffy::TaffyError) -> LayoutError {
 pub struct LayoutTree<K> {
     taffy: TaffyTree<TextLeaf>,
     nodes: HashMap<K, taffy::NodeId>,
+    /// Taffy keeps a slot for every node ever inserted. `remove` frees the value but not the slot.
+    retained: usize,
 }
 
 impl<K> Default for LayoutTree<K> {
@@ -55,6 +57,7 @@ impl<K> Default for LayoutTree<K> {
         Self {
             taffy: TaffyTree::new(),
             nodes: HashMap::new(),
+            retained: 0,
         }
     }
 }
@@ -72,6 +75,7 @@ impl<K: Copy + Eq + Hash + fmt::Debug> LayoutTree<K> {
         if let Some(previous) = self.nodes.insert(key, node) {
             self.taffy.remove(previous).map_err(engine_error)?;
         }
+        self.retained = self.retained.max(self.nodes.len());
         Ok(())
     }
 
@@ -89,6 +93,77 @@ impl<K: Copy + Eq + Hash + fmt::Debug> LayoutTree<K> {
             .set_node_context(node, text)
             .map_err(engine_error)?;
         self.taffy.mark_dirty(node).map_err(engine_error)
+    }
+
+    pub fn node_count(&self) -> usize {
+        self.nodes.len()
+    }
+
+    pub fn node_capacity(&self) -> usize {
+        self.nodes.capacity()
+    }
+
+    /// Taffy slots still reserved. This stays at the high-water mark until [`LayoutTree::compact`].
+    pub fn retained_slots(&self) -> usize {
+        self.retained
+    }
+
+    /// Rebuilds taffy from the live nodes once enough removed nodes have left empty slots.
+    pub fn compact(&mut self) {
+        const FREE_SLOTS_BEFORE_COMPACT: usize = 32;
+        let live = self.nodes.len();
+        if self.retained <= live || self.retained - live < FREE_SLOTS_BEFORE_COMPACT {
+            return;
+        }
+        let reverse: HashMap<taffy::NodeId, K> = self
+            .nodes
+            .iter()
+            .map(|(key, id)| (*id, *key))
+            .collect();
+        let saved: Vec<(K, taffy::Style, Option<TextLeaf>, Vec<K>)> = self
+            .nodes
+            .iter()
+            .map(|(key, id)| {
+                let style = self.taffy.style(*id).expect("live layout node").clone();
+                let text = self.taffy.get_node_context(*id).cloned();
+                let children = self
+                    .taffy
+                    .children(*id)
+                    .expect("live layout node")
+                    .into_iter()
+                    .map(|child| reverse[&child])
+                    .collect();
+                (*key, style, text, children)
+            })
+            .collect();
+        self.taffy = TaffyTree::new();
+        self.nodes.clear();
+        for (key, style, text, _) in &saved {
+            let node = self
+                .taffy
+                .new_leaf(style.clone())
+                .expect("a fresh layout tree accepts a node");
+            if let Some(text) = text {
+                self.taffy
+                    .set_node_context(node, Some(text.clone()))
+                    .expect("a fresh layout node accepts its text");
+            }
+            self.nodes.insert(*key, node);
+        }
+        for (key, _, _, children) in &saved {
+            let child_ids: Vec<taffy::NodeId> =
+                children.iter().map(|child| self.nodes[child]).collect();
+            self.taffy
+                .set_children(self.nodes[key], &child_ids)
+                .expect("rebuilt children are nodes in this tree");
+        }
+        self.nodes.shrink_to_fit();
+        self.retained = self.nodes.len();
+    }
+
+    /// Drops spare capacity left behind after nodes were removed.
+    pub fn shrink_to_fit(&mut self) {
+        self.nodes.shrink_to_fit();
     }
 
     /// Drops `key` after it has been unlinked from its parent. Children should already be gone.
@@ -453,6 +528,33 @@ mod tests {
             Err(LayoutError::UnknownNode(_))
         ));
         tree.remove(1).unwrap_err();
+    }
+
+    #[test]
+    fn compact_releases_slots_after_a_large_drop() {
+        let mut tree = LayoutTree::new();
+        tree.insert(0, &fixed(10.0, 10.0)).unwrap();
+        let children: Vec<u32> = (1..80).collect();
+        for id in &children {
+            tree.insert(*id, &fixed(4.0, 4.0)).unwrap();
+        }
+        tree.set_children(0, &children).unwrap();
+        assert!(tree.retained_slots() >= 80);
+        tree.set_children(0, &[]).unwrap();
+        for id in &children {
+            tree.remove(*id).unwrap();
+        }
+        assert_eq!(tree.node_count(), 1);
+        assert!(tree.retained_slots() >= 80);
+        tree.compact();
+        assert_eq!(tree.retained_slots(), 1);
+        tree.compute(
+            0,
+            Size::new(100.0, 100.0),
+            &mut ApproximateTextMeasurer::default(),
+        )
+        .unwrap();
+        assert!(tree.local_rect(0).unwrap().width > 0.0);
     }
 
     #[test]

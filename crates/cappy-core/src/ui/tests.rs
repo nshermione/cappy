@@ -220,7 +220,9 @@ fn hover_handlers_fire_on_enter_and_leave() {
 #[test]
 fn switching_theme_repaints_without_moving_anything() {
     let mut ui = settled(counter(signal(0)));
-    let rects: Vec<_> = (0..6).map(|index| ui.node_rect(NodeId(index))).collect();
+    let rects: Vec<_> = (0..6)
+        .map(|index| ui.node_rect(NodeId::from_index(index)))
+        .collect();
 
     ui.set_theme(Theme::dark());
     assert_eq!(
@@ -230,7 +232,9 @@ fn switching_theme_repaints_without_moving_anything() {
         }
     );
 
-    let after: Vec<_> = (0..6).map(|index| ui.node_rect(NodeId(index))).collect();
+    let after: Vec<_> = (0..6)
+        .map(|index| ui.node_rect(NodeId::from_index(index)))
+        .collect();
     assert_eq!(rects, after);
     assert_eq!(
         ui.node_style(ui.root()).unwrap().visual.background,
@@ -862,4 +866,98 @@ fn switching_if_disposes_hidden_show_rows_and_nested_if() {
     assert!(row_signals.iter().all(|row| signal_subscriber_count(*row) == 0));
     assert!(!signal_is_alive(state));
     assert_eq!(signal_subscriber_count(state), 0);
+}
+
+#[test]
+fn switching_branches_and_rows_reuses_slots() {
+    let flag = signal(true);
+    let items = signal(vec![1_u64, 2]);
+    let mut ui = settled(div().children([
+        if_else(
+            move || flag.get(),
+            || text_dyn(|| "yes".to_owned()).key("branch"),
+            || text_dyn(|| "no".to_owned()).key("branch"),
+        ),
+        for_each(
+            move |visit| {
+                items.with(|list| {
+                    for item in list {
+                        visit(item);
+                    }
+                });
+            },
+            |item| item,
+            |item| text_dyn(move || item.get().to_string()),
+        ),
+    ]));
+    let nodes = ui.node_slots();
+    let bindings = ui.binding_slots();
+    let signals = live_signal_count();
+    for turn in 0..40 {
+        flag.update(|value| *value = !*value);
+        if turn % 2 == 0 {
+            items.set(vec![1]);
+        } else {
+            items.set(vec![1, 2]);
+        }
+        ui.update(VIEWPORT);
+    }
+    assert_eq!(ui.node_text(ui.find_by_key("branch").unwrap()), Some("yes"));
+    assert_eq!(ui.node_slots(), nodes);
+    assert_eq!(ui.binding_slots(), bindings);
+    assert_eq!(live_signal_count(), signals);
+}
+
+#[test]
+fn add_and_drop_returns_resources_to_the_baseline() {
+    let items = signal(Vec::<u64>::new());
+    let mut ui = settled(div().child(for_each(
+        move |visit| {
+            items.with(|list| {
+                for item in list {
+                    visit(item);
+                }
+            });
+        },
+        |item| item,
+        |item| {
+            let flag = signal(false);
+            let id = item.get_untracked();
+            div().key(format!("row-{id}")).children([
+                text_dyn(move || item.get().to_string()).key(format!("label-{id}")),
+                text_dyn(move || {
+                    if flag.get() {
+                        "on".to_owned()
+                    } else {
+                        "off".to_owned()
+                    }
+                }),
+                div()
+                    .on_click(move |_| flag.update(|value| *value = !*value))
+                    .child(text("Drop")),
+            ])
+        },
+    )));
+    let baseline = ui.resources();
+    let mut peak_at_thirty = None;
+    for round in 0..3 {
+        for count in [30_usize, 0, 20, 0, 25, 0, 10, 0] {
+            items.set(
+                (0..count)
+                    .map(|index| round * 1000 + index as u64)
+                    .collect(),
+            );
+            ui.update(VIEWPORT);
+            if count == 30 {
+                let held = ui.resources();
+                if let Some(first) = peak_at_thirty {
+                    assert_eq!(held, first);
+                } else {
+                    peak_at_thirty = Some(held);
+                }
+            }
+        }
+    }
+    assert_eq!(ui.resources(), baseline);
+    assert!(ui.find_by_key("row-0").is_none());
 }

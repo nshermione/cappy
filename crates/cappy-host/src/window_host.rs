@@ -2,6 +2,8 @@
 //! turns input into redraw requests and redraws into presented frames. Integrations such as
 //! winit and tao only translate their events and forward them here.
 
+#[cfg(debug_assertions)]
+use cappy_core::ResourceCensus;
 use cappy_core::{CursorIcon, FrameInput, InputEvent, Ui, UpdateOutcome};
 use cappy_text::{CosmicTextMeasurer, FontContext};
 
@@ -91,6 +93,12 @@ pub struct WindowHost {
     /// Size of the last redraw, used to settle input without waiting for a frame.
     last_input: Option<FrameInput>,
     frames: u64,
+    /// Previous resource snapshot, so the memory trace logs only when something changed.
+    #[cfg(debug_assertions)]
+    traced_resources: Option<ResourceCensus>,
+    /// Previous private bytes of this process, from the OS.
+    #[cfg(debug_assertions)]
+    traced_private_bytes: Option<usize>,
 }
 
 impl WindowHost {
@@ -104,6 +112,10 @@ impl WindowHost {
             cursor: CursorIcon::Default,
             last_input: None,
             frames: 0,
+            #[cfg(debug_assertions)]
+            traced_resources: None,
+            #[cfg(debug_assertions)]
+            traced_private_bytes: None,
         }
     }
 
@@ -148,10 +160,13 @@ impl WindowHost {
         if !self.ui.needs_update() {
             return false;
         }
-        match self.last_input {
+        let redraw = match self.last_input {
             Some(input) => matches!(self.ui.update(input), UpdateOutcome::Redraw { .. }),
             None => true,
-        }
+        };
+        #[cfg(debug_assertions)]
+        self.trace_memory();
+        redraw
     }
 
     pub fn resize(&mut self, physical_size: (u32, u32)) {
@@ -183,10 +198,65 @@ impl WindowHost {
                 frame.damage
             );
         }
+        #[cfg(debug_assertions)]
+        self.trace_memory();
         Ok(RedrawResult {
             present,
             cursor: self.take_cursor_change(),
         })
+    }
+
+    /// Logs cappy's arena counts next to the process's private bytes.
+    ///
+    /// Compiled only into debug builds. Each call walks the signal and subscriber lists and asks
+    /// the OS for this process's memory, and a change writes a log line.
+    ///
+    /// A cappy counter that returns to an earlier value released that arena. Private bytes that
+    /// stay up, or step up while the counters repeat, are the process heap and renderer caches
+    /// this census does not hold.
+    #[cfg(debug_assertions)]
+    fn trace_memory(&mut self) {
+        let resources = self.ui.resources();
+        let memory = process_memory();
+        let resources_changed = self.traced_resources.as_ref() != Some(&resources);
+        let private_delta = memory.and_then(|(private_bytes, _)| {
+            self.traced_private_bytes
+                .map(|previous| private_bytes as isize - previous as isize)
+        });
+        let memory_changed = private_delta.is_none_or(|delta| delta.unsigned_abs() >= 32 * 1024);
+        if !resources_changed && !memory_changed {
+            return;
+        }
+        if let Some((private_bytes, working_set)) = memory {
+            let delta = private_delta.unwrap_or(0);
+            log::info!(
+                "memory private {} KiB ({delta:+} KiB) working {} KiB | cappy nodes {}/{} layout {}/{} text {} signals {} bindings {}/{}",
+                private_bytes / 1024,
+                working_set / 1024,
+                resources.nodes,
+                resources.node_capacity,
+                resources.layout_nodes,
+                resources.layout_retained,
+                resources.text_measurements,
+                resources.live_signals,
+                resources.bindings,
+                resources.binding_capacity,
+            );
+            self.traced_private_bytes = Some(private_bytes);
+        } else {
+            log::info!(
+                "memory | cappy nodes {}/{} layout {}/{} text {} signals {} bindings {}/{}",
+                resources.nodes,
+                resources.node_capacity,
+                resources.layout_nodes,
+                resources.layout_retained,
+                resources.text_measurements,
+                resources.live_signals,
+                resources.bindings,
+                resources.binding_capacity,
+            );
+        }
+        self.traced_resources = Some(resources);
     }
 
     fn take_cursor_change(&mut self) -> Option<CursorIcon> {
@@ -195,5 +265,68 @@ impl WindowHost {
             self.cursor = cursor;
             cursor
         })
+    }
+}
+
+/// Private bytes and working set of this process. Private bytes are what the process has asked
+/// the OS to keep; the working set is the part currently in RAM.
+#[cfg(debug_assertions)]
+fn process_memory() -> Option<(usize, usize)> {
+    #[cfg(windows)]
+    {
+        process_memory_windows::read()
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+/// `GetProcessMemoryInfo` has no safe wrapper in this crate's dependencies.
+#[cfg(all(debug_assertions, windows))]
+#[allow(unsafe_code)]
+mod process_memory_windows {
+    pub(super) fn read() -> Option<(usize, usize)> {
+        #[repr(C)]
+        struct Counters {
+            cb: u32,
+            page_fault_count: u32,
+            peak_working_set_size: usize,
+            working_set_size: usize,
+            quota_peak_paged_pool_usage: usize,
+            quota_paged_pool_usage: usize,
+            quota_peak_non_paged_pool_usage: usize,
+            quota_non_paged_pool_usage: usize,
+            pagefile_usage: usize,
+            peak_pagefile_usage: usize,
+            private_usage: usize,
+        }
+
+        unsafe extern "system" {
+            fn GetCurrentProcess() -> *mut core::ffi::c_void;
+            fn K32GetProcessMemoryInfo(
+                process: *mut core::ffi::c_void,
+                counters: *mut Counters,
+                cb: u32,
+            ) -> i32;
+        }
+
+        unsafe {
+            let mut counters = Counters {
+                cb: size_of::<Counters>() as u32,
+                page_fault_count: 0,
+                peak_working_set_size: 0,
+                working_set_size: 0,
+                quota_peak_paged_pool_usage: 0,
+                quota_paged_pool_usage: 0,
+                quota_peak_non_paged_pool_usage: 0,
+                quota_non_paged_pool_usage: 0,
+                pagefile_usage: 0,
+                peak_pagefile_usage: 0,
+                private_usage: 0,
+            };
+            let read = K32GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, counters.cb);
+            (read != 0).then_some((counters.private_usage, counters.working_set_size))
+        }
     }
 }

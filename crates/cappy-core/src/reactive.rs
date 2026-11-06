@@ -14,8 +14,36 @@ use std::marker::PhantomData;
 use std::rc::{Rc, Weak};
 
 /// Identifies one reactive binding inside a [`BindingQueue`].
+///
+/// `generation` changes when the slot is recycled, so a notification queued for a disposed
+/// binding does not run the binding that reused the slot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) struct BindingId(pub(crate) u32);
+pub(crate) struct BindingId {
+    index: u32,
+    generation: u32,
+}
+
+impl BindingId {
+    pub(crate) fn new(index: u32, generation: u32) -> Self {
+        Self { index, generation }
+    }
+
+    /// Binding `index` at generation 0. Tests use this when no slot is allocated.
+    pub(crate) const fn from_index(index: u32) -> Self {
+        Self {
+            index,
+            generation: 0,
+        }
+    }
+
+    pub(crate) fn slot(self) -> usize {
+        self.index as usize
+    }
+
+    pub(crate) fn generation(self) -> u32 {
+        self.generation
+    }
+}
 
 /// One signal a binding read the last time it ran.
 #[derive(Clone, Copy)]
@@ -68,7 +96,7 @@ impl BindingQueue {
 
     fn record(&self, binding: BindingId, index: u32, generation: u32) {
         let mut sources = self.sources.borrow_mut();
-        let slot = binding.0 as usize;
+        let slot = binding.slot();
         if sources.len() <= slot {
             sources.resize_with(slot + 1, Vec::new);
         }
@@ -85,9 +113,34 @@ impl BindingQueue {
     fn take_sources(&self, binding: BindingId) -> Vec<SignalKey> {
         let mut sources = self.sources.borrow_mut();
         sources
-            .get_mut(binding.0 as usize)
+            .get_mut(binding.slot())
             .map(std::mem::take)
             .unwrap_or_default()
+    }
+
+    pub(crate) fn source_slots(&self) -> usize {
+        self.sources.borrow().len()
+    }
+
+    pub(crate) fn source_capacity(&self) -> usize {
+        self.sources.borrow().capacity()
+    }
+
+    pub(crate) fn subscription_count(&self) -> usize {
+        self.sources
+            .borrow()
+            .iter()
+            .map(|sources| sources.len())
+            .sum()
+    }
+
+    /// Drops source slots past `len` and returns their spare capacity to the allocator.
+    pub(crate) fn shrink_sources(&self, len: usize) {
+        let mut sources = self.sources.borrow_mut();
+        if sources.len() > len {
+            sources.truncate(len);
+        }
+        sources.shrink_to_fit();
     }
 }
 
@@ -97,9 +150,13 @@ impl Drop for BindingQueue {
         let queue = self as *const Self;
         RUNTIME.with(|runtime| {
             for (binding, signals) in sources.into_iter().enumerate() {
-                let binding = BindingId(u32::try_from(binding).expect("too many bindings"));
                 for source in signals {
-                    runtime.remove_binding(source.index, source.generation, queue, binding);
+                    runtime.detach_queue_slot(
+                        source.index,
+                        source.generation,
+                        queue,
+                        binding as u32,
+                    );
                 }
             }
         });
@@ -239,6 +296,27 @@ impl Runtime {
         }
         slot.subscribers
             .retain(|existing| existing.binding != binding || existing.queue.as_ptr() != queue);
+    }
+
+    /// Drops every subscriber from `queue` on this signal whose binding uses `binding_slot`,
+    /// whatever generation it had. Used when the queue itself is going away.
+    fn detach_queue_slot(
+        &self,
+        index: u32,
+        generation: u32,
+        queue: *const BindingQueue,
+        binding_slot: u32,
+    ) {
+        let mut slots = self.slots.borrow_mut();
+        let Some(slot) = slots.get_mut(index as usize).and_then(Option::as_mut) else {
+            return;
+        };
+        if slot.generation != generation {
+            return;
+        }
+        slot.subscribers.retain(|existing| {
+            existing.binding.slot() != binding_slot as usize || existing.queue.as_ptr() != queue
+        });
     }
 
     fn dispose_if_placeholder(&self, index: u32, generation: u32) {
@@ -760,6 +838,84 @@ impl<T: 'static> IntoReactive for Signal<T> {
     }
 }
 
+/// Drops signal and owner slots that nothing holds anymore, when they sit at the end of the arena.
+pub(crate) fn reclaim_unused_slots() {
+    RUNTIME.with(|runtime| {
+        let len = {
+            let mut slots = runtime.slots.borrow_mut();
+            while matches!(slots.last(), Some(None)) {
+                slots.pop();
+            }
+            slots.shrink_to_fit();
+            slots.len() as u32
+        };
+        let mut free = runtime.free_slots.borrow_mut();
+        free.retain(|index| *index < len);
+        free.shrink_to_fit();
+    });
+    OWNERS.with(|owners| {
+        let len = {
+            let mut owners = owners.borrow_mut();
+            while matches!(owners.last(), Some(None)) {
+                owners.pop();
+            }
+            owners.shrink_to_fit();
+            owners.len() as u32
+        };
+        OWNER_FREE.with(|free| {
+            let mut free = free.borrow_mut();
+            free.retain(|index| *index < len);
+            free.shrink_to_fit();
+        });
+    });
+}
+
+pub(crate) struct RuntimeCensus {
+    pub signal_slots: usize,
+    pub signal_capacity: usize,
+    pub live_signals: usize,
+    pub signal_subscribers: usize,
+    pub owners: usize,
+    pub owner_capacity: usize,
+    pub live_owners: usize,
+}
+
+pub(crate) fn runtime_census() -> RuntimeCensus {
+    let (signal_slots, signal_capacity, live_signals, signal_subscribers) =
+        RUNTIME.with(|runtime| {
+            let slots = runtime.slots.borrow();
+            let live_signals = slots.iter().filter(|slot| slot.is_some()).count();
+            let signal_subscribers = slots
+                .iter()
+                .flatten()
+                .map(|slot| slot.subscribers.len())
+                .sum();
+            (
+                slots.len(),
+                slots.capacity(),
+                live_signals,
+                signal_subscribers,
+            )
+        });
+    let (owners, owner_capacity, live_owners) = OWNERS.with(|owners| {
+        let owners = owners.borrow();
+        (
+            owners.len(),
+            owners.capacity(),
+            owners.iter().filter(|owner| owner.is_some()).count(),
+        )
+    });
+    RuntimeCensus {
+        signal_slots,
+        signal_capacity,
+        live_signals,
+        signal_subscribers,
+        owners,
+        owner_capacity,
+        live_owners,
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn live_signal_count() -> usize {
     RUNTIME.with(|runtime| {
@@ -827,17 +983,17 @@ mod tests {
     fn tracked_reads_subscribe_and_writes_notify() {
         let queue = queue();
         let count = signal(0);
-        track(Observer::new(&queue, BindingId(3)), || count.get());
+        track(Observer::new(&queue, BindingId::from_index(3)), || count.get());
         assert!(queue.is_empty());
         count.set(1);
-        assert_eq!(queue.take(), vec![BindingId(3)]);
+        assert_eq!(queue.take(), vec![BindingId::from_index(3)]);
     }
 
     #[test]
     fn untracked_reads_do_not_subscribe() {
         let queue = queue();
         let count = signal(0);
-        track(Observer::new(&queue, BindingId(1)), || {
+        track(Observer::new(&queue, BindingId::from_index(1)), || {
             count.get_untracked()
         });
         count.set(1);
@@ -849,11 +1005,11 @@ mod tests {
         let queue = queue();
         let count = signal(0);
         for _ in 0..3 {
-            track(Observer::new(&queue, BindingId(1)), || count.get());
+            track(Observer::new(&queue, BindingId::from_index(1)), || count.get());
         }
         count.set(1);
         count.set(2);
-        assert_eq!(queue.take(), vec![BindingId(1)]);
+        assert_eq!(queue.take(), vec![BindingId::from_index(1)]);
     }
 
     #[test]
@@ -861,14 +1017,14 @@ mod tests {
         let queue = queue();
         let outer = signal(0);
         let inner = signal(0);
-        track(Observer::new(&queue, BindingId(1)), || {
-            track(Observer::new(&queue, BindingId(2)), || inner.get());
+        track(Observer::new(&queue, BindingId::from_index(1)), || {
+            track(Observer::new(&queue, BindingId::from_index(2)), || inner.get());
             outer.get()
         });
         outer.set(1);
-        assert_eq!(queue.take(), vec![BindingId(1)]);
+        assert_eq!(queue.take(), vec![BindingId::from_index(1)]);
         inner.set(1);
-        assert_eq!(queue.take(), vec![BindingId(2)]);
+        assert_eq!(queue.take(), vec![BindingId::from_index(2)]);
     }
 
     #[test]
@@ -876,7 +1032,7 @@ mod tests {
         let count = signal(0);
         {
             let queue = queue();
-            track(Observer::new(&queue, BindingId(1)), || count.get());
+            track(Observer::new(&queue, BindingId::from_index(1)), || count.get());
         }
         count.set(1);
         assert_eq!(count.get(), 1);
@@ -889,7 +1045,7 @@ mod tests {
         let counter = wakes.clone();
         queue.set_waker(Some(Rc::new(move || counter.set(counter.get() + 1))));
         let count = signal(0);
-        track(Observer::new(&queue, BindingId(1)), || count.get());
+        track(Observer::new(&queue, BindingId::from_index(1)), || count.get());
         count.set(1);
         count.set(2);
         assert_eq!(wakes.get(), 1);
@@ -1022,7 +1178,7 @@ mod tests {
         let left = signal(1);
         let right = signal(2);
         let run = || {
-            track(Observer::new(&binding_queue, BindingId(1)), || {
+            track(Observer::new(&binding_queue, BindingId::from_index(1)), || {
                 if flag.get() { left.get() } else { right.get() }
             });
         };
@@ -1042,7 +1198,7 @@ mod tests {
         let watched = signal(0);
         {
             let binding_queue = queue();
-            track(Observer::new(&binding_queue, BindingId(7)), || {
+            track(Observer::new(&binding_queue, BindingId::from_index(7)), || {
                 watched.get()
             });
             assert_eq!(subscriber_count(watched), 1);

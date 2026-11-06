@@ -171,8 +171,21 @@ impl Ui {
         self.mount_node(element, parent, false)
     }
 
+    fn insert_node(&mut self, mut node: Node) -> NodeId {
+        if let Some(index) = self.free_nodes.pop() {
+            node.generation = self.nodes[index as usize].generation.wrapping_add(1);
+            let id = NodeId::new(index, node.generation);
+            self.nodes[index as usize] = node;
+            id
+        } else {
+            let index = u32::try_from(self.nodes.len()).expect("too many nodes");
+            node.generation = 0;
+            self.nodes.push(node);
+            NodeId::new(index, 0)
+        }
+    }
+
     fn mount_node(&mut self, element: Element, parent: Option<NodeId>, suppressed: bool) -> NodeId {
-        let id = NodeId(u32::try_from(self.nodes.len()).expect("too many nodes"));
         let Element {
             content,
             key,
@@ -196,7 +209,7 @@ impl Ui {
             ElementContent::DynamicText(binding) => (NodeContent::Text("".into()), Some(binding)),
         };
         let initial_style = Style::inheriting(TextStyle::from_tokens(self.theme.tokens()));
-        self.nodes.push(Node {
+        let node = Node {
             parent,
             children: Vec::new(),
             key,
@@ -213,11 +226,13 @@ impl Ui {
             parts: Vec::new(),
             suppressed,
             alive: true,
+            generation: 0,
             bindings: Vec::new(),
             rect: cappy_layout::Rect::ZERO,
             style_dirty: true,
             paint_dirty: true,
-        });
+        };
+        let id = self.insert_node(node);
         let layout_style = self.layout_style_of(id);
         self.layout
             .insert(id, &layout_style)
@@ -270,7 +285,7 @@ impl Ui {
         let id = FlowId(u32::try_from(self.flows.len()).expect("too many flows"));
         self.flows.push(FlowState {
             parent,
-            binding: BindingId(0),
+            binding: BindingId::from_index(0),
             runtime: FlowRuntime::Busy,
             parts: Vec::new(),
             owner: None,
@@ -512,7 +527,10 @@ impl Ui {
     }
 
     fn dispose_node(&mut self, id: NodeId) {
-        if !self.nodes[id.index()].alive {
+        let Some(node) = self.nodes.get(id.index()) else {
+            return;
+        };
+        if !node.alive || node.generation != id.generation() {
             return;
         }
         let parts = std::mem::take(&mut self.nodes[id.index()].parts);
@@ -538,6 +556,14 @@ impl Ui {
             self.pressed = None;
         }
         self.display_list_stale = true;
+        self.free_nodes.push(id.index() as u32);
+    }
+
+    pub(super) fn reclaim_disposed_flows(&mut self) {
+        while self.flows.last().is_some_and(|flow| flow.disposed) {
+            self.flows.pop();
+        }
+        self.flows.shrink_to_fit();
     }
 
     fn refresh_pointer(&mut self) {
@@ -547,6 +573,10 @@ impl Ui {
         let Some(id) = self.pressed else {
             return;
         };
+        if !self.is_current(id) {
+            self.pressed = None;
+            return;
+        }
         let node = &self.nodes[id.index()];
         if !node.alive || node.suppressed {
             self.pressed = None;
