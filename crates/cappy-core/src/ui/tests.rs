@@ -2,7 +2,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use super::*;
-use crate::{ButtonState, InputEvent, PointerButton, div, signal, text, text_dyn};
+use crate::{ButtonState, InputEvent, PointerButton, Slot, div, signal, slot, text, text_dyn};
 use cappy_style::{Color, StyleRefinement};
 
 const VIEWPORT: FrameInput = FrameInput {
@@ -427,4 +427,18 @@ fn component_stylesheet_covers_the_rendered_tree() {
     assert_eq!(panel.visual.background, Color::BLACK);
     assert_eq!(inner.visual.background, Color::BLACK);
     assert_eq!(own.visual.background, Color::WHITE);
+}
+
+#[test]
+fn unfilled_slots_are_not_mounted() {
+    let tree = div().key("root").children([
+        text("a").key("a"),
+        slot(Slot::<(), Element>::new(0)),
+        text("b").key("b"),
+    ]);
+    let ui = settled(tree);
+    let root = ui.find_by_key("root").unwrap();
+    assert_eq!(ui.node_children(root).len(), 2);
+    assert_eq!(ui.node_text(ui.find_by_key("a").unwrap()), Some("a"));
+    assert_eq!(ui.node_text(ui.find_by_key("b").unwrap()), Some("b"));
 }

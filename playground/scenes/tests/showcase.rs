@@ -69,6 +69,24 @@ fn tasks_toggle_between_todo_and_done() {
 }
 
 #[test]
+fn badge_slots_sit_on_either_side_of_the_label() {
+    let harness = harness();
+    assert_eq!(harness.text("badge-icon"), "in");
+    assert_eq!(harness.text("badge-label"), "Badge (0)");
+    assert_eq!(harness.text("badge-tail"), "out");
+    let badge = harness.node("demo-badge");
+    let children = harness.ui().node_children(badge);
+    assert_eq!(
+        children,
+        [
+            harness.node("badge-icon"),
+            harness.node("badge-label"),
+            harness.node("badge-tail"),
+        ]
+    );
+}
+
+#[test]
 fn settled_scene_is_idle() {
     let mut harness = harness();
     assert_eq!(harness.damage(), Damage::None);

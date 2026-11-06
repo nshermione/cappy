@@ -117,7 +117,8 @@ fn parent_passes_props_events_host_attributes_and_children() {
             class = ThemeClass::Muted,
             key = "hosted",
         ) {
-            text("extra", key = "extra")
+            text("extra", key = "extra"),
+            text("more", key = "more"),
         }
     });
 
@@ -143,6 +144,7 @@ fn parent_passes_props_events_host_attributes_and_children() {
         ui.node_text(ui.find_by_key("extra").unwrap()),
         Some("extra")
     );
+    assert_eq!(ui.node_text(ui.find_by_key("more").unwrap()), Some("more"));
 
     click(&mut ui, "hosted");
     assert_eq!(seen.take(), "new");
@@ -161,4 +163,131 @@ fn unit_event_emits_without_a_payload() {
     ping.on_ping.emit(());
     assert!(hit.get());
     let _ = format!("{ping:?}");
+}
+
+#[component]
+struct Panel {
+    #[slot]
+    body: Element,
+    #[slot]
+    icon: Element,
+}
+
+impl Component for Panel {
+    fn render(self) -> Element {
+        ui! {
+            div(key = "panel") {
+                slot(icon)
+                slot(body)
+            }
+        }
+    }
+}
+
+#[component]
+struct Frame {
+    #[slot]
+    body: Element,
+}
+
+impl Component for Frame {
+    fn render(self) -> Element {
+        ui! {
+            div(key = "frame") {
+                text("before", key = "before")
+                slot(body)
+                text("after", key = "after")
+            }
+        }
+    }
+}
+
+#[component]
+struct Inner {
+    #[slot]
+    body: Element,
+}
+
+impl Component for Inner {
+    fn render(self) -> Element {
+        ui! {
+            div(key = "inner") { slot(body) }
+        }
+    }
+}
+
+#[component]
+struct Outer {
+    #[slot]
+    body: Element,
+}
+
+impl Component for Outer {
+    fn render(self) -> Element {
+        ui! {
+            div(key = "outer") {
+                slot(body)
+                @Inner { text("inner-text", key = "inner-text") }
+            }
+        }
+    }
+}
+
+#[test]
+fn slots_land_in_declaration_order_and_drop_the_rest() {
+    let panel = Panel::default();
+    let _rendered = panel.render();
+    let _again = panel;
+    let ui = settled(ui! {
+        @Panel(class = ThemeClass::Muted, key = "hosted") {
+            text("default", key = "default"),
+            text("named", key = "named", slot = body),
+            div(slot = icon, key = "icon") { text("+", key = "plus") }
+            text("extra", key = "extra"),
+        }
+    });
+
+    assert!(ui.find_by_key("panel").is_none());
+    assert!(ui.find_by_key("named").is_none());
+    assert!(ui.find_by_key("extra").is_none());
+    let hosted = ui.find_by_key("hosted").unwrap();
+    assert_eq!(
+        ui.node_style(hosted).unwrap().text.color,
+        ui.theme().tokens().colors.text_muted
+    );
+    let children = ui.node_children(hosted);
+    assert_eq!(children.len(), 2);
+    assert_eq!(ui.node_text(ui.node_children(children[0])[0]), Some("+"));
+    assert_eq!(ui.node_text(children[1]), Some("default"));
+}
+
+#[test]
+fn an_unnamed_child_is_placed_where_the_slot_is() {
+    let ui = settled(ui! {
+        @Frame {
+            text("middle", key = "middle"),
+            text("dropped", key = "dropped"),
+        }
+    });
+    let frame = ui.find_by_key("frame").unwrap();
+    let children = ui.node_children(frame);
+    assert_eq!(children.len(), 3);
+    assert_eq!(ui.node_text(children[0]), Some("before"));
+    assert_eq!(ui.node_text(children[1]), Some("middle"));
+    assert_eq!(ui.node_text(children[2]), Some("after"));
+    assert!(ui.find_by_key("dropped").is_none());
+}
+
+#[test]
+fn nested_components_keep_their_own_slots() {
+    let ui = settled(ui! {
+        @Outer {
+            text("outer-text", key = "outer-text")
+        }
+    });
+    let outer = ui.find_by_key("outer").unwrap();
+    let outer_children = ui.node_children(outer);
+    assert_eq!(ui.node_text(outer_children[0]), Some("outer-text"));
+    let inner = ui.find_by_key("inner").unwrap();
+    assert_eq!(ui.node_text(ui.node_children(inner)[0]), Some("inner-text"));
 }

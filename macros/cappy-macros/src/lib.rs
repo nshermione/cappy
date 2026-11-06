@@ -5,8 +5,8 @@
 //! - `stylesheet!` defines those class names together with their style rules.
 //! - `#[reactive]` rewrites a struct in place so each field is tracked and the struct keeps its name.
 //!   `#[reactive(singleton)]` also adds one thread-local `singleton()`.
-//! - `#[component]` is a reactive struct whose plain fields are state, `#[prop]` fields are inputs
-//!   and `#[event]` fields are listeners.
+//! - `#[component]` is a reactive struct whose plain fields are state, `#[prop]` fields are inputs,
+//!   `#[event]` fields are listeners and `#[slot]` fields are positions for parent children.
 
 mod class_name;
 mod component;
@@ -15,6 +15,7 @@ mod reactive;
 mod stylesheet;
 
 use proc_macro::TokenStream;
+use quote::quote;
 use syn::{DeriveInput, Ident, parse_macro_input};
 
 /// Generates a chainable setter per named field: `fn field(self, value: impl Into<T>) -> Self`.
@@ -109,7 +110,9 @@ fn singleton_attribute(attr: TokenStream) -> syn::Result<bool> {
 }
 
 /// A single-file component. Plain fields become reactive state, `#[prop]` fields are parent
-/// inputs, and `#[event]` fields are listeners. The macro implements [`Default`](core::default::Default).
+/// inputs, `#[event]` fields are listeners, and `#[slot]` fields are positions for parent children.
+/// A slot field is stored as a [`Copy`](core::marker::Copy) marker, not the child element, and its
+/// type must be `Element`. The macro implements [`Default`](core::default::Default).
 /// Do not also derive `Default` or apply `#[reactive]`. `render` stays a handwritten `Component` impl.
 ///
 /// `class`, `style` and `key` are reserved for the root element.
@@ -127,6 +130,15 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
     component::expand(&input)
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
+}
+
+/// Expands to `self.field` in the caller's method, so `slot(field)` inside `ui!` reads that field.
+#[doc(hidden)]
+#[proc_macro]
+pub fn slot_self(input: TokenStream) -> TokenStream {
+    let field = parse_macro_input!(input as Ident);
+    let receiver = Ident::new("self", field.span());
+    quote!(#receiver.#field).into()
 }
 
 /// Defines class names and their style rules together.

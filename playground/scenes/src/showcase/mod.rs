@@ -5,7 +5,7 @@
 //! - [`style`]: the stylesheet, i.e. the classes the layout uses, applied to every theme;
 //! - [`layout`]: the node tree, its state and its event handlers, with no styling of its own;
 //! - [`counter`]: a composable with one thread-local singleton and separate `new` instances;
-//! - [`badge`]: a single-file component with its own state, props, event and sheet.
+//! - [`badge`]: a single-file component with its own state, props, event, slots and sheet.
 
 mod badge;
 mod counter;

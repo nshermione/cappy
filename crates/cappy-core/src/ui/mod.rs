@@ -263,9 +263,13 @@ impl Ui {
             on_click,
             on_hover,
             children,
+            slot_owner: _,
+            accepts_slots: _,
         } = element;
         let (content, text_binding) = match content {
-            ElementContent::Container => (NodeContent::Container, None),
+            ElementContent::Container | ElementContent::Slot { .. } => {
+                (NodeContent::Container, None)
+            }
             ElementContent::StaticText(text) => (NodeContent::Text(text), None),
             ElementContent::DynamicText(binding) => (NodeContent::Text("".into()), Some(binding)),
         };
@@ -304,6 +308,7 @@ impl Ui {
         }
         let child_ids: Vec<NodeId> = children
             .into_iter()
+            .filter(|child| !matches!(child.content, ElementContent::Slot { .. }))
             .map(|child| self.mount(child, Some(id)))
             .collect();
         self.layout

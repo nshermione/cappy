@@ -6,6 +6,9 @@ pub mod __private {
     pub use cappy_core::*;
 }
 
+#[doc(hidden)]
+pub use cappy_macros::slot_self;
+
 /// Builds an element tree.
 ///
 /// ```
@@ -34,7 +37,11 @@ pub mod __private {
 /// - `@Type(field = value, ...) { children }` builds `Type::default()` and sets fields, e.g. a
 ///   struct using `#[derive(Props)]` or `#[component]` that implements
 ///   [`Component`](cappy_core::Component). `class`, `style` and `key` are applied to the element
-///   `render` returns. Children are appended to that root.
+///   `render` returns. Without `#[slot]` fields, children are appended to that root. With slots,
+///   the first child that has no `slot = name` fills the first slot, `slot = name` fills that
+///   slot, and further unnamed children are dropped.
+/// - `slot(field)` inside a component's `render` places that `#[slot]` field. It reads
+///   `self.field`.
 /// - `{ expression }` embeds an element; `{ ..iterator }` embeds every element it yields.
 ///
 /// Every `field = value` calls the builder method `field(value)`. A leading `:` makes the value
@@ -71,6 +78,9 @@ macro_rules! __ui_node {
     ({ $element:expr } $(,)?) => {
         $crate::__private::Element::from($element)
     };
+    ($ctor:ident ( $field:ident ) $(,)?) => {
+        $crate::__ui_slot_expr!($ctor ; $field)
+    };
     ($name:ident $(( $($args:tt)* ))? $({ $($children:tt)* })? $(,)?) => {
         $crate::__ui_children!(
             $crate::__ui_args!(@head $name ; $($($args)*)?) ; $($($children)*)?
@@ -79,7 +89,8 @@ macro_rules! __ui_node {
 }
 
 /// Splits `@Type` arguments. `class`, `style` and `key` stay on the element `render` returns.
-/// Every other field is a setter on the component. Children are appended to that root.
+/// Every other field is a setter on the component. Children fill slots, or append to that root
+/// when the component has none.
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __ui_component {
@@ -239,18 +250,34 @@ macro_rules! __ui_component {
         host [ $($host:tt)* ] ;
         children [ $($children:tt)* ] ;
     ) => {
-        $crate::__ui_children!(
-            $crate::__ui_args!(
-                @fields
-                [
+        $crate::__ui_args!(
+            @fields
+            [
+                $crate::__ui_slot_children!(
                     $crate::__private::Element::from(
                         $crate::__ui_args!(@fields [<$type $(:: $segment)*>::default()] $($props)*)
-                    )
-                ]
-                $($host)*
-            ) ;
-            $($children)*
+                    ).prepare_slots() ;
+                    $type $(:: $segment)* ;
+                    $($children)*
+                )
+            ]
+            $($host)*
         )
+    };
+}
+
+/// `slot(field)` reads `self.field`. Any other single-ident call stays a normal element.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ui_slot_expr {
+    ($ctor:ident ; $field:ident) => {
+        $crate::__ui_slot_expr!(@is $ctor ; $field ; $ctor)
+    };
+    (@is slot ; $field:ident ; $ctor:ident) => {
+        $ctor($crate::slot_self!($field))
+    };
+    (@is $other:ident ; $field:ident ; $ctor:ident) => {
+        $crate::__ui_args!(@head $ctor ; $field)
     };
 }
 
@@ -328,6 +355,15 @@ macro_rules! __ui_children {
     ($parent:expr ; { $child:expr } $($rest:tt)*) => {
         $crate::__ui_children!($parent.child($child) ; $($rest)*)
     };
+    ($parent:expr ; $ctor:ident ( $field:ident ) { $($children:tt)* } $($rest:tt)*) => {
+        $crate::__ui_children!(
+            $parent.child($crate::__ui_node!($ctor ( $field ) { $($children)* })) ;
+            $($rest)*
+        )
+    };
+    ($parent:expr ; $ctor:ident ( $field:ident ) $($rest:tt)*) => {
+        $crate::__ui_slot_child!($parent ; $ctor ; $field ; $($rest)*)
+    };
     ($parent:expr ; @ $type:ident $(:: $segment:ident)* ( $($props:tt)* ) { $($children:tt)* } $($rest:tt)*) => {
         $crate::__ui_children!(
             $parent.child($crate::__ui_node!(@ $type $(:: $segment)* ( $($props)* ) { $($children)* })) ;
@@ -361,6 +397,449 @@ macro_rules! __ui_children {
     };
     ($parent:expr ; $name:ident $($rest:tt)*) => {
         $crate::__ui_children!($parent.child($crate::__ui_node!($name)) ; $($rest)*)
+    };
+}
+
+/// `slot(field)` becomes `slot(self.field)`. The captured `slot` token keeps go-to-definition.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ui_slot_child {
+    ($parent:expr ; $ctor:ident ; $field:ident ; $($rest:tt)*) => {
+        $crate::__ui_slot_child!(@is $parent ; $ctor ; $field ; $ctor ; $($rest)*)
+    };
+    (@is $parent:expr ; slot ; $field:ident ; $ctor:ident ; $($rest:tt)*) => {
+        $crate::__ui_children!($parent.child($ctor($crate::slot_self!($field))) ; $($rest)*)
+    };
+    (@is $parent:expr ; $other:ident ; $field:ident ; $ctor:ident ; $($rest:tt)*) => {
+        $crate::__ui_children!(
+            $parent.child($crate::__ui_node!($ctor ( $field ))) ; $($rest)*
+        )
+    };
+}
+
+/// Places each child of `@Type` into a slot, or appends it when the component has none.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ui_slot_children {
+    ($parent:expr ; $type:ident $(:: $segment:ident)* ;) => {
+        $parent
+    };
+    ($parent:expr ; $type:ident $(:: $segment:ident)* ; , $($rest:tt)*) => {
+        $crate::__ui_slot_children!($parent ; $type $(:: $segment)* ; $($rest)*)
+    };
+    ($parent:expr ; $type:ident $(:: $segment:ident)* ; { .. $children:expr } $($rest:tt)*) => {
+        $crate::__ui_slot_children!(
+            $parent.place_children($children) ; $type $(:: $segment)* ; $($rest)*
+        )
+    };
+    ($parent:expr ; $type:ident $(:: $segment:ident)* ; { $child:expr } $($rest:tt)*) => {
+        $crate::__ui_slot_children!(
+            $parent.place_child($child) ; $type $(:: $segment)* ; $($rest)*
+        )
+    };
+    ($parent:expr ; $type:ident $(:: $segment:ident)* ; @ $child:ident $(:: $child_segment:ident)* ( $($props:tt)* ) { $($inner:tt)* } $($rest:tt)*) => {
+        $crate::__ui_partition_slot!(
+            @start
+            parent $parent ;
+            ty $type $(:: $segment)* ;
+            rest [ $($rest)* ] ;
+            build [ @ $child $(:: $child_segment)* ] ;
+            inner { $($inner)* } ;
+            $($props)*
+        )
+    };
+    ($parent:expr ; $type:ident $(:: $segment:ident)* ; @ $child:ident $(:: $child_segment:ident)* ( $($props:tt)* ) $($rest:tt)*) => {
+        $crate::__ui_partition_slot!(
+            @start
+            parent $parent ;
+            ty $type $(:: $segment)* ;
+            rest [ $($rest)* ] ;
+            build [ @ $child $(:: $child_segment)* ] ;
+            inner { } ;
+            $($props)*
+        )
+    };
+    ($parent:expr ; $type:ident $(:: $segment:ident)* ; @ $child:ident $(:: $child_segment:ident)* { $($inner:tt)* } $($rest:tt)*) => {
+        $crate::__ui_slot_children!(
+            $parent.place_child($crate::__ui_node!(@ $child $(:: $child_segment)* { $($inner)* })) ;
+            $type $(:: $segment)* ;
+            $($rest)*
+        )
+    };
+    ($parent:expr ; $type:ident $(:: $segment:ident)* ; @ $child:ident $(:: $child_segment:ident)* $($rest:tt)*) => {
+        $crate::__ui_slot_children!(
+            $parent.place_child($crate::__ui_node!(@ $child $(:: $child_segment)*)) ;
+            $type $(:: $segment)* ;
+            $($rest)*
+        )
+    };
+    ($parent:expr ; $type:ident $(:: $segment:ident)* ; $name:ident ( $($args:tt)* ) { $($inner:tt)* } $($rest:tt)*) => {
+        $crate::__ui_partition_slot!(
+            @start
+            parent $parent ;
+            ty $type $(:: $segment)* ;
+            rest [ $($rest)* ] ;
+            build [ $name ] ;
+            inner { $($inner)* } ;
+            $($args)*
+        )
+    };
+    ($parent:expr ; $type:ident $(:: $segment:ident)* ; $name:ident ( $($args:tt)* ) $($rest:tt)*) => {
+        $crate::__ui_partition_slot!(
+            @start
+            parent $parent ;
+            ty $type $(:: $segment)* ;
+            rest [ $($rest)* ] ;
+            build [ $name ] ;
+            inner { } ;
+            $($args)*
+        )
+    };
+    ($parent:expr ; $type:ident $(:: $segment:ident)* ; $name:ident { $($inner:tt)* } $($rest:tt)*) => {
+        $crate::__ui_slot_children!(
+            $parent.place_child($crate::__ui_node!($name { $($inner)* })) ;
+            $type $(:: $segment)* ;
+            $($rest)*
+        )
+    };
+    ($parent:expr ; $type:ident $(:: $segment:ident)* ; $name:ident $($rest:tt)*) => {
+        $crate::__ui_slot_children!(
+            $parent.place_child($crate::__ui_node!($name)) ;
+            $type $(:: $segment)* ;
+            $($rest)*
+        )
+    };
+}
+
+/// Removes `slot = name` from one child's arguments and places that child.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ui_partition_slot {
+    (
+        @start
+        parent $parent:expr ;
+        ty $($ty:ident)::+ ;
+        rest [ $($rest:tt)* ] ;
+        build [ $($build:tt)+ ] ;
+        inner { $($inner:tt)* } ;
+        $($args:tt)*
+    ) => {
+        $crate::__ui_partition_slot!(
+            @go
+            parent $parent ;
+            ty $($ty)::+ ;
+            rest [ $($rest)* ] ;
+            build [ $($build)+ ] ;
+            inner { $($inner)* } ;
+            kept [] ;
+            slot [] ;
+            $($args)*
+        )
+    };
+    (
+        @go
+        parent $parent:expr ;
+        ty $($ty:ident)::+ ;
+        rest [ $($rest:tt)* ] ;
+        build [ $($build:tt)+ ] ;
+        inner { $($inner:tt)* } ;
+        kept [ $($kept:tt)* ] ;
+        slot [ $slot:ident ] ;
+        slot = $ignored:ident, $($more:tt)*
+    ) => {
+        $crate::__ui_partition_slot!(
+            @go
+            parent $parent ;
+            ty $($ty)::+ ;
+            rest [ $($rest)* ] ;
+            build [ $($build)+ ] ;
+            inner { $($inner)* } ;
+            kept [ $($kept)* ] ;
+            slot [ $slot ] ;
+            $($more)*
+        )
+    };
+    (
+        @go
+        parent $parent:expr ;
+        ty $($ty:ident)::+ ;
+        rest [ $($rest:tt)* ] ;
+        build [ $($build:tt)+ ] ;
+        inner { $($inner:tt)* } ;
+        kept [ $($kept:tt)* ] ;
+        slot [ ] ;
+        slot = $slot:ident, $($more:tt)*
+    ) => {
+        $crate::__ui_partition_slot!(
+            @go
+            parent $parent ;
+            ty $($ty)::+ ;
+            rest [ $($rest)* ] ;
+            build [ $($build)+ ] ;
+            inner { $($inner)* } ;
+            kept [ $($kept)* ] ;
+            slot [ $slot ] ;
+            $($more)*
+        )
+    };
+    (
+        @go
+        parent $parent:expr ;
+        ty $($ty:ident)::+ ;
+        rest [ $($rest:tt)* ] ;
+        build [ $($build:tt)+ ] ;
+        inner { $($inner:tt)* } ;
+        kept [ $($kept:tt)* ] ;
+        slot [ $slot:ident ] ;
+        slot = $ignored:ident
+    ) => {
+        $crate::__ui_partition_slot!(
+            @go
+            parent $parent ;
+            ty $($ty)::+ ;
+            rest [ $($rest)* ] ;
+            build [ $($build)+ ] ;
+            inner { $($inner)* } ;
+            kept [ $($kept)* ] ;
+            slot [ $slot ] ;
+        )
+    };
+    (
+        @go
+        parent $parent:expr ;
+        ty $($ty:ident)::+ ;
+        rest [ $($rest:tt)* ] ;
+        build [ $($build:tt)+ ] ;
+        inner { $($inner:tt)* } ;
+        kept [ $($kept:tt)* ] ;
+        slot [ ] ;
+        slot = $slot:ident
+    ) => {
+        $crate::__ui_partition_slot!(
+            @go
+            parent $parent ;
+            ty $($ty)::+ ;
+            rest [ $($rest)* ] ;
+            build [ $($build)+ ] ;
+            inner { $($inner)* } ;
+            kept [ $($kept)* ] ;
+            slot [ $slot ] ;
+        )
+    };
+    (
+        @go
+        parent $parent:expr ;
+        ty $($ty:ident)::+ ;
+        rest [ $($rest:tt)* ] ;
+        build [ $($build:tt)+ ] ;
+        inner { $($inner:tt)* } ;
+        kept [ $($kept:tt)* ] ;
+        slot [ $($slot:ident)? ] ;
+        : $field:ident = $value:expr, $($more:tt)*
+    ) => {
+        $crate::__ui_partition_slot!(
+            @go
+            parent $parent ;
+            ty $($ty)::+ ;
+            rest [ $($rest)* ] ;
+            build [ $($build)+ ] ;
+            inner { $($inner)* } ;
+            kept [ $($kept)* : $field = $value, ] ;
+            slot [ $($slot)? ] ;
+            $($more)*
+        )
+    };
+    (
+        @go
+        parent $parent:expr ;
+        ty $($ty:ident)::+ ;
+        rest [ $($rest:tt)* ] ;
+        build [ $($build:tt)+ ] ;
+        inner { $($inner:tt)* } ;
+        kept [ $($kept:tt)* ] ;
+        slot [ $($slot:ident)? ] ;
+        : $field:ident = $value:expr
+    ) => {
+        $crate::__ui_partition_slot!(
+            @go
+            parent $parent ;
+            ty $($ty)::+ ;
+            rest [ $($rest)* ] ;
+            build [ $($build)+ ] ;
+            inner { $($inner)* } ;
+            kept [ $($kept)* : $field = $value, ] ;
+            slot [ $($slot)? ] ;
+        )
+    };
+    (
+        @go
+        parent $parent:expr ;
+        ty $($ty:ident)::+ ;
+        rest [ $($rest:tt)* ] ;
+        build [ $($build:tt)+ ] ;
+        inner { $($inner:tt)* } ;
+        kept [ $($kept:tt)* ] ;
+        slot [ $($slot:ident)? ] ;
+        $field:ident = $value:expr, $($more:tt)*
+    ) => {
+        $crate::__ui_partition_slot!(
+            @go
+            parent $parent ;
+            ty $($ty)::+ ;
+            rest [ $($rest)* ] ;
+            build [ $($build)+ ] ;
+            inner { $($inner)* } ;
+            kept [ $($kept)* $field = $value, ] ;
+            slot [ $($slot)? ] ;
+            $($more)*
+        )
+    };
+    (
+        @go
+        parent $parent:expr ;
+        ty $($ty:ident)::+ ;
+        rest [ $($rest:tt)* ] ;
+        build [ $($build:tt)+ ] ;
+        inner { $($inner:tt)* } ;
+        kept [ $($kept:tt)* ] ;
+        slot [ $($slot:ident)? ] ;
+        $field:ident = $value:expr
+    ) => {
+        $crate::__ui_partition_slot!(
+            @go
+            parent $parent ;
+            ty $($ty)::+ ;
+            rest [ $($rest)* ] ;
+            build [ $($build)+ ] ;
+            inner { $($inner)* } ;
+            kept [ $($kept)* $field = $value, ] ;
+            slot [ $($slot)? ] ;
+        )
+    };
+    (
+        @go
+        parent $parent:expr ;
+        ty $($ty:ident)::+ ;
+        rest [ $($rest:tt)* ] ;
+        build [ $($build:tt)+ ] ;
+        inner { $($inner:tt)* } ;
+        kept [ $($kept:tt)* ] ;
+        slot [ $($slot:ident)? ] ;
+        : $content:expr, $($more:tt)*
+    ) => {
+        $crate::__ui_partition_slot!(
+            @go
+            parent $parent ;
+            ty $($ty)::+ ;
+            rest [ $($rest)* ] ;
+            build [ $($build)+ ] ;
+            inner { $($inner)* } ;
+            kept [ $($kept)* : $content, ] ;
+            slot [ $($slot)? ] ;
+            $($more)*
+        )
+    };
+    (
+        @go
+        parent $parent:expr ;
+        ty $($ty:ident)::+ ;
+        rest [ $($rest:tt)* ] ;
+        build [ $($build:tt)+ ] ;
+        inner { $($inner:tt)* } ;
+        kept [ $($kept:tt)* ] ;
+        slot [ $($slot:ident)? ] ;
+        : $content:expr
+    ) => {
+        $crate::__ui_partition_slot!(
+            @go
+            parent $parent ;
+            ty $($ty)::+ ;
+            rest [ $($rest)* ] ;
+            build [ $($build)+ ] ;
+            inner { $($inner)* } ;
+            kept [ $($kept)* : $content, ] ;
+            slot [ $($slot)? ] ;
+        )
+    };
+    (
+        @go
+        parent $parent:expr ;
+        ty $($ty:ident)::+ ;
+        rest [ $($rest:tt)* ] ;
+        build [ $($build:tt)+ ] ;
+        inner { $($inner:tt)* } ;
+        kept [ $($kept:tt)* ] ;
+        slot [ $($slot:ident)? ] ;
+        $content:expr, $($more:tt)*
+    ) => {
+        $crate::__ui_partition_slot!(
+            @go
+            parent $parent ;
+            ty $($ty)::+ ;
+            rest [ $($rest)* ] ;
+            build [ $($build)+ ] ;
+            inner { $($inner)* } ;
+            kept [ $($kept)* $content, ] ;
+            slot [ $($slot)? ] ;
+            $($more)*
+        )
+    };
+    (
+        @go
+        parent $parent:expr ;
+        ty $($ty:ident)::+ ;
+        rest [ $($rest:tt)* ] ;
+        build [ $($build:tt)+ ] ;
+        inner { $($inner:tt)* } ;
+        kept [ $($kept:tt)* ] ;
+        slot [ $($slot:ident)? ] ;
+        $content:expr
+    ) => {
+        $crate::__ui_partition_slot!(
+            @go
+            parent $parent ;
+            ty $($ty)::+ ;
+            rest [ $($rest)* ] ;
+            build [ $($build)+ ] ;
+            inner { $($inner)* } ;
+            kept [ $($kept)* $content, ] ;
+            slot [ $($slot)? ] ;
+        )
+    };
+    (
+        @go
+        parent $parent:expr ;
+        ty $($ty:ident)::+ ;
+        rest [ $($rest:tt)* ] ;
+        build [ $($build:tt)+ ] ;
+        inner { $($inner:tt)* } ;
+        kept [ $($kept:tt)* ] ;
+        slot [ $slot:ident ] ;
+    ) => {
+        $crate::__ui_slot_children!(
+            $parent.fill_slot(
+                <$($ty)::*>::$slot,
+                $crate::__ui_node!($($build)+ ( $($kept)* ) { $($inner)* })
+            ) ;
+            $($ty)::+ ;
+            $($rest)*
+        )
+    };
+    (
+        @go
+        parent $parent:expr ;
+        ty $($ty:ident)::+ ;
+        rest [ $($rest:tt)* ] ;
+        build [ $($build:tt)+ ] ;
+        inner { $($inner:tt)* } ;
+        kept [ $($kept:tt)* ] ;
+        slot [ ] ;
+    ) => {
+        $crate::__ui_slot_children!(
+            $parent.place_child($crate::__ui_node!($($build)+ ( $($kept)* ) { $($inner)* })) ;
+            $($ty)::+ ;
+            $($rest)*
+        )
     };
 }
 

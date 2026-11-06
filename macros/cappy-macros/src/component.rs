@@ -11,6 +11,7 @@ enum FieldKind {
     State,
     Prop,
     Event,
+    Slot(u16),
 }
 
 pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
@@ -25,11 +26,18 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         ));
     }
     let fields = named_fields(input, "#[component]")?;
-    let kinds = fields
-        .iter()
-        .copied()
-        .map(classify)
-        .collect::<syn::Result<Vec<_>>>()?;
+    let mut kinds = Vec::with_capacity(fields.len());
+    let mut next_slot = 0u16;
+    for field in &fields {
+        let kind = classify(field, next_slot)?;
+        if matches!(kind, FieldKind::Slot(_)) {
+            let name = field.ident.as_ref().expect("named field");
+            next_slot = next_slot
+                .checked_add(1)
+                .ok_or_else(|| syn::Error::new(name.span(), "too many #[slot] fields"))?;
+        }
+        kinds.push(kind);
+    }
     let vis = &input.vis;
     let name = &input.ident;
     let attrs = without_default_derive(&input.attrs)?;
@@ -40,7 +48,7 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         .zip(&kinds)
         .map(|(field, kind)| struct_field(field, kind));
     let new_args = fields.iter().zip(&kinds).filter_map(|(field, kind)| {
-        if matches!(kind, FieldKind::Event) {
+        if matches!(kind, FieldKind::Event | FieldKind::Slot(_)) {
             None
         } else {
             let field_name = field.ident.as_ref().expect("named field");
@@ -56,12 +64,23 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         .iter()
         .zip(&kinds)
         .filter_map(|(field, kind)| setter(field, kind));
+    let slot_consts = fields.iter().zip(&kinds).filter_map(|(field, kind)| {
+        let FieldKind::Slot(index) = kind else {
+            return None;
+        };
+        let name = field.ident.as_ref().expect("named field");
+        let ty = &field.ty;
+        Some(quote! {
+            #[allow(non_upper_case_globals, dead_code)]
+            pub const #name: ::cappy::Slot<Self, #ty> = ::cappy::Slot::new(#index);
+        })
+    });
     let default_impl = default_impl(&generics, name, &fields, &kinds);
     let copy_types: Vec<TokenStream> = fields
         .iter()
         .zip(&kinds)
         .filter_map(|(field, kind)| match kind {
-            FieldKind::Event => None,
+            FieldKind::Event | FieldKind::Slot(_) => None,
             FieldKind::State | FieldKind::Prop => {
                 let ty = &field.ty;
                 Some(quote!(<#ty as ::cappy::IntoReactive>::Output))
@@ -84,6 +103,7 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
             }
 
             #(#setters)*
+            #(#slot_consts)*
         }
 
         #default_impl
@@ -91,7 +111,7 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     })
 }
 
-fn classify(field: &Field) -> syn::Result<FieldKind> {
+fn classify(field: &Field, next_slot: u16) -> syn::Result<FieldKind> {
     let name = field.ident.as_ref().expect("named field");
     if RESERVED.iter().any(|reserved| name == reserved) {
         return Err(syn::Error::new(
@@ -101,15 +121,54 @@ fn classify(field: &Field) -> syn::Result<FieldKind> {
     }
     let prop = marker(field, "prop")?;
     let event = marker(field, "event")?;
-    match (prop, event) {
-        (true, true) => Err(syn::Error::new(
+    let slot = marker(field, "slot")?;
+    if prop && event {
+        return Err(syn::Error::new(
             name.span(),
             "a field cannot be both #[prop] and #[event]",
-        )),
-        (false, true) => Ok(FieldKind::Event),
-        (true, false) => Ok(FieldKind::Prop),
-        (false, false) => Ok(FieldKind::State),
+        ));
     }
+    if prop && slot {
+        return Err(syn::Error::new(
+            name.span(),
+            "a field cannot be both #[prop] and #[slot]",
+        ));
+    }
+    if event && slot {
+        return Err(syn::Error::new(
+            name.span(),
+            "a field cannot be both #[event] and #[slot]",
+        ));
+    }
+    if slot {
+        if !is_element_type(&field.ty) {
+            return Err(syn::Error::new(
+                field.ty.span(),
+                "#[slot] fields must have type `Element`",
+            ));
+        }
+        return Ok(FieldKind::Slot(next_slot));
+    }
+    if event {
+        return Ok(FieldKind::Event);
+    }
+    if prop {
+        return Ok(FieldKind::Prop);
+    }
+    Ok(FieldKind::State)
+}
+
+fn is_element_type(ty: &Type) -> bool {
+    let Type::Path(path) = ty else {
+        return false;
+    };
+    if path.qself.is_some() {
+        return false;
+    }
+    let Some(segment) = path.path.segments.last() else {
+        return false;
+    };
+    segment.ident == "Element" && segment.arguments.is_empty()
 }
 
 fn marker(field: &Field, name: &str) -> syn::Result<bool> {
@@ -158,7 +217,11 @@ fn kept_attrs(field: &Field) -> Vec<&Attribute> {
     field
         .attrs
         .iter()
-        .filter(|attr| !attr.path().is_ident("prop") && !attr.path().is_ident("event"))
+        .filter(|attr| {
+            !attr.path().is_ident("prop")
+                && !attr.path().is_ident("event")
+                && !attr.path().is_ident("slot")
+        })
         .collect()
 }
 
@@ -172,6 +235,10 @@ fn struct_field(field: &Field, kind: &FieldKind) -> TokenStream {
             #(#attrs)*
             #vis #name: ::cappy::Listener<#ty>,
         },
+        FieldKind::Slot(_) => quote! {
+            #(#attrs)*
+            #vis #name: ::cappy::Slot<Self, #ty>,
+        },
         FieldKind::State | FieldKind::Prop => quote! {
             #(#attrs)*
             #vis #name: <#ty as ::cappy::IntoReactive>::Output,
@@ -184,6 +251,7 @@ fn field_init(field: &Field, kind: &FieldKind, default_value: bool) -> TokenStre
     let ty = &field.ty;
     match kind {
         FieldKind::Event => quote!(#name: ::cappy::Listener::empty()),
+        FieldKind::Slot(index) => quote!(#name: ::cappy::Slot::new(#index)),
         FieldKind::State | FieldKind::Prop if default_value => {
             quote!(#name: ::cappy::reactive(<#ty as ::core::default::Default>::default()))
         }
@@ -199,7 +267,7 @@ fn setter(field: &Field, kind: &FieldKind) -> Option<TokenStream> {
         .iter()
         .filter(|attr| attr.path().is_ident("doc"));
     match kind {
-        FieldKind::State => None,
+        FieldKind::State | FieldKind::Slot(_) => None,
         FieldKind::Prop => Some(quote! {
             #(#docs)*
             #[must_use]
@@ -250,7 +318,7 @@ fn default_impl(
     {
         let predicates = &mut generics.make_where_clause().predicates;
         for (field, kind) in fields.iter().zip(kinds) {
-            if !matches!(kind, FieldKind::Event) {
+            if matches!(kind, FieldKind::State | FieldKind::Prop) {
                 let ty = &field.ty;
                 predicates.push(parse_quote!(#ty: ::core::default::Default));
             }

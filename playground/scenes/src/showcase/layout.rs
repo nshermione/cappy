@@ -63,7 +63,10 @@ fn demo_badge() -> Element {
     let label = reactive(String::from("Badge"));
     let mark_clicked = move |value: &String| label.set(format!("{value}!"));
     ui! {
-        @Badge(label = label, on_click = mark_clicked, key = "demo-badge")
+        @Badge(label = label, on_click = mark_clicked, key = "demo-badge") {
+            text("in", key = "badge-icon", slot = icon)
+            text("out", key = "badge-tail", slot = tail)
+        }
     }
 }
 

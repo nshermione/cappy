@@ -363,6 +363,7 @@ name = "cappy-dsl"
 version = "0.1.0"
 dependencies = [
  "cappy-core",
+ "cappy-macros",
 ]
 
 [[package]]

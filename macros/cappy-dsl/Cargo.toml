@@ -8,6 +8,7 @@ authors.workspace = true
 
 [dependencies]
 cappy-core.workspace = true
+cappy-macros.workspace = true
 
 [lints]
 workspace = true
