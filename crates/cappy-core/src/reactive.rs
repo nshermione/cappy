@@ -184,6 +184,44 @@ impl Runtime {
     }
 }
 
+// #region agent log
+#[cfg(test)]
+pub(crate) fn debug_signal_occupancy() -> (usize, usize, usize) {
+    RUNTIME.with(|runtime| {
+        let slots = runtime.slots.borrow();
+        let occupied = slots.iter().filter(|slot| slot.is_some()).count();
+        let free = runtime.free_slots.borrow().len();
+        (occupied, slots.len(), free)
+    })
+}
+
+#[cfg(test)]
+pub(crate) fn debug_signal_alive<T: 'static>(signal: Signal<T>) -> bool {
+    RUNTIME.with(|runtime| {
+        runtime
+            .slots
+            .borrow()
+            .get(signal.index as usize)
+            .and_then(|slot| slot.as_ref())
+            .is_some_and(|slot| slot.generation == signal.generation)
+    })
+}
+
+#[cfg(test)]
+pub(crate) fn debug_subscriber_count<T: 'static>(signal: Signal<T>) -> usize {
+    RUNTIME.with(|runtime| {
+        runtime
+            .slots
+            .borrow()
+            .get(signal.index as usize)
+            .and_then(|slot| slot.as_ref())
+            .filter(|slot| slot.generation == signal.generation)
+            .map(|slot| slot.subscribers.len())
+            .unwrap_or(0)
+    })
+}
+// #endregion
+
 /// Runs `scope` with `observer` as the current subscriber, restoring the previous one afterwards.
 pub(crate) fn track<R>(observer: Observer, scope: impl FnOnce() -> R) -> R {
     let previous = RUNTIME.with(|runtime| runtime.current_observer.replace(Some(observer)));
@@ -582,6 +620,156 @@ mod tests {
         assert_eq!(inner.get(), "yo");
         assert_eq!(reactive(wrapped), wrapped);
     }
+
+    // #region agent log
+    fn agent_log(hypothesis_id: &str, message: &str, data: String) {
+        use std::io::Write;
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis())
+            .unwrap_or(0);
+        let line = format!(
+            "{{\"sessionId\":\"c37ca8\",\"runId\":\"probe\",\"hypothesisId\":\"{hypothesis_id}\",\"location\":\"cappy-core/src/reactive.rs\",\"message\":{message_json},\"data\":{data},\"timestamp\":{timestamp}}}\n",
+            message_json = format!("\"{}\"", message.replace('"', "'")),
+        );
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(r"d:\projects\rs-gui\.cursor\debug-c37ca8.log")
+        {
+            let _ = file.write_all(line.as_bytes());
+        }
+    }
+
+    #[test]
+    fn memory_probe_dynamic_slots() {
+        let (occupied_before, _, _) = debug_signal_occupancy();
+        {
+            let _dropped = signal(String::from("temporary"));
+        }
+        let (occupied_after_drop, _, _) = debug_signal_occupancy();
+        let kept = signal(1);
+        kept.dispose();
+        let (occupied_after_dispose, _, free_after_dispose) = debug_signal_occupancy();
+        agent_log(
+            "A",
+            "signal drop vs dispose",
+            format!(
+                "{{\"occupiedBefore\":{occupied_before},\"occupiedAfterDrop\":{occupied_after_drop},\"dropRetained\":{},\"occupiedAfterDispose\":{occupied_after_dispose},\"freeAfterDispose\":{free_after_dispose}}}",
+                occupied_after_drop == occupied_before + 1
+            ),
+        );
+
+        let (listeners_before, handlers_before) = crate::listener::debug_listener_occupancy();
+        {
+            let listener = crate::Listener::<String>::empty();
+            listener.set(|value| {
+                let _kept = value.clone();
+            });
+        }
+        let (listeners_after, handlers_after) = crate::listener::debug_listener_occupancy();
+        agent_log(
+            "B",
+            "listener drop keeps slot and handler",
+            format!(
+                "{{\"slotsBefore\":{listeners_before},\"slotsAfter\":{listeners_after},\"handlersBefore\":{handlers_before},\"handlersAfter\":{handlers_after}}}"
+            ),
+        );
+
+        let (before_prop, _, _) = debug_signal_occupancy();
+        let mut slot = reactive(String::from("default-prop"));
+        let orphan = slot.inner;
+        let parent = reactive(String::from("parent"));
+        crate::PropInput::<String, crate::ByHandle>::apply(parent, &mut slot);
+        let orphan_alive = debug_signal_alive(orphan);
+        let (after_prop, _, _) = debug_signal_occupancy();
+        agent_log(
+            "C",
+            "by-handle prop replace",
+            format!(
+                "{{\"occupiedBefore\":{before_prop},\"occupiedAfter\":{after_prop},\"orphanAlive\":{orphan_alive},\"slotNowAliasesParent\":{}}}",
+                slot.inner == parent.inner
+            ),
+        );
+
+        let binding_queue = queue();
+        let flag = signal(true);
+        let left = signal(1);
+        let right = signal(2);
+        let eval = || {
+            track(Observer::new(&binding_queue, BindingId(1)), || {
+                if flag.get() { left.get() } else { right.get() }
+            });
+        };
+        eval();
+        let left_after_first = debug_subscriber_count(left);
+        let right_after_first = debug_subscriber_count(right);
+        flag.set(false);
+        eval();
+        let left_after_second = debug_subscriber_count(left);
+        let right_after_second = debug_subscriber_count(right);
+        agent_log(
+            "D",
+            "binding does not unsubscribe",
+            format!(
+                "{{\"leftAfterFirst\":{left_after_first},\"rightAfterFirst\":{right_after_first},\"leftAfterSecond\":{left_after_second},\"rightAfterSecond\":{right_after_second}}}"
+            ),
+        );
+
+        let watched = signal(0);
+        {
+            let ephemeral = queue();
+            track(Observer::new(&ephemeral, BindingId(7)), || watched.get());
+        }
+        let subscribers_after_queue_drop = debug_subscriber_count(watched);
+        watched.set(1);
+        let subscribers_after_write = debug_subscriber_count(watched);
+        agent_log(
+            "E",
+            "dead observers linger until write",
+            format!(
+                "{{\"afterQueueDrop\":{subscribers_after_queue_drop},\"afterWrite\":{subscribers_after_write}}}"
+            ),
+        );
+
+        let (before_ui, _, _) = debug_signal_occupancy();
+        let theme_signal;
+        {
+            let ui = crate::Ui::new(crate::div(), crate::Theme::light());
+            theme_signal = ui.theme_signal();
+        }
+        let (after_ui_drop, _, _) = debug_signal_occupancy();
+        agent_log(
+            "G",
+            "Ui::new theme signal survives Ui drop",
+            format!(
+                "{{\"occupiedBefore\":{before_ui},\"occupiedAfter\":{after_ui_drop},\"themeAliveAfterDrop\":{}}}",
+                debug_signal_alive(theme_signal)
+            ),
+        );
+
+        let cycled = queue();
+        let captured = Rc::clone(&cycled);
+        cycled.set_waker(Some(Rc::new(move || {
+            let _pin = &captured;
+        })));
+        let cycled_weak = Rc::downgrade(&cycled);
+        drop(cycled);
+        let plain = queue();
+        plain.set_waker(Some(Rc::new(|| {})));
+        let plain_weak = Rc::downgrade(&plain);
+        drop(plain);
+        agent_log(
+            "F",
+            "waker capture cycle",
+            format!(
+                "{{\"capturingWakerStrongCount\":{},\"plainWakerStrongCount\":{}}}",
+                cycled_weak.strong_count(),
+                plain_weak.strong_count()
+            ),
+        );
+    }
+    // #endregion
 
     #[test]
     fn display_read_tracks_in_a_binding() {
