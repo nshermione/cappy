@@ -76,6 +76,8 @@ pub struct Renderer {
     overlay_quads: QuadBatch,
     text: TextLayer,
     offscreen: Option<Offscreen>,
+    /// Frame size of the latest paint. The offscreen texture may be larger than this.
+    viewport_size: (u32, u32),
     debug_damage: bool,
     /// Physical rectangles repainted by the latest paint that had damage.
     last_repainted: Vec<Rect>,
@@ -91,6 +93,7 @@ impl Renderer {
             compositor: Compositor::new(device),
             text: TextLayer::new(device, queue, fonts, OFFSCREEN_FORMAT),
             offscreen: None,
+            viewport_size: (1, 1),
             debug_damage: false,
             last_repainted: Vec::new(),
         }
@@ -130,6 +133,7 @@ impl Renderer {
         frame: &RenderFrame,
     ) -> Result<usize, RenderError> {
         let size = (frame.physical_width.max(1), frame.physical_height.max(1));
+        self.viewport_size = size;
         let recreated = self
             .compositor
             .ensure_offscreen(device, &mut self.offscreen, size);
@@ -156,7 +160,7 @@ impl Renderer {
             &frame.primitives,
             &batches,
         )?;
-        self.draw_regions(device, encoder, &scissors, &quad_ranges)?;
+        self.draw_regions(device, encoder, size, &scissors, &quad_ranges)?;
         self.text.finish_paint();
 
         self.last_repainted = scissors.iter().map(|scissor| scissor.to_rect()).collect();
@@ -192,6 +196,7 @@ impl Renderer {
         &mut self,
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
+        frame_size: (u32, u32),
         scissors: &[PixelRect],
         quad_ranges: &[Range<u32>],
     ) -> Result<(), RenderError> {
@@ -206,6 +211,9 @@ impl Renderer {
             .as_ref()
             .expect("paint creates the offscreen texture");
         let mut pass = begin_pass(encoder, "cappy paint", &offscreen.view, wgpu::LoadOp::Load);
+        // Quads and text map pixels through this frame. The texture can be larger, so the pass
+        // viewport has to be the frame or the content lands past the rectangle the composite reads.
+        pass.set_viewport(0.0, 0.0, frame_size.0 as f32, frame_size.1 as f32, 0.0, 1.0);
         for (index, scissor) in (0u32..).zip(scissors) {
             pass.set_scissor_rect(scissor.x, scissor.y, scissor.width, scissor.height);
             self.scene_quads.draw(&mut pass, &eraser, index..index + 1);
@@ -223,8 +231,7 @@ impl Renderer {
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
     ) -> Option<(wgpu::RenderPipeline, u32)> {
-        let offscreen = self.offscreen.as_ref()?;
-        if !self.debug_damage || self.last_repainted.is_empty() {
+        if self.offscreen.is_none() || !self.debug_damage || self.last_repainted.is_empty() {
             return None;
         }
         let instances: Vec<QuadInstance> = self
@@ -241,7 +248,7 @@ impl Renderer {
             })
             .collect();
         self.overlay_quads
-            .upload(device, queue, offscreen.size, &instances);
+            .upload(device, queue, self.viewport_size, &instances);
         let pipeline = self.quad_pipelines.get(device, format, QuadBlend::Over);
         Some((pipeline, instances.len() as u32))
     }

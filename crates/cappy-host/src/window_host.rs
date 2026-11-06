@@ -6,7 +6,9 @@
 use cappy_core::ResourceCensus;
 use cappy_core::{CursorIcon, FrameInput, InputEvent, Ui, UpdateOutcome};
 use cappy_text::{CosmicTextMeasurer, FontContext};
+use std::time::Instant;
 
+use crate::resize_pace::{PresentedFrame, ResizeFrame, choose_resize_frame};
 use crate::{PresentOutcome, RendererError, RendererKind, WindowRenderer};
 
 const DEFAULT_TITLE: &str = "cappy";
@@ -77,6 +79,9 @@ pub struct RedrawResult {
     pub present: PresentOutcome,
     /// Set when the cursor icon must change.
     pub cursor: Option<CursorIcon>,
+    /// When set, redraw at this instant. A drag in progress presents on this cadence, and a
+    /// released drag presents the resting size here.
+    pub settle_at: Option<Instant>,
 }
 
 impl RedrawResult {
@@ -92,6 +97,11 @@ pub struct WindowHost {
     cursor: CursorIcon,
     /// Size of the last redraw, used to settle input without waiting for a frame.
     last_input: Option<FrameInput>,
+    /// Last size passed to [`WindowHost::resize`], and when it changed.
+    last_resize_size: Option<(u32, u32)>,
+    last_resize: Option<Instant>,
+    /// Last size actually submitted to the GPU.
+    presented: Option<PresentedFrame>,
     frames: u64,
     /// Previous resource snapshot, so the memory trace logs only when something changed.
     #[cfg(debug_assertions)]
@@ -111,6 +121,9 @@ impl WindowHost {
             renderer,
             cursor: CursorIcon::Default,
             last_input: None,
+            last_resize_size: None,
+            last_resize: None,
+            presented: None,
             frames: 0,
             #[cfg(debug_assertions)]
             traced_resources: None,
@@ -169,19 +182,52 @@ impl WindowHost {
         redraw
     }
 
+    /// Records a window-size change for the present pace. The surface is resized in
+    /// [`WindowHost::redraw`] when that size is actually shown.
     pub fn resize(&mut self, physical_size: (u32, u32)) {
-        self.renderer.resize(physical_size);
+        if physical_size.0 == 0
+            || physical_size.1 == 0
+            || self.last_resize_size == Some(physical_size)
+        {
+            return;
+        }
+        self.last_resize_size = Some(physical_size);
+        self.last_resize = Some(Instant::now());
     }
 
     /// Updates the UI for the current window size and presents a frame. When nothing changed the
     /// frame carries no damage, so this costs only a composite (e.g. after the OS exposes the
     /// window).
+    ///
+    /// While the window size is still changing, presents are at least one resize interval apart.
+    /// [`RedrawResult::settle_at`] is when the next one is due, including the frame for the
+    /// resting size.
     pub fn redraw(
         &mut self,
         physical_size: (u32, u32),
         scale_factor: f64,
     ) -> Result<RedrawResult, RendererError> {
-        let input = FrameInput::new(physical_size.0, physical_size.1, scale_factor as f32);
+        let size = (physical_size.0, physical_size.1);
+        let scale = scale_factor as f32;
+        let now = Instant::now();
+        if let ResizeFrame::Defer { after } =
+            choose_resize_frame(self.presented, size, scale, self.last_resize, now)
+        {
+            return Ok(RedrawResult {
+                present: PresentOutcome::Deferred,
+                cursor: None,
+                settle_at: Some(now + after),
+            });
+        }
+        self.paint_and_present(physical_size, scale)
+    }
+
+    fn paint_and_present(
+        &mut self,
+        physical_size: (u32, u32),
+        scale: f32,
+    ) -> Result<RedrawResult, RendererError> {
+        let input = FrameInput::new(physical_size.0, physical_size.1, scale);
         self.last_input = Some(input);
         self.ui.update(input);
         let frame = self
@@ -189,7 +235,19 @@ impl WindowHost {
             .prepare_frame()
             .expect("a frame is always available after an update");
         let background = self.ui.theme().tokens().colors.background;
+        let size = (physical_size.0, physical_size.1);
+        if self.presented.map(|frame| frame.size) != Some(size) {
+            self.renderer.resize(size);
+            log::debug!("resized to {:?}", size);
+        }
         let present = self.renderer.present(&frame, background)?;
+        if matches!(present, PresentOutcome::Presented { .. }) {
+            self.presented = Some(PresentedFrame {
+                size: (physical_size.0, physical_size.1),
+                scale_factor: scale,
+                at: Instant::now(),
+            });
+        }
         self.frames += 1;
         if let PresentOutcome::Presented { repainted } = present {
             log::debug!(
@@ -203,6 +261,7 @@ impl WindowHost {
         Ok(RedrawResult {
             present,
             cursor: self.take_cursor_change(),
+            settle_at: None,
         })
     }
 

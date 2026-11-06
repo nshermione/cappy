@@ -4,6 +4,7 @@
 
 mod regions;
 mod renderer;
+mod resize_pace;
 mod selection;
 mod window_host;
 

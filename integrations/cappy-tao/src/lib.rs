@@ -1,6 +1,7 @@
 //! Runs a cappy [`Ui`] in a tao window (the windowing library behind Tauri). The event loop
 //! sleeps until input arrives or a signal changes, and each redraw repaints only the damaged
-//! regions.
+//! regions. A live resize follows the pointer. Presents stay on the resize interval, then one
+//! more frame is presented when the size settles.
 //!
 //! ```no_run
 //! use cappy_core::{Theme, Ui, div, text};
@@ -19,6 +20,7 @@ mod translate;
 
 use std::fmt;
 use std::sync::Arc;
+use std::time::Instant;
 
 use cappy_core::{CursorIcon, InputEvent, Ui};
 use cappy_host::{RendererError, RendererSelectionError, WindowHost, select_renderer};
@@ -28,6 +30,8 @@ use tao::event::{ElementState, Event, KeyEvent, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoop, EventLoopBuilder};
 use tao::keyboard::KeyCode;
 use tao::platform::run_return::EventLoopExtRunReturn;
+#[cfg(target_os = "windows")]
+use tao::platform::windows::WindowBuilderExtWindows;
 use tao::window::{Window, WindowBuilder};
 
 pub use cappy_host::{RendererKind, WindowOptions};
@@ -71,6 +75,8 @@ struct Running {
     // Declared before `window` so the renderer is dropped before the window it renders to.
     host: WindowHost,
     window: Arc<Window>,
+    /// When set, redraw then so a resize presents on its cadence or at the resting size.
+    settle_at: Option<Instant>,
 }
 
 /// Opens a window showing `ui` and runs until it is closed.
@@ -84,7 +90,21 @@ pub fn run(options: WindowOptions, ui: Ui) -> Result<(), RunError> {
             log::error!("{error}");
             failure = Some(error);
             *control_flow = ControlFlow::Exit;
+            return;
         }
+        if *control_flow == ControlFlow::Exit {
+            return;
+        }
+        if running
+            .settle_at
+            .is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            running.window.request_redraw();
+        }
+        *control_flow = match running.settle_at {
+            Some(deadline) if deadline > Instant::now() => ControlFlow::WaitUntil(deadline),
+            _ => ControlFlow::Wait,
+        };
     });
     failure.map_or(Ok(()), Err)
 }
@@ -97,11 +117,17 @@ fn start(
     let kind =
         select_renderer(options.renderer, AVAILABLE_RENDERERS).map_err(RunError::SelectRenderer)?;
     let (width, height) = options.logical_size;
-    let window = WindowBuilder::new()
+    let mut builder = WindowBuilder::new()
         .with_title(options.title.clone())
-        .with_inner_size(LogicalSize::new(width, height))
-        .build(event_loop)
-        .map_err(RunError::CreateWindow)?;
+        .with_inner_size(LogicalSize::new(width, height));
+    // DWM keeps a bitmap of the window and scales it on the GPU for the whole drag.
+    // The GPU swapchain is the window content, so that bitmap is dropped.
+    // The CPU backend blits through GDI and still needs it.
+    #[cfg(target_os = "windows")]
+    if kind == RendererKind::Gpu {
+        builder = builder.with_no_redirection_bitmap(true);
+    }
+    let window = builder.build(event_loop).map_err(RunError::CreateWindow)?;
     let window = Arc::new(window);
     let fonts = FontContext::from_system();
     let renderer = renderer::open_renderer(kind, &window, &fonts).map_err(RunError::Renderer)?;
@@ -114,7 +140,11 @@ fn start(
         }
     });
     window.request_redraw();
-    Ok(Running { host, window })
+    Ok(Running {
+        host,
+        window,
+        settle_at: None,
+    })
 }
 
 fn handle(
@@ -148,7 +178,7 @@ fn window_input(
     event: WindowEvent<'_>,
     control_flow: &mut ControlFlow,
 ) -> Option<InputEvent> {
-    let window = &running.window;
+    let window = Arc::clone(&running.window);
     match event {
         WindowEvent::CloseRequested => {
             *control_flow = ControlFlow::Exit;
@@ -184,6 +214,7 @@ fn is_debug_toggle(event: &KeyEvent) -> bool {
 fn redraw(running: &mut Running) -> Result<(), RunError> {
     let size = running.window.inner_size();
     if size.width == 0 || size.height == 0 {
+        running.settle_at = None;
         return Ok(());
     }
     let result = running
@@ -191,6 +222,7 @@ fn redraw(running: &mut Running) -> Result<(), RunError> {
         .redraw((size.width, size.height), running.window.scale_factor())
         .map_err(RunError::Renderer)?;
     apply_cursor(&running.window, result.cursor);
+    running.settle_at = result.settle_at;
     if result.needs_retry() {
         running.window.request_redraw();
     }

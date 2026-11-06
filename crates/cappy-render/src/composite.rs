@@ -14,7 +14,13 @@ const FULLSCREEN_TRIANGLE_VERTICES: u32 = 3;
 /// Format of the offscreen texture: premultiplied, sRGB-encoded storage of linear colors.
 pub(crate) const OFFSCREEN_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
+/// Offscreen textures grow in this step so a drag does not allocate on every pixel.
+const OFFSCREEN_STEP: u32 = 64;
+
 /// Keeps last frame's pixels so only damaged regions need repainting.
+///
+/// `size` is the texture, which may be larger than the window. Paint writes the frame into the
+/// top-left, and the composite reads that rectangle.
 pub(crate) struct Offscreen {
     pub view: wgpu::TextureView,
     pub size: (u32, u32),
@@ -93,8 +99,10 @@ impl Compositor {
         }
     }
 
-    /// Returns an offscreen texture of `size`, recreating it if the size changed.
-    /// The flag is `true` when the texture is new and must be repainted completely.
+    /// Returns an offscreen texture that can hold `size`.
+    ///
+    /// A texture that still covers the frame, with less than a quarter of it spare, is kept. The
+    /// flag is `true` when the texture is new and must be repainted completely.
     pub fn ensure_offscreen(
         &self,
         device: &wgpu::Device,
@@ -103,11 +111,12 @@ impl Compositor {
     ) -> bool {
         if current
             .as_ref()
-            .is_some_and(|offscreen| offscreen.size == size)
+            .is_some_and(|offscreen| covers(offscreen.size, size))
         {
             return false;
         }
-        *current = Some(Offscreen::new(device, &self.bind_group_layout, size));
+        let capacity = offscreen_capacity(size);
+        *current = Some(Offscreen::new(device, &self.bind_group_layout, capacity));
         true
     }
 
@@ -165,5 +174,42 @@ impl Compositor {
             multiview_mask: None,
             cache: None,
         })
+    }
+}
+
+fn offscreen_capacity((width, height): (u32, u32)) -> (u32, u32) {
+    (
+        width.div_ceil(OFFSCREEN_STEP) * OFFSCREEN_STEP,
+        height.div_ceil(OFFSCREEN_STEP) * OFFSCREEN_STEP,
+    )
+}
+
+/// Keeps `capacity` while it still contains `needed` and the spare edge is at most a quarter.
+fn covers(capacity: (u32, u32), needed: (u32, u32)) -> bool {
+    let spare_x = capacity.0.saturating_sub(needed.0);
+    let spare_y = capacity.1.saturating_sub(needed.1);
+    capacity.0 >= needed.0
+        && capacity.1 >= needed.1
+        && spare_x <= capacity.0 / 4
+        && spare_y <= capacity.1 / 4
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{covers, offscreen_capacity};
+
+    #[test]
+    fn capacity_rounds_up_to_a_step() {
+        assert_eq!(offscreen_capacity((1, 1)), (64, 64));
+        assert_eq!(offscreen_capacity((64, 64)), (64, 64));
+        assert_eq!(offscreen_capacity((65, 200)), (128, 256));
+    }
+
+    #[test]
+    fn a_resize_keeps_a_texture_that_still_fits() {
+        assert!(covers((256, 256), (200, 200)));
+        assert!(covers((256, 256), (192, 192)));
+        assert!(!covers((256, 256), (100, 100)));
+        assert!(!covers((128, 128), (200, 200)));
     }
 }

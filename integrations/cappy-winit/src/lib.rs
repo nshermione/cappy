@@ -1,5 +1,6 @@
 //! Runs a cappy [`Ui`] in a winit window. The event loop sleeps until input arrives or a signal
-//! changes, and each redraw repaints only the damaged regions.
+//! changes, and each redraw repaints only the damaged regions. A live resize follows the pointer.
+//! Presents stay on the resize interval, then one more frame is presented when the size settles.
 //!
 //! ```no_run
 //! use cappy_core::{Theme, Ui, div, text};
@@ -18,6 +19,7 @@ mod translate;
 
 use std::fmt;
 use std::sync::Arc;
+use std::time::Instant;
 
 use cappy_core::{CursorIcon, InputEvent, Ui};
 use cappy_host::{RendererError, RendererSelectionError, WindowHost, select_renderer};
@@ -25,14 +27,47 @@ use cappy_text::FontContext;
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::window::{Window, WindowId};
+#[cfg(target_os = "windows")]
+use winit::platform::windows::WindowAttributesExtWindows;
+use winit::window::{Window, WindowAttributes, WindowId};
 
 pub use cappy_host::{RendererKind, WindowOptions};
 pub use renderer::AVAILABLE_RENDERERS;
 
 const DEBUG_DAMAGE_KEY: KeyCode = KeyCode::F12;
+
+fn window_attributes(options: &WindowOptions, renderer: RendererKind) -> WindowAttributes {
+    let (width, height) = options.logical_size;
+    let attributes = Window::default_attributes()
+        .with_title(options.title.clone())
+        .with_inner_size(LogicalSize::new(width, height));
+    without_redirection_bitmap(attributes, renderer)
+}
+
+/// DWM keeps a bitmap of the window and scales it on the GPU for the whole drag.
+/// The GPU swapchain is the window content, so that bitmap is dropped.
+/// The CPU backend blits through GDI and still needs it.
+#[cfg(target_os = "windows")]
+fn without_redirection_bitmap(
+    attributes: WindowAttributes,
+    renderer: RendererKind,
+) -> WindowAttributes {
+    if renderer == RendererKind::Gpu {
+        attributes.with_no_redirection_bitmap(true)
+    } else {
+        attributes
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn without_redirection_bitmap(
+    attributes: WindowAttributes,
+    _renderer: RendererKind,
+) -> WindowAttributes {
+    attributes
+}
 
 #[derive(Debug)]
 pub enum RunError {
@@ -92,6 +127,8 @@ struct Running {
     // Declared before `window` so the renderer is dropped before the window it renders to.
     host: WindowHost,
     window: Arc<Window>,
+    /// When set, redraw then so a resize presents on its cadence or at the resting size.
+    settle_at: Option<Instant>,
 }
 
 struct App {
@@ -105,10 +142,7 @@ struct App {
 
 impl App {
     fn start(&mut self, event_loop: &ActiveEventLoop, ui: Ui) -> Result<Running, RunError> {
-        let (width, height) = self.options.logical_size;
-        let attributes = Window::default_attributes()
-            .with_title(self.options.title.clone())
-            .with_inner_size(LogicalSize::new(width, height));
+        let attributes = window_attributes(&self.options, self.renderer);
         let window = Arc::new(
             event_loop
                 .create_window(attributes)
@@ -126,7 +160,11 @@ impl App {
             }
         });
         window.request_redraw();
-        Ok(Running { host, window })
+        Ok(Running {
+            host,
+            window,
+            settle_at: None,
+        })
     }
 
     fn fail(&mut self, event_loop: &ActiveEventLoop, error: RunError) {
@@ -150,6 +188,21 @@ impl ApplicationHandler<Wake> for App {
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, _event: Wake) {
         if let Some(running) = &self.running {
             running.window.request_redraw();
+        }
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(running) = &self.running else {
+            event_loop.set_control_flow(ControlFlow::Wait);
+            return;
+        };
+        match running.settle_at {
+            Some(deadline) if Instant::now() >= deadline => {
+                running.window.request_redraw();
+                event_loop.set_control_flow(ControlFlow::Wait);
+            }
+            Some(deadline) => event_loop.set_control_flow(ControlFlow::WaitUntil(deadline)),
+            None => event_loop.set_control_flow(ControlFlow::Wait),
         }
     }
 
@@ -223,6 +276,7 @@ fn is_debug_toggle(event: &KeyEvent) -> bool {
 fn redraw(running: &mut Running) -> Result<(), RunError> {
     let size = running.window.inner_size();
     if size.width == 0 || size.height == 0 {
+        running.settle_at = None;
         return Ok(());
     }
     let result = running
@@ -230,6 +284,7 @@ fn redraw(running: &mut Running) -> Result<(), RunError> {
         .redraw((size.width, size.height), running.window.scale_factor())
         .map_err(RunError::Renderer)?;
     apply_cursor(&running.window, result.cursor);
+    running.settle_at = result.settle_at;
     if result.needs_retry() {
         running.window.request_redraw();
     }

@@ -117,7 +117,8 @@ impl WindowSurface {
         })
     }
 
-    pub fn resize(&mut self, physical_size: (u32, u32)) {
+    /// Reconfigures the swapchain when `physical_size` differs from the current one.
+    fn apply_size(&mut self, physical_size: (u32, u32)) {
         let (width, height) = physical_size;
         if width == 0 || height == 0 || (width, height) == (self.config.width, self.config.height) {
             return;
@@ -133,6 +134,8 @@ impl WindowSurface {
 
     /// Paints `frame`'s damage and presents. When no surface frame is available the damage is
     /// still painted offscreen, so nothing is lost before the next attempt.
+    ///
+    /// The swapchain size is whatever [`WindowSurface::resize`] last applied.
     pub fn present(
         &mut self,
         frame: &RenderFrame,
@@ -212,7 +215,7 @@ impl WindowRenderer for WindowSurface {
     }
 
     fn resize(&mut self, physical_size: (u32, u32)) {
-        WindowSurface::resize(self, physical_size);
+        self.apply_size(physical_size);
     }
 
     fn present(
@@ -251,5 +254,8 @@ fn surface_config(
         config.format = srgb;
     }
     config.present_mode = wgpu::PresentMode::AutoVsync;
+    // configure waits for the GPU to finish before it recreates the swapchain, so a second
+    // buffered frame only adds latency while the window is changing size.
+    config.desired_maximum_frame_latency = 1;
     Ok(config)
 }

@@ -71,6 +71,8 @@ pub enum PresentOutcome {
     Retry,
     /// The window is hidden; wait for it to become visible before redrawing.
     Occluded,
+    /// A live resize is in progress and this redraw submitted nothing.
+    Deferred,
 }
 
 /// A backend failure, tagged with the backend that produced it.
@@ -113,7 +115,8 @@ impl Error for RendererError {
 pub trait WindowRenderer {
     fn kind(&self) -> RendererKind;
 
-    /// Adapts to a new window size in physical pixels; zero-sized windows are ignored.
+    /// Applies `physical_size` to the surface. A burst of window sizes reconfigures once, when the
+    /// host is about to show that size.
     fn resize(&mut self, physical_size: (u32, u32));
 
     /// Paints `frame`'s damage and shows the result over `background`.
