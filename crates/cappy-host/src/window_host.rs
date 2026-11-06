@@ -8,7 +8,7 @@ use cappy_core::{CursorIcon, FrameInput, InputEvent, Ui, UpdateOutcome};
 use cappy_text::{CosmicTextMeasurer, FontContext};
 use std::time::Instant;
 
-use crate::resize_pace::{PresentedFrame, ResizeFrame, choose_resize_frame};
+use crate::resize_pace::{PresentedFrame, ResizeFrame, choose_resize_frame, resize_interval};
 use crate::{PresentOutcome, RendererError, RendererKind, WindowRenderer};
 
 const DEFAULT_TITLE: &str = "cappy";
@@ -210,9 +210,14 @@ impl WindowHost {
         let size = (physical_size.0, physical_size.1);
         let scale = scale_factor as f32;
         let now = Instant::now();
-        if let ResizeFrame::Defer { after } =
-            choose_resize_frame(self.presented, size, scale, self.last_resize, now)
-        {
+        if let ResizeFrame::Defer { after } = choose_resize_frame(
+            self.presented,
+            size,
+            scale,
+            self.last_resize,
+            now,
+            resize_interval(self.renderer.kind()),
+        ) {
             return Ok(RedrawResult {
                 present: PresentOutcome::Deferred,
                 cursor: None,

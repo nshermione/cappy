@@ -1,15 +1,25 @@
 //! How often a live resize is allowed to present.
 //!
-//! Each presented size recreates the swapchain. While the pointer is still dragging, presents
-//! are at least [`RESIZE_INTERVAL`] apart and the window size follows the pointer. Once the size
-//! stops changing, the next redraw presents that size.
+//! Each presented size recreates the window buffer. While the pointer is still dragging, presents
+//! are at least one resize interval apart and the window size follows the pointer. Once the size
+//! stops changing, the next redraw presents that size. The CPU backend uses a longer interval
+//! because a size change repaints the whole window on the UI thread.
 
 use std::time::{Duration, Instant};
 
-/// Present interval while the size is still changing.
+use crate::RendererKind;
+
+/// Present interval while the size is still changing on the GPU backend.
 pub(crate) const RESIZE_INTERVAL: Duration = Duration::from_millis(16);
-/// A size that has not changed for this long is presented on the next redraw.
-const RESIZE_IDLE: Duration = RESIZE_INTERVAL;
+/// Present interval while the size is still changing on the CPU backend.
+pub(crate) const CPU_RESIZE_INTERVAL: Duration = Duration::from_millis(100);
+
+pub(crate) fn resize_interval(kind: RendererKind) -> Duration {
+    match kind {
+        RendererKind::Cpu => CPU_RESIZE_INTERVAL,
+        RendererKind::Gpu => RESIZE_INTERVAL,
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct PresentedFrame {
@@ -33,6 +43,7 @@ pub(crate) fn choose_resize_frame(
     scale: f32,
     last_resize: Option<Instant>,
     now: Instant,
+    interval: Duration,
 ) -> ResizeFrame {
     let Some(presented) = presented else {
         return ResizeFrame::Paint;
@@ -40,17 +51,17 @@ pub(crate) fn choose_resize_frame(
     if presented.size == size || presented.scale_factor != scale {
         return ResizeFrame::Paint;
     }
-    let resizing = last_resize.is_some_and(|at| now.saturating_duration_since(at) < RESIZE_IDLE);
+    let resizing = last_resize.is_some_and(|at| now.saturating_duration_since(at) < interval);
     if !resizing {
         return ResizeFrame::Paint;
     }
     let since_present = now.saturating_duration_since(presented.at);
-    if since_present >= RESIZE_INTERVAL {
+    if since_present >= interval {
         return ResizeFrame::Paint;
     }
-    let until_interval = RESIZE_INTERVAL - since_present;
+    let until_interval = interval - since_present;
     let until_idle = last_resize
-        .map(|at| RESIZE_IDLE.saturating_sub(now.saturating_duration_since(at)))
+        .map(|at| interval.saturating_sub(now.saturating_duration_since(at)))
         .unwrap_or(until_interval);
     let after = until_interval.min(until_idle);
     if after.is_zero() {
@@ -61,7 +72,9 @@ pub(crate) fn choose_resize_frame(
 
 #[cfg(test)]
 mod tests {
-    use super::{PresentedFrame, RESIZE_IDLE, RESIZE_INTERVAL, ResizeFrame, choose_resize_frame};
+    use super::{
+        CPU_RESIZE_INTERVAL, PresentedFrame, RESIZE_INTERVAL, ResizeFrame, choose_resize_frame,
+    };
     use std::time::{Duration, Instant};
 
     fn presented(at: Instant) -> PresentedFrame {
@@ -76,7 +89,7 @@ mod tests {
     fn the_first_frame_paints() {
         let now = Instant::now();
         assert!(matches!(
-            choose_resize_frame(None, (800, 600), 1.0, Some(now), now),
+            choose_resize_frame(None, (800, 600), 1.0, Some(now), now, RESIZE_INTERVAL),
             ResizeFrame::Paint
         ));
     }
@@ -85,7 +98,14 @@ mod tests {
     fn an_unchanged_size_paints() {
         let now = Instant::now();
         assert!(matches!(
-            choose_resize_frame(Some(presented(now)), (800, 600), 1.0, Some(now), now),
+            choose_resize_frame(
+                Some(presented(now)),
+                (800, 600),
+                1.0,
+                Some(now),
+                now,
+                RESIZE_INTERVAL
+            ),
             ResizeFrame::Paint
         ));
     }
@@ -94,7 +114,14 @@ mod tests {
     fn a_scale_change_paints() {
         let now = Instant::now();
         assert!(matches!(
-            choose_resize_frame(Some(presented(now)), (1600, 1200), 2.0, Some(now), now),
+            choose_resize_frame(
+                Some(presented(now)),
+                (1600, 1200),
+                2.0,
+                Some(now),
+                now,
+                RESIZE_INTERVAL
+            ),
             ResizeFrame::Paint
         ));
     }
@@ -104,10 +131,16 @@ mod tests {
         let now = Instant::now();
         let presented = presented(now);
         let soon = now + Duration::from_millis(10);
-        match choose_resize_frame(Some(presented), (900, 700), 1.0, Some(soon), soon) {
+        match choose_resize_frame(
+            Some(presented),
+            (900, 700),
+            1.0,
+            Some(soon),
+            soon,
+            RESIZE_INTERVAL,
+        ) {
             ResizeFrame::Defer { after } => {
                 assert!(after < RESIZE_INTERVAL);
-                assert!(after <= RESIZE_IDLE);
             }
             ResizeFrame::Paint => panic!("a fresh drag should wait"),
         }
@@ -119,7 +152,14 @@ mod tests {
         let presented = presented(now);
         let later = now + RESIZE_INTERVAL;
         assert!(matches!(
-            choose_resize_frame(Some(presented), (900, 700), 1.0, Some(later), later),
+            choose_resize_frame(
+                Some(presented),
+                (900, 700),
+                1.0,
+                Some(later),
+                later,
+                RESIZE_INTERVAL
+            ),
             ResizeFrame::Paint
         ));
     }
@@ -128,9 +168,46 @@ mod tests {
     fn a_settled_size_paints() {
         let now = Instant::now();
         let presented = presented(now);
-        let later = now + RESIZE_IDLE;
+        let later = now + RESIZE_INTERVAL;
         assert!(matches!(
-            choose_resize_frame(Some(presented), (900, 700), 1.0, Some(now), later),
+            choose_resize_frame(
+                Some(presented),
+                (900, 700),
+                1.0,
+                Some(now),
+                later,
+                RESIZE_INTERVAL
+            ),
+            ResizeFrame::Paint
+        ));
+    }
+
+    #[test]
+    fn a_cpu_drag_uses_the_longer_interval() {
+        let now = Instant::now();
+        let presented = presented(now);
+        let mid = now + Duration::from_millis(50);
+        assert!(matches!(
+            choose_resize_frame(
+                Some(presented),
+                (900, 700),
+                1.0,
+                Some(mid),
+                mid,
+                CPU_RESIZE_INTERVAL
+            ),
+            ResizeFrame::Defer { .. }
+        ));
+        let later = now + CPU_RESIZE_INTERVAL;
+        assert!(matches!(
+            choose_resize_frame(
+                Some(presented),
+                (900, 700),
+                1.0,
+                Some(later),
+                later,
+                CPU_RESIZE_INTERVAL
+            ),
             ResizeFrame::Paint
         ));
     }
