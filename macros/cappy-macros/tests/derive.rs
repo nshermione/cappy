@@ -1,4 +1,4 @@
-use cappy::{Reactive, reactive};
+use cappy::{Reactive, reactive, ui};
 use cappy_core::{Component, Element, FrameInput, Theme, Ui, div, text};
 use cappy_macros::{ClassName, Props};
 
@@ -118,4 +118,33 @@ fn already_reactive_field_keeps_its_handle() {
     assert_eq!(row.label, label);
     label.set(String::from("yo"));
     assert_eq!(row.label.get(), "yo");
+}
+
+#[reactive]
+struct Badge {
+    label: String,
+}
+
+impl Component for Badge {
+    fn render(self) -> Element {
+        ui! {
+            div(class = "badge", key = "badge") {
+                text(:format!("{}", self.label))
+            }
+        }
+    }
+}
+
+#[test]
+fn reactive_component_label_updates_after_mount() {
+    let badge = Badge::new(String::from("new"));
+    let mut ui = Ui::new(badge.render(), Theme::light());
+    let viewport = FrameInput::new(320, 240, 1.0);
+    ui.update(viewport);
+    let node = ui.find_by_key("badge").unwrap();
+    let text_node = ui.node_children(node)[0];
+    assert_eq!(ui.node_text(text_node), Some("new"));
+    badge.label.set(String::from("next"));
+    ui.update(viewport);
+    assert_eq!(ui.node_text(text_node), Some("next"));
 }
