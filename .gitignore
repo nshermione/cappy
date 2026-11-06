@@ -3,3 +3,4 @@
 *.pdb
 *.snap.new
 **/snapshots/*.actual.png
+*.log
