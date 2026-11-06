@@ -129,7 +129,38 @@ impl<W: HasDisplayHandle + HasWindowHandle + Clone> CpuWindowSurface<W> {
             .surface
             .buffer_mut()
             .map_err(|error| CpuSurfaceError::AcquireBuffer(error.to_string()))?;
-        write_canvas(&mut buffer, canvas.data(), background);
+        // A new buffer has no pixels to keep. Every later frame copies only the regions whose
+        // window pixels change: this paint, and the previous debug outlines being erased.
+        let width = buffer_width.get();
+        if resized || buffer.age() == 0 {
+            write_regions(
+                &mut buffer,
+                canvas.data(),
+                width,
+                &[PixelRect {
+                    x: 0,
+                    y: 0,
+                    width,
+                    height: buffer_height.get(),
+                }],
+                background,
+            );
+        } else if repainted > 0 {
+            write_regions(
+                &mut buffer,
+                canvas.data(),
+                width,
+                self.renderer.last_repainted(),
+                background,
+            );
+            write_regions(
+                &mut buffer,
+                canvas.data(),
+                width,
+                &self.shown_overlay,
+                background,
+            );
+        }
         let overlay = if self.debug_damage {
             self.renderer.last_repainted().to_vec()
         } else {
@@ -182,11 +213,38 @@ impl<W: HasDisplayHandle + HasWindowHandle + Clone> WindowRenderer for CpuWindow
     }
 }
 
-/// Composites the premultiplied canvas over `background` into `0RGB` pixels.
-fn write_canvas(buffer: &mut [u32], canvas: &[u8], background: Color) {
+/// Composites `regions` of the premultiplied canvas over `background` into `0RGB` pixels.
+///
+/// `canvas` is tightly packed rows of `width` pixels. Pixels outside `regions` stay as they are.
+fn write_regions(
+    buffer: &mut [u32],
+    canvas: &[u8],
+    width: u32,
+    regions: &[PixelRect],
+    background: Color,
+) {
+    if width == 0 || buffer.is_empty() {
+        return;
+    }
     let background = premultiply(background.to_rgba8());
-    for (target, pixel) in buffer.iter_mut().zip(canvas.chunks_exact(BYTES_PER_PIXEL)) {
-        *target = to_xrgb(over([pixel[0], pixel[1], pixel[2], pixel[3]], background));
+    let height = buffer.len() as u32 / width;
+    for region in regions {
+        let x0 = region.x.min(width);
+        let y0 = region.y.min(height);
+        let x1 = region.right().min(width);
+        let y1 = region.bottom().min(height);
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let start = (y as usize * width as usize + x as usize) * BYTES_PER_PIXEL;
+                let pixel = [
+                    canvas[start],
+                    canvas[start + 1],
+                    canvas[start + 2],
+                    canvas[start + 3],
+                ];
+                buffer[(y * width + x) as usize] = to_xrgb(over(pixel, background));
+            }
+        }
     }
 }
 
@@ -204,5 +262,40 @@ fn resize_error(width: u32, height: u32, error: &SoftBufferError) -> CpuSurfaceE
         width,
         height,
         message: error.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn write_regions_leaves_pixels_outside_the_damage() {
+        let width = 4u32;
+        let height = 3u32;
+        let mut canvas = vec![0u8; (width * height) as usize * BYTES_PER_PIXEL];
+        let red = (1 * width + 1) as usize * BYTES_PER_PIXEL;
+        canvas[red..red + 4].copy_from_slice(&[255, 0, 0, 255]);
+        let mut buffer = vec![0x00FF_FFFFu32; (width * height) as usize];
+        write_regions(
+            &mut buffer,
+            &canvas,
+            width,
+            &[PixelRect {
+                x: 1,
+                y: 1,
+                width: 1,
+                height: 1,
+            }],
+            Color::rgb(10, 20, 30),
+        );
+        assert_eq!(buffer[(1 * width + 1) as usize], 0x00FF_0000);
+        assert!(
+            buffer
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| *index != (1 * width + 1) as usize)
+                .all(|(_, pixel)| *pixel == 0x00FF_FFFF)
+        );
     }
 }
