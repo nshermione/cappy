@@ -1,0 +1,5 @@
+error: class `Missing` is not defined in this sheet
+ --> tests/compile_fail/stylesheet_unknown_include.rs:6:22
+  |
+6 |             @include Missing,
+  |                      ^^^^^^^

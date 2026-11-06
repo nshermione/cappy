@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{Data, DeriveInput, Fields, LitStr, Variant};
+use syn::{Attribute, Data, DeriveInput, Fields, Ident, LitStr};
 
 const ATTRIBUTE: &str = "class";
 const NAME: &str = "name";
@@ -22,7 +22,7 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
             ));
         }
         let ident = &variant.ident;
-        let class = class_name_of(variant)?;
+        let class = class_name(ident, &variant.attrs)?;
         arms.push(quote! { Self::#ident => #class });
         variants.push(quote! { Self::#ident });
     }
@@ -56,13 +56,9 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     })
 }
 
-fn class_name_of(variant: &Variant) -> syn::Result<String> {
+pub(crate) fn class_name(ident: &Ident, attrs: &[Attribute]) -> syn::Result<String> {
     let mut explicit = None;
-    for attribute in variant
-        .attrs
-        .iter()
-        .filter(|attr| attr.path().is_ident(ATTRIBUTE))
-    {
+    for attribute in attrs.iter().filter(|attr| attr.path().is_ident(ATTRIBUTE)) {
         attribute.parse_nested_meta(|meta| {
             if meta.path.is_ident(NAME) {
                 let value: LitStr = meta.value()?.parse()?;
@@ -73,7 +69,7 @@ fn class_name_of(variant: &Variant) -> syn::Result<String> {
             }
         })?;
     }
-    Ok(explicit.unwrap_or_else(|| kebab_case(&variant.ident.to_string())))
+    Ok(explicit.unwrap_or_else(|| kebab_case(&ident.to_string())))
 }
 
 /// `BtnPrimary` becomes `btn-primary`; a dash goes before each capital that follows a lowercase

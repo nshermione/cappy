@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use cappy_layout::Rect;
-use cappy_style::{ClassName, InteractionState, Style, StyleRefinement};
+use cappy_style::{ClassName, InteractionState, Style, StyleRefinement, Stylesheet};
 
 use crate::element::{ClickHandler, HoverHandler};
 
@@ -29,6 +29,8 @@ pub(crate) struct Node {
     pub(crate) content: NodeContent,
     pub(crate) classes: Vec<ClassName>,
     pub(crate) dynamic_classes: Vec<ClassName>,
+    /// Sheet of this node only. Children do not inherit it.
+    pub(crate) stylesheet: Option<&'static Stylesheet>,
     pub(crate) inline_style: StyleRefinement,
     pub(crate) dynamic_style: StyleRefinement,
     pub(crate) style: Style,

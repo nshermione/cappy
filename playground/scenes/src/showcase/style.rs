@@ -3,91 +3,45 @@
 
 use cappy::prelude::*;
 
-const HOVER: &str = ":hover";
 const TILE_COLUMNS: u16 = 3;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, ClassName)]
-pub enum Class {
-    // Built into every cappy theme.
-    App,
-    Row,
-    Column,
-    Card,
-    Title,
-    Subtitle,
-    Muted,
-    Btn,
-    BtnPrimary,
-    Badge,
-    Tile,
-    // Defined by this stylesheet.
-    Header,
-    CardRow,
-    Grow,
-    Count,
-    TileGrid,
-    TileSelected,
-    BadgeDone,
-    TaskDone,
+stylesheet! {
+    pub enum Class {
+        Header {
+            direction: FlexDirection::Row,
+            align: Align::Center,
+            justify: Justify::SpaceBetween,
+        }
+        CardRow {
+            direction: FlexDirection::Row,
+            align: Align::Stretch,
+            gap: Space::Lg,
+        }
+        Grow { flex_grow: 1.0 }
+        Count { font_size: FontSize::Xl }
+        TileGrid {
+            display: Display::Grid,
+            grid_columns: TILE_COLUMNS,
+            gap: Space::Sm,
+        }
+        TileSelected {
+            background: ColorToken::Primary,
+            border_color: ColorToken::Primary,
+            text_color: ColorToken::OnPrimary,
+        }
+        BadgeDone {
+            background: ColorToken::Success,
+            border_color: ColorToken::Success,
+            text_color: ColorToken::OnPrimary,
+        }
+        TaskDone { text_color: ColorToken::TextMuted }
+    }
+    TileSelected:hover { background: ColorToken::PrimaryHover }
 }
 
 /// Adds the scene's own classes to `theme`.
 pub fn stylesheet(theme: Theme) -> Theme {
-    theme
-        .with_class(
-            Class::Header,
-            style! {
-                direction: FlexDirection::Row,
-                align: Align::Center,
-                justify: Justify::SpaceBetween,
-            },
-        )
-        .with_class(
-            Class::CardRow,
-            style! {
-                direction: FlexDirection::Row,
-                align: Align::Stretch,
-                gap: Space::Lg,
-            },
-        )
-        .with_class(Class::Grow, style! { flex_grow: 1.0 })
-        .with_class(Class::Count, style! { font_size: FontSize::Xl })
-        .with_class(
-            Class::TileGrid,
-            style! {
-                display: Display::Grid,
-                grid_columns: TILE_COLUMNS,
-                gap: Space::Sm,
-            },
-        )
-        .with_class(
-            Class::TileSelected,
-            style! {
-                background: ColorToken::Primary,
-                border_color: ColorToken::Primary,
-                text_color: ColorToken::OnPrimary,
-            },
-        )
-        .with_class(
-            hover(Class::TileSelected),
-            style! { background: ColorToken::PrimaryHover },
-        )
-        .with_class(
-            Class::BadgeDone,
-            style! {
-                background: ColorToken::Success,
-                border_color: ColorToken::Success,
-                text_color: ColorToken::OnPrimary,
-            },
-        )
-        .with_class(
-            Class::TaskDone,
-            style! { text_color: ColorToken::TextMuted },
-        )
-}
-
-fn hover(class: Class) -> String {
-    format!("{class}{HOVER}")
+    Class::apply(theme)
 }
 
 #[cfg(test)]

@@ -4,7 +4,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use cappy_style::{ClassName, StyleRefinement};
+use cappy_style::{ClassName, StyleRefinement, Stylesheet};
 
 use crate::ClickEvent;
 use crate::binding::{Dynamic, IntoClasses, IntoStyle, IntoText};
@@ -29,6 +29,8 @@ pub struct Element {
     pub(crate) class_binding: Option<ClassBinding>,
     pub(crate) style: StyleRefinement,
     pub(crate) style_binding: Option<StyleBinding>,
+    /// Sheet for this element only. Children do not inherit it.
+    pub(crate) stylesheet: Option<&'static Stylesheet>,
     pub(crate) on_click: Option<ClickHandler>,
     pub(crate) on_hover: Option<HoverHandler>,
     pub(crate) children: Vec<Element>,
@@ -59,6 +61,7 @@ impl Element {
             class_binding: None,
             style: StyleRefinement::default(),
             style_binding: None,
+            stylesheet: None,
             on_click: None,
             on_hover: None,
             children: Vec::new(),
@@ -96,6 +99,14 @@ impl Element {
     #[must_use]
     pub fn style_dyn(self, refinement: impl Fn() -> StyleRefinement + 'static) -> Self {
         self.style(Dynamic(refinement))
+    }
+
+    /// Stylesheet for this element only. Class names it defines win over the theme on this
+    /// element; child elements keep resolving against the theme.
+    #[must_use]
+    pub fn stylesheet(mut self, stylesheet: &'static Stylesheet) -> Self {
+        self.stylesheet = Some(stylesheet);
+        self
     }
 
     #[must_use]
@@ -158,13 +169,20 @@ impl fmt::Debug for Element {
 }
 
 /// A reusable piece of UI that renders to an [`Element`].
+///
+/// [`stylesheet`](Component::stylesheet) is resolved only on the element `render` returns.
+/// It is not registered on the theme and child elements do not see it.
 pub trait Component {
     fn render(self) -> Element;
+
+    fn stylesheet() -> &'static Stylesheet {
+        Stylesheet::empty()
+    }
 }
 
 impl<C: Component> From<C> for Element {
     fn from(component: C) -> Self {
-        component.render()
+        component.render().stylesheet(C::stylesheet())
     }
 }
 

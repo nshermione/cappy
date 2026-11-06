@@ -1,0 +1,5 @@
+error: `A` is included in a cycle
+ --> tests/compile_fail/stylesheet_include_cycle.rs:9:22
+  |
+9 |             @include A,
+  |                      ^

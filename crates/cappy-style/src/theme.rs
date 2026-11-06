@@ -3,12 +3,9 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
-use crate::{
-    Align, ColorToken, FlexDirection, FontSize, FontWeight, Justify, Radius, Space, Style,
-    StyleRefinement, TextStyle, Tokens,
-};
+use crate::{Style, StyleRefinement, TextStyle, Tokens};
 
 /// Name of a style class, e.g. `"card"` or `"btn-primary"`.
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -89,47 +86,18 @@ impl ClassRule {
     }
 }
 
-/// Tokens plus a set of named classes.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Theme {
-    name: String,
-    tokens: Tokens,
+/// Named classes with `:hover` and `:active` variants. A [`Theme`] shares one of these with every
+/// node. A component may carry its own, and that sheet applies only to the component's element.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Stylesheet {
     classes: HashMap<String, ClassRule>,
 }
 
-impl Theme {
-    pub fn new(name: impl Into<String>, tokens: Tokens) -> Self {
-        Self {
-            name: name.into(),
-            tokens,
-            classes: HashMap::new(),
-        }
-    }
-
-    /// Light theme with the built-in class set.
-    pub fn light() -> Self {
-        Self::new("light", Tokens::light()).with_default_classes()
-    }
-
-    /// Dark theme with the built-in class set. Same classes as [`Theme::light`], other tokens.
-    pub fn dark() -> Self {
-        Self::new("dark", Tokens::dark()).with_default_classes()
-    }
-
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    pub fn tokens(&self) -> &Tokens {
-        &self.tokens
-    }
-
-    pub fn tokens_mut(&mut self) -> &mut Tokens {
-        &mut self.tokens
-    }
-
-    pub fn set_name(&mut self, name: impl Into<String>) {
-        self.name = name.into();
+impl Stylesheet {
+    /// A sheet with no classes. Component stylesheets fall back to this.
+    pub fn empty() -> &'static Self {
+        static EMPTY: LazyLock<Stylesheet> = LazyLock::new(Stylesheet::default);
+        &EMPTY
     }
 
     /// Defines or replaces a class. `selector` may end in `:hover` or `:active`.
@@ -152,17 +120,96 @@ impl Theme {
         self.classes.contains_key(name)
     }
 
+    /// Copies every variant `other` sets. Variants `other` leaves unset stay as they are.
+    pub fn merge(&mut self, other: &Self) {
+        for (name, rule) in &other.classes {
+            let slot = self.classes.entry(name.clone()).or_default();
+            if rule.base.is_some() {
+                slot.base = rule.base.clone();
+            }
+            if rule.hover.is_some() {
+                slot.hover = rule.hover.clone();
+            }
+            if rule.active.is_some() {
+                slot.active = rule.active.clone();
+            }
+        }
+    }
+
+    fn rule(&self, name: &str) -> Option<&ClassRule> {
+        self.classes.get(name)
+    }
+}
+
+/// Tokens plus a set of named classes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Theme {
+    name: String,
+    tokens: Tokens,
+    classes: Stylesheet,
+}
+
+impl Theme {
+    pub fn new(name: impl Into<String>, tokens: Tokens) -> Self {
+        Self {
+            name: name.into(),
+            tokens,
+            classes: Stylesheet::default(),
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn tokens(&self) -> &Tokens {
+        &self.tokens
+    }
+
+    pub fn tokens_mut(&mut self) -> &mut Tokens {
+        &mut self.tokens
+    }
+
+    pub fn set_name(&mut self, name: impl Into<String>) {
+        self.name = name.into();
+    }
+
+    /// Defines or replaces a class. `selector` may end in `:hover` or `:active`.
+    pub fn set_class(&mut self, selector: impl AsRef<str>, refinement: StyleRefinement) {
+        self.classes.set_class(selector, refinement);
+    }
+
+    #[must_use]
+    pub fn with_class(mut self, selector: impl AsRef<str>, refinement: StyleRefinement) -> Self {
+        self.set_class(selector, refinement);
+        self
+    }
+
+    /// Merges `sheet` into this theme. Every node can then use those classes.
+    #[must_use]
+    pub fn with_sheet(mut self, sheet: &Stylesheet) -> Self {
+        self.classes.merge(sheet);
+        self
+    }
+
+    pub fn has_class(&self, name: &str) -> bool {
+        self.classes.has_class(name)
+    }
+
     /// Resolves the style of a node.
     ///
     /// Layers, lowest first: text inherited from `parent_text` (or the theme defaults for the
     /// root), each class in order, each class's `:hover` then `:active` variant when the
-    /// state matches, then `inline`.
+    /// state matches, then `inline`. A name present in `local` uses that sheet's rule, including
+    /// its hover and active variants. Names `local` does not define fall through to the theme.
+    /// `local` is the sheet of this node only; child nodes do not receive it.
     pub fn resolve(
         &self,
         parent_text: Option<&TextStyle>,
         classes: &[ClassName],
         inline: &StyleRefinement,
         state: InteractionState,
+        local: Option<&Stylesheet>,
     ) -> Style {
         let inherited = parent_text
             .cloned()
@@ -170,7 +217,12 @@ impl Theme {
         let mut style = Style::inheriting(inherited);
         let rules: Vec<&ClassRule> = classes
             .iter()
-            .filter_map(|class| self.classes.get(class.as_str()))
+            .filter_map(|class| {
+                let name = class.as_str();
+                local
+                    .and_then(|sheet| sheet.rule(name))
+                    .or_else(|| self.classes.rule(name))
+            })
             .collect();
         let apply = |style: &mut Style, layer: &Option<StyleRefinement>| {
             if let Some(refinement) = layer {
@@ -192,117 +244,6 @@ impl Theme {
         }
         inline.apply_to(&mut style, &self.tokens);
         style
-    }
-
-    fn with_default_classes(self) -> Self {
-        let style = StyleRefinement::default;
-        let button = style()
-            .direction(FlexDirection::Row)
-            .align(Align::Center)
-            .justify(Justify::Center)
-            .padding_x(Space::Lg)
-            .padding_y(Space::Sm)
-            .radius(Radius::Md)
-            .border_width(1)
-            .border_color(ColorToken::Border)
-            .background(ColorToken::Surface)
-            .font_weight(FontWeight::MEDIUM);
-        self.with_class(
-            "app",
-            style()
-                .direction(FlexDirection::Column)
-                .size(crate::percent(100.0))
-                .padding(Space::Xl)
-                .gap(Space::Lg)
-                .background(ColorToken::Background)
-                .text_color(ColorToken::Text)
-                .font_size(FontSize::Md),
-        )
-        .with_class(
-            "row",
-            style()
-                .direction(FlexDirection::Row)
-                .align(Align::Center)
-                .gap(Space::Sm),
-        )
-        .with_class(
-            "column",
-            style().direction(FlexDirection::Column).gap(Space::Sm),
-        )
-        .with_class(
-            "card",
-            style()
-                .direction(FlexDirection::Column)
-                .padding(Space::Lg)
-                .gap(Space::Md)
-                .radius(Radius::Lg)
-                .border_width(1)
-                .border_color(ColorToken::Border)
-                .background(ColorToken::Surface),
-        )
-        .with_class(
-            "title",
-            style()
-                .font_size(FontSize::Xxl)
-                .font_weight(FontWeight::BOLD),
-        )
-        .with_class(
-            "subtitle",
-            style()
-                .font_size(FontSize::Lg)
-                .font_weight(FontWeight::SEMIBOLD),
-        )
-        .with_class(
-            "muted",
-            style()
-                .text_color(ColorToken::TextMuted)
-                .font_size(FontSize::Sm),
-        )
-        .with_class("btn", button)
-        .with_class("btn:hover", style().background(ColorToken::SurfaceHover))
-        .with_class("btn:active", style().border_color(ColorToken::Primary))
-        .with_class(
-            "btn-primary",
-            style()
-                .background(ColorToken::Primary)
-                .border_color(ColorToken::Primary)
-                .text_color(ColorToken::OnPrimary),
-        )
-        .with_class(
-            "btn-primary:hover",
-            style().background(ColorToken::PrimaryHover),
-        )
-        .with_class(
-            "btn-primary:active",
-            style().background(ColorToken::PrimaryActive),
-        )
-        .with_class(
-            "badge",
-            style()
-                .padding_x(Space::Sm)
-                .padding_y(2)
-                .radius(Radius::Full)
-                .background(ColorToken::SurfaceAlt)
-                .border_width(1)
-                .border_color(ColorToken::Border)
-                .font_size(FontSize::Sm),
-        )
-        .with_class(
-            "tile",
-            style()
-                .padding(Space::Md)
-                .radius(Radius::Md)
-                .background(ColorToken::SurfaceAlt)
-                .border_width(1)
-                .border_color(ColorToken::Border),
-        )
-        .with_class("tile:hover", style().background(ColorToken::SurfaceHover))
-    }
-}
-
-impl Default for Theme {
-    fn default() -> Self {
-        Self::light()
     }
 }
 
@@ -332,6 +273,7 @@ mod tests {
             &classes("btn btn-primary"),
             &StyleRefinement::default(),
             InteractionState::default(),
+            None,
         );
         assert_eq!(style.visual.background, theme.tokens().colors.primary);
         assert_eq!(style.text.color, theme.tokens().colors.on_primary);
@@ -348,6 +290,7 @@ mod tests {
                     &classes("btn btn-primary"),
                     &StyleRefinement::default(),
                     InteractionState { hovered, pressed },
+                    None,
                 )
                 .visual
                 .background
@@ -367,6 +310,7 @@ mod tests {
                 .padding(2)
                 .background(Color::BLACK),
             InteractionState::default(),
+            None,
         );
         assert_eq!(style.layout.padding, Edges::all(2.0));
         assert_eq!(style.visual.background, Color::BLACK);
@@ -380,12 +324,14 @@ mod tests {
             &classes("card title"),
             &StyleRefinement::default(),
             InteractionState::default(),
+            None,
         );
         let child = theme.resolve(
             Some(&parent.text),
             &[],
             &StyleRefinement::default(),
             InteractionState::default(),
+            None,
         );
         assert_eq!(child.text, parent.text);
         assert_eq!(child.layout.padding, Edges::ZERO);
@@ -400,12 +346,32 @@ mod tests {
                 &classes("card"),
                 &StyleRefinement::default(),
                 InteractionState::default(),
+                None,
             )
         };
         let light = resolve(&Theme::light());
         let dark = resolve(&Theme::dark());
         let change = dark.diff(&light);
         assert!(change.paint && !change.layout);
+    }
+
+    #[test]
+    fn local_sheet_replaces_the_same_theme_class() {
+        let theme = Theme::light();
+        let local = Stylesheet::default()
+            .with_class("btn", StyleRefinement::default().background(Color::BLACK));
+        let style = theme.resolve(
+            None,
+            &classes("btn"),
+            &StyleRefinement::default(),
+            InteractionState {
+                hovered: true,
+                pressed: false,
+            },
+            Some(&local),
+        );
+        assert_eq!(style.visual.background, Color::BLACK);
+        assert!(!local.has_class("missing"));
     }
 
     #[test]
@@ -416,6 +382,7 @@ mod tests {
             &classes("does-not-exist"),
             &StyleRefinement::default(),
             InteractionState::default(),
+            None,
         );
         assert_eq!(style.visual.background, Color::TRANSPARENT);
         assert!(!theme.has_class("does-not-exist"));

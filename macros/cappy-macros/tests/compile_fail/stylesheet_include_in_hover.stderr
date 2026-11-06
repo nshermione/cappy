@@ -1,0 +1,5 @@
+error: hover and active blocks only set properties
+ --> tests/compile_fail/stylesheet_include_in_hover.rs:8:18
+  |
+8 |         @include Badge,
+  |                  ^^^^^

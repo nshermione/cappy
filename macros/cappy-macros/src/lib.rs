@@ -2,11 +2,13 @@
 //!
 //! - `#[derive(Props)]` generates builder setters for a component's fields.
 //! - `#[derive(ClassName)]` turns a fieldless enum into typo-proof theme class names.
+//! - `stylesheet!` defines those class names together with their style rules.
 //! - `#[reactive]` rewrites a struct in place so each field is tracked and the struct keeps its name.
 
 mod class_name;
 mod props;
 mod reactive;
+mod stylesheet;
 
 use proc_macro::TokenStream;
 use syn::{DeriveInput, parse_macro_input};
@@ -81,6 +83,35 @@ pub fn reactive(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
     let input = parse_macro_input!(item as DeriveInput);
     reactive::expand(&input)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+/// Defines class names and their style rules together.
+///
+/// The enum variants are the classes. `@include Name` copies the properties of another class in
+/// this sheet; a property written after the include overwrites a copied one. `Name:hover` and
+/// `Name:active` are extra rules for that class, not extra variants. Each one starts from that
+/// class's own properties, and a property in the block overwrites one from the base. The macro generates
+/// `as_str`, `ALL`, `sheet` and `apply`. `sheet` and `apply` call `Stylesheet`, `StyleRefinement`
+/// and `Theme`, which must be in scope.
+///
+/// ```ignore
+/// stylesheet! {
+///     enum Class {
+///         Header { direction: FlexDirection::Row }
+///         HeaderMuted {
+///             @include Header,
+///             text_color: ColorToken::TextMuted,
+///         }
+///     }
+///     Header:hover { background: ColorToken::SurfaceHover }
+/// }
+/// ```
+#[proc_macro]
+pub fn stylesheet(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as stylesheet::Input);
+    stylesheet::expand(&input)
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }

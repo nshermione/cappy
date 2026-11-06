@@ -83,6 +83,7 @@ impl Ui {
             &node.all_classes(),
             &node.effective_inline_style(),
             node.interaction,
+            node.stylesheet,
         );
         let change = resolved.diff(&node.style);
         let is_text = node.is_text();

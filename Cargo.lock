@@ -386,8 +386,6 @@ dependencies = [
 name = "cappy-macros"
 version = "0.1.0"
 dependencies = [
- "cappy",
- "cappy-core",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -423,6 +421,9 @@ dependencies = [
 [[package]]
 name = "cappy-style"
 version = "0.1.0"
+dependencies = [
+ "cappy-macros",
+]
 
 [[package]]
 name = "cappy-tao"

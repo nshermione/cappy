@@ -376,3 +376,45 @@ fn prepare_frame_before_update_is_none() {
     let mut ui = Ui::new(div(), Theme::light());
     assert!(ui.prepare_frame().is_none());
 }
+
+#[test]
+fn component_stylesheet_stays_on_its_element() {
+    use std::sync::LazyLock;
+
+    use crate::Component;
+    use cappy_style::{Color, Stylesheet};
+
+    fn sheet() -> &'static Stylesheet {
+        static SHEET: LazyLock<Stylesheet> = LazyLock::new(|| {
+            Stylesheet::default()
+                .with_class("card", StyleRefinement::default().background(Color::BLACK))
+                .with_class(
+                    "panel-skin",
+                    StyleRefinement::default().background(Color::BLACK),
+                )
+        });
+        &SHEET
+    }
+
+    struct Panel;
+
+    impl Component for Panel {
+        fn stylesheet() -> &'static Stylesheet {
+            sheet()
+        }
+
+        fn render(self) -> Element {
+            div()
+                .class("card")
+                .key("panel")
+                .child(div().class("card").key("inner"))
+        }
+    }
+
+    let ui = settled(Panel.into());
+    assert!(!ui.theme().has_class("panel-skin"));
+    let panel = ui.node_style(ui.find_by_key("panel").unwrap()).unwrap();
+    let inner = ui.node_style(ui.find_by_key("inner").unwrap()).unwrap();
+    assert_eq!(panel.visual.background, Color::BLACK);
+    assert_eq!(inner.visual.background, ui.theme().tokens().colors.surface);
+}

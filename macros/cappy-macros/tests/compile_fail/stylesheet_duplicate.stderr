@@ -1,0 +1,5 @@
+error: duplicate class `Badge`
+ --> tests/compile_fail/stylesheet_duplicate.rs:6:9
+  |
+6 |         Badge {
+  |         ^^^^^
