@@ -97,18 +97,18 @@ fn every_class_exists_in_the_default_theme() {
     }
 }
 
-#[reactive]
+#[store]
 struct CounterState {
     count: i64,
 }
 
-#[reactive]
+#[store]
 struct AppState {
     counter: CounterState,
     name: String,
 }
 
-#[reactive]
+#[store]
 struct Row {
     count: i64,
     label: Reactive<String>,
@@ -122,6 +122,11 @@ fn nested_reactive_fields_are_independent() {
     assert_eq!(state.counter.count.get(), 2);
     assert_eq!(state.name.get(), "a");
     assert_eq!(state.counter.count.to_string(), "2");
+
+    let shared = context.use_store(CounterState);
+    shared.count.set(7);
+    assert_eq!(context.use_store(CounterState).count.get(), 7);
+    assert_eq!(state.counter.count.get(), 2);
 }
 
 #[test]
@@ -149,17 +154,17 @@ impl Component for Badge {
     }
 }
 
-#[reactive(singleton)]
+#[store]
 struct SharedCount {
     count: i64,
 }
 
-#[reactive(singleton)]
+#[store]
 struct SharedName {
     name: String,
 }
 
-#[reactive(singleton)]
+#[store]
 struct Pair<T> {
     value: T,
 }
@@ -167,9 +172,9 @@ struct Pair<T> {
 #[test]
 fn singleton_is_shared_and_new_is_separate() {
     let context = Application::new().context().clone();
-    let shared = context.singleton(SharedCount);
+    let shared = context.use_store(SharedCount);
     shared.count.set(0);
-    let again = context.singleton(SharedCount);
+    let again = context.use_store(SharedCount);
     shared.count.set(4);
     assert_eq!(again.count.get(), 4);
 
@@ -178,17 +183,17 @@ fn singleton_is_shared_and_new_is_separate() {
     local.count.set(9);
     assert_eq!(shared.count.get(), 4);
 
-    let name = context.singleton(SharedName);
+    let name = context.use_store(SharedName);
     name.name.set(String::from("a"));
-    assert_eq!(context.singleton(SharedName).name.get(), "a");
+    assert_eq!(context.use_store(SharedName).name.get(), "a");
     assert_eq!(SharedName::new(&context, String::from("b")).name.get(), "b");
     assert_eq!(shared.count.get(), 4);
     shared.count.set(0);
 
-    let ints = context.singleton(Pair::<i64>());
+    let ints = context.use_store(Pair::<i64>());
     ints.value.set(3);
-    assert_eq!(context.singleton(Pair::<i64>()).value.get(), 3);
-    assert!(!context.singleton(Pair::<bool>()).value.get());
+    assert_eq!(context.use_store(Pair::<i64>()).value.get(), 3);
+    assert!(!context.use_store(Pair::<bool>()).value.get());
     assert_eq!(Pair::new(&context, 9_i64).value.get(), 9);
     assert_eq!(ints.value.get(), 3);
     ints.value.set(0);

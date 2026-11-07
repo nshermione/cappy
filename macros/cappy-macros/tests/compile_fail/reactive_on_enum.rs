@@ -1,6 +1,6 @@
-use cappy_macros::reactive;
+use cappy_macros::store;
 
-#[reactive]
+#[store]
 enum NotAStruct {
     One,
 }

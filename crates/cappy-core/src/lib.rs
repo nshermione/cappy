@@ -13,7 +13,7 @@ mod prop;
 mod reactive;
 mod ui;
 
-pub use context::{Application, Context, Singleton, SingletonOf};
+pub use context::{Application, Context, FieldInit, Singleton, SingletonOf};
 
 pub use binding::{Dynamic, IntoClasses, IntoStyle, IntoText};
 pub use damage::{Damage, DamageTracker};

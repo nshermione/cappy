@@ -1,5 +1,5 @@
-error: #[component] already tracks its fields; remove #[reactive]
+error: #[component] already tracks its fields; remove #[store]
  --> tests/compile_fail/component_with_reactive.rs:6:3
   |
-6 | #[reactive]
-  |   ^^^^^^^^
+6 | #[store]
+  |   ^^^^^

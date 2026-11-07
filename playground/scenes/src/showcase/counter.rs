@@ -1,8 +1,8 @@
-//! Shared counter. `singleton` is one value in a context; `new` is a separate instance.
+//! Shared counter. `cx.use_store(Counter)` is one value in a context; `new` is a separate instance.
 
 use cappy::prelude::*;
 
-#[reactive(singleton)]
+#[store]
 pub struct Counter {
     pub count: i64,
 }

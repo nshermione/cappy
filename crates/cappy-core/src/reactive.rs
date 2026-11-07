@@ -4,8 +4,9 @@
 //! signal inside a tracked scope subscribes that scope; writing the signal queues every subscriber
 //! so the UI re-evaluates only the bindings that depend on it.
 //!
-//! [`Context::reactive`] turns a primitive into a [`Reactive`] handle. `#[reactive]` on a struct keeps the
+//! [`Context::reactive`] turns a primitive into a [`Reactive`] handle. `#[store]` on a struct keeps the
 //! struct's name and tracks each field. A value that is already reactive is returned as itself.
+//! `cx.use_store(Type)` returns the one value of that struct stored in the context.
 
 use std::any::{Any, TypeId};
 use std::cell::{Cell, RefCell};
@@ -805,7 +806,7 @@ impl crate::Context {
     /// Tracks `value` in this context.
     ///
     /// A primitive, [`String`], [`Option`] or [`Vec`] becomes one [`Reactive`] handle. A
-    /// `#[reactive]` struct is already tracked, so it is returned as itself. [`Reactive`] and
+    /// `#[store]` struct is already tracked, so it is returned as itself. [`Reactive`] and
     /// [`Signal`] become a [`Reactive`] handle without wrapping them again.
     pub fn reactive<T: IntoReactive>(&self, value: T) -> T::Output {
         value.into_reactive(self)
@@ -813,8 +814,8 @@ impl crate::Context {
 
     /// Returns the one `T` stored for this context, creating it on the first call.
     ///
-    /// Pass the marker `#[reactive(singleton)]` emits under the struct's name: `cx.singleton(Counter)`.
-    pub fn singleton<T: crate::Singleton>(&self, _of: crate::SingletonOf<T>) -> T {
+    /// Pass the marker `#[store]` emits under the struct's name: `cx.use_store(Counter)`.
+    pub fn use_store<T: crate::Singleton>(&self, _of: crate::SingletonOf<T>) -> T {
         self.runtime.singleton(|| T::create(self))
     }
 }
@@ -886,6 +887,15 @@ impl<T: 'static> IntoReactive for Reactive<T> {
 
     fn into_reactive(self, _context: &crate::Context) -> Self::Output {
         self
+    }
+}
+
+impl<T> crate::FieldInit for Reactive<T>
+where
+    T: Default + IntoReactive<Output = Reactive<T>> + 'static,
+{
+    fn field_init(cx: &crate::Context) -> Self {
+        T::default().into_reactive(cx)
     }
 }
 

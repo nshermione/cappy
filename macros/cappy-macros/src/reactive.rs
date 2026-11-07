@@ -2,7 +2,7 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{Data, DeriveInput, Field, Fields, Generics, Ident, spanned::Spanned};
 
-pub fn expand(input: &DeriveInput, singleton: bool) -> syn::Result<TokenStream> {
+pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     if let Some(attr) = input
         .attrs
         .iter()
@@ -10,10 +10,10 @@ pub fn expand(input: &DeriveInput, singleton: bool) -> syn::Result<TokenStream> 
     {
         return Err(syn::Error::new(
             attr.path().span(),
-            "#[component] already tracks its fields; remove #[reactive]",
+            "#[component] already tracks its fields; remove #[store]",
         ));
     }
-    let fields = named_fields(input, "#[reactive]")?;
+    let fields = named_fields(input, "#[store]")?;
     let vis = &input.vis;
     let name = &input.ident;
     let attrs = &input.attrs;
@@ -43,8 +43,8 @@ pub fn expand(input: &DeriveInput, singleton: bool) -> syn::Result<TokenStream> 
         quote!(#field_name: cx.reactive(#field_name))
     });
     let tracked = tracked_impls(name, &generics, &copy_types);
-    let marker = singleton.then(|| singleton_marker(vis, name, &generics));
-    let singleton = singleton.then(|| singleton_impl(name, &generics, &fields));
+    let marker = singleton_marker(vis, name, &generics);
+    let singleton = singleton_impl(name, &generics, &fields);
 
     Ok(quote! {
         #[derive(Clone)]
@@ -70,17 +70,17 @@ pub fn expand(input: &DeriveInput, singleton: bool) -> syn::Result<TokenStream> 
     })
 }
 
-/// Same name as the struct, in the value namespace, so `cx.singleton(Name)` can name it.
+/// Same name as the struct, in the value namespace, so `cx.use_store(Name)` can name it.
 fn singleton_marker(vis: &syn::Visibility, name: &Ident, generics: &Generics) -> TokenStream {
     if generics.params.is_empty() {
         quote! {
-            #[allow(non_upper_case_globals)]
+            #[allow(non_upper_case_globals, dead_code)]
             #vis const #name: ::cappy::SingletonOf<#name> = ::cappy::SingletonOf::new();
         }
     } else {
         let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
         quote! {
-            #[allow(non_snake_case)]
+            #[allow(non_snake_case, dead_code)]
             #vis fn #name #impl_generics() -> ::cappy::SingletonOf<#name #type_generics> #where_clause {
                 ::cappy::SingletonOf::new()
             }
@@ -88,25 +88,32 @@ fn singleton_marker(vis: &syn::Visibility, name: &Ident, generics: &Generics) ->
     }
 }
 
-/// `cx.singleton(Type)` for `#[reactive(singleton)]`. The value lives in that context.
+/// `cx.use_store(Type)` for `#[store]`. The value lives in that context.
 fn singleton_impl(name: &Ident, generics: &Generics, fields: &[&Field]) -> TokenStream {
     let mut generics = generics.clone();
     {
         let predicates = &mut generics.make_where_clause().predicates;
         for field in fields {
             let ty = &field.ty;
-            predicates.push(syn::parse_quote!(#ty: ::core::default::Default));
+            predicates.push(syn::parse_quote!(#ty: ::cappy::FieldInit));
         }
         predicates.push(syn::parse_quote!(Self: ::core::clone::Clone + 'static));
     }
     let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
-    let defaults = fields
-        .iter()
-        .map(|_| quote!(::core::default::Default::default()));
+    let inits = fields.iter().map(|field| {
+        let ty = &field.ty;
+        quote!(<#ty as ::cappy::FieldInit>::field_init(cx))
+    });
     quote! {
+        impl #impl_generics ::cappy::FieldInit for #name #type_generics #where_clause {
+            fn field_init(cx: &::cappy::Context) -> Self {
+                Self::new(cx, #(#inits),*)
+            }
+        }
+
         impl #impl_generics ::cappy::Singleton for #name #type_generics #where_clause {
             fn create(cx: &::cappy::Context) -> Self {
-                Self::new(cx, #(#defaults),*)
+                <Self as ::cappy::FieldInit>::field_init(cx)
             }
         }
     }

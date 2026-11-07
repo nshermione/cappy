@@ -2,8 +2,10 @@
 
 use std::sync::Arc;
 
-use cappy::prelude::*;
 use cappy::ClickEvent;
+use cappy::prelude::*;
+
+use crate::showcase::counter::Counter;
 
 #[component]
 pub struct Badge {
@@ -40,10 +42,11 @@ impl Component for Badge {
     }
 
     fn render(&self, cx: &Context) -> Element {
+        let counter = cx.use_store(Counter);
         ui! {
             div(class = Class::Root, on_click = cx.on(Self::press)) {
                 slot(icon)
-                text(:format!("{} ({})", self.label, self.hits), key = "badge-label")
+                text(:format!("{} ({}) c:{}", self.label, self.hits, counter.count), key = "badge-label")
                 slot(tail)
             }
         }
@@ -51,8 +54,10 @@ impl Component for Badge {
 }
 
 impl Badge {
-    fn press(&self, _event: &ClickEvent) {
+    fn press(&self, cx: &Context, _event: &ClickEvent) {
         self.hits.update(|hits| *hits += 1);
+        let counter = cx.use_store(Counter);
+        counter.increment();
         self.on_click.emit(self.label.get());
     }
 }

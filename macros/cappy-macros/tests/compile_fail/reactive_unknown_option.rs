@@ -1,6 +1,6 @@
-use cappy_macros::reactive;
+use cappy_macros::store;
 
-#[reactive(other)]
+#[store(other)]
 struct Counter {
     count: i64,
 }

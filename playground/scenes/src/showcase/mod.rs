@@ -21,7 +21,7 @@ use cappy::prelude::*;
 /// Header with a theme switcher, a counter (`show` / `if`), selectable tiles and a keyed task list.
 pub fn showcase(cx: &Context) -> Ui {
     // A context reused for another scene still holds the previous singleton.
-    cx.singleton(counter::Counter).reset();
+    cx.use_store(counter::Counter).reset();
     let themes: Rc<[Arc<Theme>]> = theme::themes()
         .into_iter()
         .map(|tokens| Arc::new(style::stylesheet(tokens)))

@@ -33,13 +33,13 @@ impl Default for Application {
     }
 }
 
-/// One value of this type per [`Context`]. `#[reactive(singleton)]` implements it.
+/// One value of this type per [`Context`]. `#[store]` on a struct implements it.
 pub trait Singleton: Clone + 'static {
-    /// Builds the value stored the first time [`Context::singleton`] sees this type.
+    /// Builds the value stored the first time [`Context::use_store`] sees this type.
     fn create(cx: &Context) -> Self;
 }
 
-/// Marker passed to [`Context::singleton`]. `#[reactive(singleton)]` emits one under the struct's name.
+/// Marker passed to [`Context::use_store`]. `#[store]` emits one under the struct's name.
 pub struct SingletonOf<T> {
     _marker: PhantomData<fn() -> T>,
 }
@@ -72,6 +72,21 @@ impl fmt::Debug for Context {
     }
 }
 
+/// Builds one field of a `#[store]` struct.
+///
+/// [`Default`](Default) types use their default. [`crate::Reactive`] builds a new handle from the
+/// inner default. The `#[store]` macro implements this for the struct itself.
+#[doc(hidden)]
+pub trait FieldInit: Sized {
+    fn field_init(cx: &Context) -> Self;
+}
+
+impl<T: Default> FieldInit for T {
+    fn field_init(_cx: &Context) -> Self {
+        T::default()
+    }
+}
+
 impl Context {
     /// Runs `body` while `component` is the one [`Context::on`] binds.
     ///
@@ -87,12 +102,13 @@ impl Context {
 
     /// Binds `method` to the component [`Context::with`] is rendering.
     ///
-    /// The returned closure owns a clone of that component, so it outlives `render`.
+    /// The returned closure owns a clone of that component and of this context, so it outlives
+    /// `render`. The method receives `&self`, `&Context`, then the event.
     ///
     /// # Panics
     /// Panics when called outside [`Context::with`], or when `method`'s receiver is not the
     /// component currently on the stack.
-    pub fn on<T, E>(&self, method: fn(&T, &E)) -> impl FnMut(&E) + 'static
+    pub fn on<T, E>(&self, method: fn(&T, &Context, &E)) -> impl FnMut(&E) + 'static
     where
         T: 'static,
         E: 'static,
@@ -107,7 +123,8 @@ impl Context {
         let instance = frame.downcast::<T>().unwrap_or_else(|_| {
             panic!("cx.on method does not belong to the component being rendered")
         });
-        move |event| method(&instance, event)
+        let cx = self.clone();
+        move |event| method(&instance, &cx, event)
     }
 }
 

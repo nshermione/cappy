@@ -18,11 +18,11 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     if let Some(attr) = input
         .attrs
         .iter()
-        .find(|attr| attr.path().is_ident("reactive"))
+        .find(|attr| attr.path().is_ident("store"))
     {
         return Err(syn::Error::new(
             attr.path().span(),
-            "#[component] already tracks its fields; remove #[reactive]",
+            "#[component] already tracks its fields; remove #[store]",
         ));
     }
     let fields = named_fields(input, "#[component]")?;

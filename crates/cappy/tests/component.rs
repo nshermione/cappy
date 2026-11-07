@@ -28,7 +28,7 @@ stylesheet! {
 }
 
 impl Badge {
-    fn press(&self, _event: &ClickEvent) {
+    fn press(&self, _cx: &Context, _event: &ClickEvent) {
         self.on_click.emit(self.label.get());
     }
 }

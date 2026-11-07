@@ -74,8 +74,8 @@ fn demo_badge(cx: &Context) -> Element {
 }
 
 fn counter_card(cx: &Context) -> Element {
-    let shared = cx.singleton(Counter);
-    let mirror = cx.singleton(Counter);
+    let shared = cx.use_store(Counter);
+    let mirror = cx.use_store(Counter);
     let local = Counter::new(cx, 0);
     let decrement_count = shared.clone();
     let increment_count = shared.clone();

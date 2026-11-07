@@ -3,8 +3,8 @@
 //! - `#[derive(Props)]` generates builder setters for a component's fields.
 //! - `#[derive(ClassName)]` turns a fieldless enum into typo-proof theme class names.
 //! - `stylesheet!` defines those class names together with their style rules.
-//! - `#[reactive]` rewrites a struct in place so each field is tracked and the struct keeps its name.
-//!   `#[reactive(singleton)]` is read with `cx.singleton(Type)`.
+//! - `#[store]` rewrites a struct in place so each field is tracked and the struct keeps its name.
+//!   `cx.use_store(Type)` returns the one value of that struct in the context.
 //! - `#[component]` is a reactive struct whose plain fields are state, `#[prop]` fields are inputs,
 //!   `#[event]` fields are listeners and `#[slot]` fields are positions for parent children.
 
@@ -78,45 +78,35 @@ pub fn derive_class_name(input: TokenStream) -> TokenStream {
 /// its name. `new` passes each argument through `reactive`. A field that is already reactive stays
 /// that handle.
 ///
-/// `#[reactive(singleton)]` implements [`Singleton`](cappy::Singleton) and a marker with the
-/// struct's name. `cx.singleton(Type)` returns the one value stored in that
-/// [`Context`](cappy::Context), starting from
-/// [`Default`](core::default::Default) for each field. The struct stays
-/// [`Clone`](core::clone::Clone) when every tracked field is.
+/// The struct implements [`Singleton`](cappy::Singleton). A marker with the struct's name lets
+/// `cx.use_store(Type)` returns the one value stored in that [`Context`](cappy::Context). Each field
+/// starts from [`Default`](core::default::Default), from the inner default of a
+/// [`Reactive`](cappy::Reactive) handle, or from a nested `#[store]` struct. `new` still builds
+/// a separate instance.
+/// The struct stays [`Clone`](core::clone::Clone) when every tracked field is.
 ///
-/// A `#[component]` struct is already tracked. Remove `#[reactive]` from it.
+/// A `#[component]` struct is already tracked. Remove `#[store]` from it.
 #[proc_macro_attribute]
-pub fn reactive(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let singleton = match singleton_attribute(attr) {
-        Ok(singleton) => singleton,
-        Err(error) => return error.into_compile_error().into(),
-    };
+pub fn store(attr: TokenStream, item: TokenStream) -> TokenStream {
+    if !attr.is_empty() {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "#[store] does not take arguments",
+        )
+        .into_compile_error()
+        .into();
+    }
     let input = parse_macro_input!(item as DeriveInput);
-    reactive::expand(&input, singleton)
+    reactive::expand(&input)
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
-}
-
-/// `#[reactive]` or `#[reactive(singleton)]`. Anything else is a compile error.
-fn singleton_attribute(attr: TokenStream) -> syn::Result<bool> {
-    if attr.is_empty() {
-        return Ok(false);
-    }
-    let ident = syn::parse::<Ident>(attr)?;
-    if ident == "singleton" {
-        return Ok(true);
-    }
-    Err(syn::Error::new(
-        ident.span(),
-        "unknown #[reactive] option; expected `singleton`",
-    ))
 }
 
 /// A single-file component. Plain fields become reactive state, `#[prop]` fields are parent
 /// inputs, `#[event]` fields are listeners, and `#[slot]` fields are positions for parent children.
 /// A slot field is stored as a [`Copy`](core::marker::Copy) marker, not the child element, and its
 /// type must be `Element`. The macro adds `new(cx, ...)`, `open(cx)` and [`Clone`](core::clone::Clone).
-/// Do not also derive `Default` or apply `#[reactive]`. `render` stays a handwritten `Component` impl.
+/// Do not also derive `Default` or apply `#[store]`. `render` stays a handwritten `Component` impl.
 ///
 /// `class`, `style` and `key` are reserved for the root element.
 #[proc_macro_attribute]

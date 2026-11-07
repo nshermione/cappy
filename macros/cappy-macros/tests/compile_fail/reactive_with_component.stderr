@@ -1,4 +1,4 @@
-error: #[component] already tracks its fields; remove #[reactive]
+error: #[component] already tracks its fields; remove #[store]
  --> tests/compile_fail/reactive_with_component.rs:6:3
   |
 6 | #[component]

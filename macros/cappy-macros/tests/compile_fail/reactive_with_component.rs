@@ -1,8 +1,8 @@
 #![allow(unused_imports)]
 
-use cappy_macros::{component, reactive};
+use cappy_macros::{component, store};
 
-#[reactive]
+#[store]
 #[component]
 struct Badge {
     text: String,
