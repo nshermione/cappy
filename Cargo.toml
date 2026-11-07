@@ -23,7 +23,6 @@ cappy-testing = { path = "crates/cappy-testing", version = "0.1.0" }
 cappy-dsl = { path = "macros/cappy-dsl", version = "0.1.0" }
 cappy-macros = { path = "macros/cappy-macros", version = "0.1.0" }
 cappy-winit = { path = "integrations/cappy-winit", version = "0.1.0", default-features = false }
-cappy-tao = { path = "integrations/cappy-tao", version = "0.1.0", default-features = false }
 playground-scenes = { path = "playground/scenes" }
 
 # Rendering, layout and text. wgpu and cosmic-text must stay on the versions glyphon uses.
@@ -38,7 +37,6 @@ bytemuck = { version = "1", features = ["derive"] }
 
 # Window managers
 winit = "0.30"
-tao = "0.37"
 
 # Utilities
 log = "0.4"

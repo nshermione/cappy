@@ -3,6 +3,7 @@
 //! [`Ui::update`], and hand [`Ui::prepare_frame`] output to a renderer.
 
 mod binding;
+mod context;
 mod damage;
 mod element;
 mod event;
@@ -12,16 +13,19 @@ mod prop;
 mod reactive;
 mod ui;
 
+pub use context::{Application, Context, Singleton, SingletonOf};
+
 pub use binding::{Dynamic, IntoClasses, IntoStyle, IntoText};
 pub use damage::{Damage, DamageTracker};
 pub use element::{
-    Component, Element, Slot, div, for_each, fragment, if_else, show, slot, text, text_dyn,
+    Component, Element, HasContext, Slot, div, for_each, fragment, if_else, show, slot, text,
+    text_dyn,
 };
 pub use event::{ButtonState, ClickEvent, CursorIcon, InputEvent, PointerButton};
 pub use listener::Listener;
 pub use paint::{Primitive, QuadPrimitive, RenderFrame, TextPrimitive};
 pub use prop::{ByHandle, ByValue, PropInput};
-pub use reactive::{IntoReactive, Reactive, RetirePlaceholder, Signal, reactive, signal};
+pub use reactive::{IntoReactive, Reactive, RetirePlaceholder, Signal};
 pub use ui::{FrameInput, NodeId, ResourceCensus, Ui, UpdateOutcome};
 
 pub use cappy_layout::{

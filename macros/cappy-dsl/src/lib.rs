@@ -7,20 +7,23 @@ pub mod __private {
 }
 
 #[doc(hidden)]
-pub use cappy_macros::slot_self;
+pub use cappy_macros::{context_in_scope, slot_self, ui_closure};
 
 /// Builds an element tree.
 ///
 /// ```
 /// use cappy_dsl::{style, ui};
-/// use cappy_core::{Space, div, signal, text};
+/// use cappy_core::{Application, Space, div, text};
 ///
-/// let count = signal(0);
+/// let application = Application::new();
+/// let cx = application.context();
+/// let count = cx.signal(0);
+/// let label = count.clone();
 /// let tree = ui! {
 ///     div(class = "app") {
 ///         text("Counter", class = "title"),
 ///         div(class = "row", style = style! { gap: Space::Sm }) {
-///             text(:format!("Count: {}", count.get()), key = "label"),
+///             text(:format!("Count: {}", label.get()), key = "label"),
 ///             div(class = "btn btn-primary", on_click = move |_| count.update(|n| *n += 1)) {
 ///                 text("+1")
 ///             }
@@ -34,9 +37,9 @@ pub use cappy_macros::slot_self;
 /// - `name(content, field = value, ...) { children }` calls the function `name` in scope, so
 ///   `div`, `text` and your own element functions all resolve (and go to definition) the same
 ///   way. The leading `content` argument, the fields and the children are all optional.
-/// - `@Type(field = value, ...) { children }` builds `Type::default()` and sets fields, e.g. a
-///   struct using `#[derive(Props)]` or `#[component]` that implements
-///   [`Component`](cappy_core::Component). `class`, `style` and `key` are applied to the element
+/// - `@Type(field = value, ...) { children }` builds `Type::open(cx)` and sets fields. `cx` is the
+///   [`Context`](cappy_core::Context) in scope. The type is a `#[component]`. `class`, `style` and
+///   `key` are applied to the element
 ///   `render` returns. Without `#[slot]` fields, children are appended to that root. With slots,
 ///   the first child that has no `slot = name` fills the first slot, `slot = name` fills that
 ///   slot, and further unnamed children are dropped.
@@ -54,8 +57,9 @@ pub use cappy_macros::slot_self;
 /// Every `field = value` calls the builder method `field(value)`. A leading `:` makes the value
 /// reactive: `:field = value` calls `field(Dynamic(move || value))` and the content `:value`
 /// calls `name(Dynamic(move || value))`, so the value is recomputed whenever a signal it reads
-/// changes. The setter must accept [`Dynamic`](cappy_core::Dynamic), as `text`, `class` and
-/// `style` do.
+/// changes. `self.field` inside that expression, and inside `show`, `if` and `for`, is cloned
+/// before the closure. The setter must accept [`Dynamic`](cappy_core::Dynamic), as `text`, `class`
+/// and `style` do.
 ///
 /// `class` takes one class or a list: `class = [a, b]` is shorthand for `class = a, class = b`,
 /// and `:class = [a, b]` for `:class = a, :class = b`. List items may mix strings and typed
@@ -80,10 +84,10 @@ macro_rules! __ui_node {
         $crate::__ui_show_expr!(: $cond ; $($body)*)
     };
     (if ( : $cond:expr ) { $($then:tt)* } $($rest:tt)*) => {
-        $crate::__ui_if_root!(move || $cond ; move || $crate::__ui_fragment!($($then)*) ; $($rest)*)
+        $crate::__ui_if_root!($crate::ui_closure!(move || $cond) ; $crate::ui_closure!(move || $crate::__ui_fragment!($($then)*)) ; $($rest)*)
     };
     (if ( $cond:expr ) { $($then:tt)* } $($rest:tt)*) => {
-        $crate::__ui_if_root!(move || $cond ; move || $crate::__ui_fragment!($($then)*) ; $($rest)*)
+        $crate::__ui_if_root!($crate::ui_closure!(move || $cond) ; $crate::ui_closure!(move || $crate::__ui_fragment!($($then)*)) ; $($rest)*)
     };
     (for ( $item:ident in : $source:expr , key = $key:ident . $($field:ident).+ ) { $($body:tt)* } $(,)?) => {
         $crate::__ui_for_expr!($item ; $source ; $key ; path $($field).+ ; $($body)*)
@@ -280,7 +284,7 @@ macro_rules! __ui_component {
             [
                 $crate::__ui_slot_children!(
                     $crate::__private::Element::from(
-                        $crate::__ui_args!(@fields [<$type $(:: $segment)*>::default()] $($props)*)
+                        $crate::__ui_args!(@fields [<$type $(:: $segment)*>::open(&$crate::context_in_scope!($type))] $($props)*)
                     ).prepare_slots() ;
                     $type $(:: $segment)* ;
                     $($children)*
@@ -357,10 +361,10 @@ macro_rules! __ui_args {
 #[macro_export]
 macro_rules! __ui_bind {
     (content $name:ident, $value:expr) => {
-        $name($crate::__private::Dynamic(move || $value))
+        $name($crate::__private::Dynamic($crate::ui_closure!(move || $value)))
     };
     (field $builder:expr, $field:ident = $value:expr) => {
-        $builder.$field($crate::__private::Dynamic(move || $value))
+        $builder.$field($crate::__private::Dynamic($crate::ui_closure!(move || $value)))
     };
 }
 
@@ -404,16 +408,16 @@ macro_rules! __ui_collect {
     ($nodes:ident ; if ( : $cond:expr ) { $($then:tt)* } $($rest:tt)*) => {
         $crate::__ui_if_chain!(
             @start $nodes ;
-            move || $cond ;
-            move || $crate::__ui_fragment!($($then)*) ;
+            $crate::ui_closure!(move || $cond) ;
+            $crate::ui_closure!(move || $crate::__ui_fragment!($($then)*)) ;
             $($rest)*
         )
     };
     ($nodes:ident ; if ( $cond:expr ) { $($then:tt)* } $($rest:tt)*) => {
         $crate::__ui_if_chain!(
             @start $nodes ;
-            move || $cond ;
-            move || $crate::__ui_fragment!($($then)*) ;
+            $crate::ui_closure!(move || $cond) ;
+            $crate::ui_closure!(move || $crate::__ui_fragment!($($then)*)) ;
             $($rest)*
         )
     };
@@ -496,7 +500,10 @@ macro_rules! __ui_fragment {
 #[macro_export]
 macro_rules! __ui_show_expr {
     (: $cond:expr ; $($body:tt)*) => {
-        $crate::__private::show(move || $cond, move || $crate::__ui_fragment!($($body)*))
+        $crate::__private::show(
+            $crate::ui_closure!(move || $cond),
+            $crate::ui_closure!(move || $crate::__ui_fragment!($($body)*)),
+        )
     };
 }
 
@@ -505,28 +512,28 @@ macro_rules! __ui_show_expr {
 macro_rules! __ui_for_expr {
     ($item:ident ; $source:expr ; $key:ident ; self ; $($body:tt)*) => {
         $crate::__private::for_each(
-            move |visit| {
+            $crate::ui_closure!(move |visit| {
                 $source.with(|list| {
                     for item in list.iter() {
                         visit(item);
                     }
                 });
-            },
+            }),
             |$key| $key,
-            move |$item| $crate::__ui_fragment!($($body)*),
+            $crate::ui_closure!(move |$item| $crate::__ui_fragment!($($body)*)),
         )
     };
     ($item:ident ; $source:expr ; $key:ident ; path $($field:ident).+ ; $($body:tt)*) => {
         $crate::__private::for_each(
-            move |visit| {
+            $crate::ui_closure!(move |visit| {
                 $source.with(|list| {
                     for item in list.iter() {
                         visit(item);
                     }
                 });
-            },
+            }),
             |$key| &$key$(.$field)+,
-            move |$item| $crate::__ui_fragment!($($body)*),
+            $crate::ui_closure!(move |$item| $crate::__ui_fragment!($($body)*)),
         )
     };
 }
@@ -551,14 +558,14 @@ macro_rules! __ui_if_chain {
     (@more $nodes:ident ; [$($frames:tt)*] ; else if ( : $cond:expr ) { $($body:tt)* } $($rest:tt)*) => {
         $crate::__ui_if_chain!(
             @more $nodes ;
-            [$($frames)* {move || $cond ; move || $crate::__ui_fragment!($($body)*)}] ;
+            [$($frames)* {$crate::ui_closure!(move || $cond) ; $crate::ui_closure!(move || $crate::__ui_fragment!($($body)*))}] ;
             $($rest)*
         )
     };
     (@more $nodes:ident ; [$($frames:tt)*] ; else if ( $cond:expr ) { $($body:tt)* } $($rest:tt)*) => {
         $crate::__ui_if_chain!(
             @more $nodes ;
-            [$($frames)* {move || $cond ; move || $crate::__ui_fragment!($($body)*)}] ;
+            [$($frames)* {$crate::ui_closure!(move || $cond) ; $crate::ui_closure!(move || $crate::__ui_fragment!($($body)*))}] ;
             $($rest)*
         )
     };
@@ -566,7 +573,7 @@ macro_rules! __ui_if_chain {
         $crate::__ui_if_fold!(
             $nodes ;
             [$($frames)*] ;
-            move || $crate::__ui_fragment!($($body)*) ;
+            $crate::ui_closure!(move || $crate::__ui_fragment!($($body)*)) ;
             $($rest)*
         )
     };
@@ -612,7 +619,7 @@ macro_rules! __ui_if_fold {
     (@wrap $nodes:ident ; $inner:expr ; [{$cond:expr ; $then:expr} $($more:tt)*] ; $($rest:tt)*) => {
         $crate::__ui_if_fold!(
             @nest $nodes ;
-            move || $inner ;
+            $crate::ui_closure!(move || $inner) ;
             [{$cond ; $then} $($more)*] ;
             $($rest)*
         )

@@ -109,7 +109,7 @@ impl Ui {
             BindingKind::Classes(compute) => Step::Classes(track(observer, compute)),
             BindingKind::Style(compute) => Step::Style(Box::new(track(observer, compute))),
             BindingKind::Theme => {
-                let theme_signal = self.theme_signal;
+                let theme_signal = self.theme_signal.clone();
                 Step::Theme(track(observer, || theme_signal.get()))
             }
             BindingKind::Flow(flow) => Step::Flow(*flow),

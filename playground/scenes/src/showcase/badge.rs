@@ -1,6 +1,9 @@
 //! One file for the badge: state, a parent prop, a click event, two slots and its sheet.
 
+use std::sync::Arc;
+
 use cappy::prelude::*;
+use cappy::ClickEvent;
 
 #[component]
 pub struct Badge {
@@ -32,15 +35,15 @@ stylesheet! {
 }
 
 impl Component for Badge {
-    fn stylesheet() -> &'static Stylesheet {
-        Class::sheet()
+    fn stylesheet() -> Option<Arc<Stylesheet>> {
+        Some(Class::sheet())
     }
 
-    fn render(self) -> Element {
+    fn render(&self, cx: &Context) -> Element {
         ui! {
-            div(class = Class::Root, on_click = move |_| self.press()) {
+            div(class = Class::Root, on_click = cx.on(Self::press)) {
                 slot(icon)
-                text(:self.formatted_text(), key = "badge-label")
+                text(:format!("{} ({})", self.label, self.hits), key = "badge-label")
                 slot(tail)
             }
         }
@@ -48,12 +51,8 @@ impl Component for Badge {
 }
 
 impl Badge {
-    fn press(&self) {
+    fn press(&self, _event: &ClickEvent) {
         self.hits.update(|hits| *hits += 1);
         self.on_click.emit(self.label.get());
-    }
-
-    fn formatted_text(&self) -> String {
-        format!("{} ({})", self.label, self.hits)
     }
 }

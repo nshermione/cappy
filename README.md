@@ -30,8 +30,7 @@ taffy-based layout and themeable styles. Frames are drawn either on the GPU with
 | `macros/cappy-dsl` | `macro_rules!` DSL (`ui!`, `style!`, `theme!`) |
 | `macros/cappy-macros` | Procedural macros (`derive(Props)`, `derive(ClassName)`) |
 | `integrations/cappy-winit` | [winit](https://github.com/rust-windowing/winit) integration |
-| `integrations/cappy-tao` | [tao](https://github.com/tauri-apps/tao) integration |
-| `playground/*` | Shared demo scenes and the winit / tao demo hosts |
+| `playground/*` | Shared demo scenes and the winit demo host |
 
 Both renderers consume the same `RenderFrame` (primitives plus damage) from `cappy-core` and
 implement the `WindowRenderer` trait from `cappy-host`, so the integrations do not care which
@@ -42,14 +41,11 @@ one draws the window.
 The toolchain is pinned in `rust-toolchain.toml`, so `rustup` picks it up automatically.
 
 ```sh
-# Run the playground with winit
+# Run the playground
 cargo run -p winit-demo
 
-# Run the playground with tao
-cargo run -p tao-demo
-
 # Outline the regions each frame repaints (or press F12 in the window)
-cargo run -p tao-demo -- --debug-damage
+cargo run -p winit-demo -- --debug-damage
 
 # Run the tests
 cargo test --workspace
@@ -63,12 +59,12 @@ cargo test --workspace
 | Memory | GPU driver loaded into the process | No GPU driver |
 | Best for | Animation, large or high-DPI windows, effects | Tools and mostly static UIs |
 
-On the author's machine (Windows, AMD RX 6600, release build of `tao-demo`), the window used
+On the author's machine (Windows, AMD RX 6600, release build of `winit-demo`), the window used
 about 174 MB with the GPU renderer and about 10 MB with the CPU renderer (Task Manager,
 private working set). The CPU renderer pays for this with CPU time per repainted pixel, which
 damage-region repainting keeps small for typical UIs.
 
-- Enable the `cpu` feature of `cappy-tao` or `cappy-winit` (or of the demos) to compile it in.
+- Enable the `cpu` feature of `cappy-winit` (or of the demo) to compile it in.
 - With both backends compiled in, pick one in code or with the `CAPPY_RENDERER=gpu|cpu`
   environment variable, which takes precedence. Without either, the GPU renderer is used.
 - With `default-features = false, features = ["cpu"]`, wgpu is not compiled at all, which
@@ -76,18 +72,21 @@ damage-region repainting keeps small for typical UIs.
 - Asking for a backend that is not compiled in is an error; there is no silent fallback.
 
 ```rust
-use cappy_tao::{RendererKind, WindowOptions, run};
+use cappy_core::{Application, Theme, Ui, div, text};
+use cappy_winit::{RendererKind, Run, WindowOptions};
 
+let application = Application::new();
+let ui = Ui::new(application.context(), div().child(text("Hello")), Theme::light());
 let options = WindowOptions::new("My app").with_renderer(RendererKind::Cpu);
-run(options, ui).expect("app failed");
+application.run(options, ui).expect("app failed");
 ```
 
 ```sh
 # Both backends, CPU chosen at runtime (PowerShell: $env:CAPPY_RENDERER="cpu")
-CAPPY_RENDERER=cpu cargo run -p tao-demo --features cpu --release
+CAPPY_RENDERER=cpu cargo run -p winit-demo --features cpu --release
 
 # CPU only, without wgpu
-cargo run -p tao-demo --no-default-features --features cpu --release
+cargo run -p winit-demo --no-default-features --features cpu --release
 ```
 
 The two renderers blend colors differently (wgpu in linear light, tiny-skia in sRGB), so

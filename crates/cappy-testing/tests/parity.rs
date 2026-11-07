@@ -6,19 +6,19 @@
 
 mod common;
 
-use cappy_core::{Element, signal};
+use cappy_core::{Context, Element};
 use cappy_testing::Image;
 use cappy_testing::cpu::CpuHeadlessRenderer;
 use cappy_testing::gpu::HeadlessRenderer;
-use common::{VIEWPORT, background, counter, fonts, harness, shapes};
+use common::{VIEWPORT, background, context, counter, fonts, harness, shapes};
 
 /// Channel difference treated as equal; covers rounding between the two pipelines.
 const CHANNEL_TOLERANCE: u8 = 3;
 /// Share of pixels allowed to differ more, for anti-aliased edges and glyph coverage.
 const MAX_DIFFERING_SHARE: f64 = 0.02;
 
-fn render_both(root: Element) -> (Image, Image) {
-    let mut harness = harness(root);
+fn render_both(context: &Context, root: Element) -> (Image, Image) {
+    let mut harness = harness(context, root);
     let frame = harness.frame();
     let gpu = HeadlessRenderer::new(fonts())
         .expect("headless GPU available")
@@ -41,12 +41,13 @@ fn assert_close(name: &str, gpu: &Image, cpu: &Image) {
 
 #[test]
 fn shapes_look_the_same_on_both_renderers() {
-    let (gpu, cpu) = render_both(shapes());
+    let (gpu, cpu) = render_both(&context(), shapes());
     assert_close("shapes", &gpu, &cpu);
 }
 
 #[test]
 fn text_and_buttons_look_the_same_on_both_renderers() {
-    let (gpu, cpu) = render_both(counter(signal(0)));
+    let cx = context();
+    let (gpu, cpu) = render_both(&cx, counter(cx.signal(0)));
     assert_close("counter", &gpu, &cpu);
 }

@@ -17,7 +17,20 @@ pub fn expand(input: &DeriveInput, singleton: bool) -> syn::Result<TokenStream> 
     let vis = &input.vis;
     let name = &input.ident;
     let attrs = &input.attrs;
-    let generics = with_into_reactive(&input.generics);
+    let mut generics = with_into_reactive(&input.generics);
+    let copy_types: Vec<TokenStream> = fields
+        .iter()
+        .map(|field| {
+            let ty = &field.ty;
+            quote!(<#ty as ::cappy::IntoReactive>::Output)
+        })
+        .collect();
+    {
+        let predicates = &mut generics.make_where_clause().predicates;
+        for ty in &copy_types {
+            predicates.push(syn::parse_quote!(#ty: ::core::clone::Clone));
+        }
+    }
     let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
     let reactive_fields = fields.iter().copied().map(reactive_field);
     let field_args = fields.iter().map(|field| {
@@ -27,110 +40,74 @@ pub fn expand(input: &DeriveInput, singleton: bool) -> syn::Result<TokenStream> 
     });
     let field_inits = fields.iter().map(|field| {
         let field_name = field.ident.as_ref().expect("named field");
-        quote!(#field_name: ::cappy::reactive(#field_name))
+        quote!(#field_name: cx.reactive(#field_name))
     });
-    let copy_types: Vec<TokenStream> = fields
-        .iter()
-        .map(|field| {
-            let ty = &field.ty;
-            quote!(<#ty as ::cappy::IntoReactive>::Output)
-        })
-        .collect();
     let tracked = tracked_impls(name, &generics, &copy_types);
-    let generic = !input.generics.params.is_empty();
-    let singleton = singleton.then(|| singleton_method(name, generic, &fields, &copy_types));
+    let marker = singleton.then(|| singleton_marker(vis, name, &generics));
+    let singleton = singleton.then(|| singleton_impl(name, &generics, &fields));
 
     Ok(quote! {
+        #[derive(Clone)]
         #(#attrs)*
         #vis struct #name #impl_generics #where_clause {
             #(#reactive_fields)*
         }
 
         impl #impl_generics #name #type_generics #where_clause {
-            pub fn new(#(#field_args),*) -> Self {
+            pub fn new(cx: &::cappy::Context, #(#field_args),*) -> Self {
                 Self {
                     #(#field_inits,)*
                 }
             }
 
-            #singleton
         }
+
+        #marker
+
+        #singleton
 
         #tracked
     })
 }
 
-/// `singleton()` for `#[reactive(singleton)]`. The thread-local lives inside the function, so its
-/// name cannot leak into the module or collide with another struct.
-fn singleton_method(
-    name: &Ident,
-    generic: bool,
-    fields: &[&Field],
-    copy_types: &[TokenStream],
-) -> TokenStream {
+/// Same name as the struct, in the value namespace, so `cx.singleton(Name)` can name it.
+fn singleton_marker(vis: &syn::Visibility, name: &Ident, generics: &Generics) -> TokenStream {
+    if generics.params.is_empty() {
+        quote! {
+            #[allow(non_upper_case_globals)]
+            #vis const #name: ::cappy::SingletonOf<#name> = ::cappy::SingletonOf::new();
+        }
+    } else {
+        let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
+        quote! {
+            #[allow(non_snake_case)]
+            #vis fn #name #impl_generics() -> ::cappy::SingletonOf<#name #type_generics> #where_clause {
+                ::cappy::SingletonOf::new()
+            }
+        }
+    }
+}
+
+/// `cx.singleton(Type)` for `#[reactive(singleton)]`. The value lives in that context.
+fn singleton_impl(name: &Ident, generics: &Generics, fields: &[&Field]) -> TokenStream {
+    let mut generics = generics.clone();
+    {
+        let predicates = &mut generics.make_where_clause().predicates;
+        for field in fields {
+            let ty = &field.ty;
+            predicates.push(syn::parse_quote!(#ty: ::core::default::Default));
+        }
+        predicates.push(syn::parse_quote!(Self: ::core::clone::Clone + 'static));
+    }
+    let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
     let defaults = fields
         .iter()
         .map(|_| quote!(::core::default::Default::default()));
-    let mut bounds = Vec::new();
-    for field in fields {
-        let ty = &field.ty;
-        bounds.push(quote!(#ty: ::core::default::Default));
-    }
-    for ty in copy_types {
-        bounds.push(quote!(#ty: ::core::marker::Copy));
-    }
-    // A nested static cannot name `Self` or an outer type parameter. A concrete struct can name
-    // itself. A generic one keeps one map inside the function and selects its own entry.
-    if generic {
-        bounds.push(quote!(Self: 'static));
-    }
-    let where_clause = if bounds.is_empty() {
-        quote!()
-    } else {
-        quote!(where #(#bounds,)*)
-    };
-    let body = if generic {
-        quote! {
-            thread_local! {
-                static SHARED: ::std::cell::RefCell<
-                    ::std::collections::HashMap<
-                        ::std::any::TypeId,
-                        ::std::boxed::Box<dyn ::std::any::Any>,
-                    >,
-                > = ::std::cell::RefCell::new(::std::collections::HashMap::new());
-            }
-            SHARED.with(|slot| {
-                let mut values = slot.borrow_mut();
-                let id = ::std::any::TypeId::of::<Self>();
-                if let Some(existing) = values.get(&id) {
-                    return *existing
-                        .downcast_ref::<Self>()
-                        .expect("singleton stored under its own type");
-                }
-                let created = Self::new(#(#defaults),*);
-                values.insert(id, ::std::boxed::Box::new(created));
-                created
-            })
-        }
-    } else {
-        quote! {
-            thread_local! {
-                static SHARED: ::std::cell::Cell<Option<#name>> =
-                    const { ::std::cell::Cell::new(None) };
-            }
-            SHARED.with(|slot| {
-                if let Some(existing) = slot.get() {
-                    return existing;
-                }
-                let created = Self::new(#(#defaults),*);
-                slot.set(Some(created));
-                created
-            })
-        }
-    };
     quote! {
-        pub fn singleton() -> Self #where_clause {
-            #body
+        impl #impl_generics ::cappy::Singleton for #name #type_generics #where_clause {
+            fn create(cx: &::cappy::Context) -> Self {
+                Self::new(cx, #(#defaults),*)
+            }
         }
     }
 }
@@ -162,36 +139,20 @@ pub(crate) fn with_into_reactive(generics: &Generics) -> Generics {
     generics
 }
 
-/// `IntoReactive`, `Copy` and `Clone` for a tracked struct. Each type in `copy_types` must be
-/// [`Copy`](core::marker::Copy) for the copy impl to apply.
+/// `IntoReactive` for a tracked struct. `copy_types` is unused; handles are [`Clone`](Clone), not
+/// [`Copy`](Copy).
 pub(crate) fn tracked_impls(
     name: &Ident,
     generics: &Generics,
-    copy_types: &[TokenStream],
+    _copy_types: &[TokenStream],
 ) -> TokenStream {
     let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
-    let mut copy_generics = generics.clone();
-    if !copy_types.is_empty() {
-        let predicates = &mut copy_generics.make_where_clause().predicates;
-        for ty in copy_types {
-            predicates.push(syn::parse_quote!(#ty: ::core::marker::Copy));
-        }
-    }
-    let (copy_impl_generics, copy_type_generics, copy_where) = copy_generics.split_for_impl();
     quote! {
         impl #impl_generics ::cappy::IntoReactive for #name #type_generics #where_clause {
             type Output = Self;
 
-            fn into_reactive(self) -> Self::Output {
+            fn into_reactive(self, _context: &::cappy::Context) -> Self::Output {
                 self
-            }
-        }
-
-        impl #copy_impl_generics ::core::marker::Copy for #name #copy_type_generics #copy_where {}
-
-        impl #copy_impl_generics ::core::clone::Clone for #name #copy_type_generics #copy_where {
-            fn clone(&self) -> Self {
-                *self
             }
         }
 

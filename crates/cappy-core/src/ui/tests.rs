@@ -1,11 +1,12 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use super::*;
 use crate::reactive::{live_signal_count, signal_is_alive, signal_subscriber_count};
 use crate::{
-    ButtonState, Element, InputEvent, PointerButton, Signal, Slot, div, for_each, fragment,
-    if_else, show, signal, slot, text, text_dyn,
+    Application, ButtonState, Context, Element, InputEvent, PointerButton, Signal, Slot, div,
+    for_each, fragment, if_else, show, slot, text, text_dyn,
 };
 use cappy_style::{Color, StyleRefinement};
 
@@ -15,10 +16,15 @@ const VIEWPORT: FrameInput = FrameInput {
     scale_factor: 1.0,
 };
 
+fn context() -> Context {
+    Application::new().context().clone()
+}
+
 fn counter(count: Signal<i32>) -> Element {
+    let label = count.clone();
     div().class("app").child(
         div().class("row").key("row").children([
-            text_dyn(move || format!("Count: {}", count.get())).key("label"),
+            text_dyn(move || format!("Count: {}", label.get())).key("label"),
             div()
                 .class("btn btn-primary")
                 .key("button")
@@ -28,8 +34,8 @@ fn counter(count: Signal<i32>) -> Element {
     )
 }
 
-fn settled(root: Element) -> Ui {
-    let mut ui = Ui::new(root, Theme::light());
+fn settled(context: &Context, root: Element) -> Ui {
+    let mut ui = Ui::new(context, root, Theme::light());
     ui.update(VIEWPORT);
     ui.prepare_frame();
     ui
@@ -62,7 +68,8 @@ fn click(ui: &mut Ui, key: &str) {
 
 #[test]
 fn first_update_repaints_everything() {
-    let mut ui = Ui::new(counter(signal(0)), Theme::light());
+    let cx = context();
+    let mut ui = Ui::new(&cx, counter(cx.signal(0)), Theme::light());
     assert!(ui.needs_update());
     assert_eq!(
         ui.update(VIEWPORT),
@@ -78,7 +85,8 @@ fn first_update_repaints_everything() {
 
 #[test]
 fn root_fills_the_viewport() {
-    let ui = settled(counter(signal(0)));
+    let cx = context();
+    let ui = settled(&cx, counter(cx.signal(0)));
     assert_eq!(
         ui.node_rect(ui.root()),
         Some(Rect::new(0.0, 0.0, 800.0, 600.0))
@@ -87,7 +95,8 @@ fn root_fills_the_viewport() {
 
 #[test]
 fn nothing_changed_means_idle() {
-    let mut ui = settled(counter(signal(0)));
+    let cx = context();
+    let mut ui = settled(&cx, counter(cx.signal(0)));
     assert!(!ui.needs_update());
     assert_eq!(ui.update(VIEWPORT), UpdateOutcome::Idle);
     assert_eq!(ui.prepare_frame().unwrap().damage, Damage::None);
@@ -95,8 +104,9 @@ fn nothing_changed_means_idle() {
 
 #[test]
 fn signal_change_damages_only_the_bound_text() {
-    let count = signal(0);
-    let mut ui = settled(counter(count));
+    let cx = context();
+    let count = cx.signal(0);
+    let mut ui = settled(&cx, counter(count.clone()));
     let label = ui.find_by_key("label").unwrap();
     let before = ui.node_rect(label).unwrap();
 
@@ -110,8 +120,9 @@ fn signal_change_damages_only_the_bound_text() {
 
 #[test]
 fn growing_text_also_damages_the_siblings_it_pushes() {
-    let count = signal(0);
-    let mut ui = settled(counter(count));
+    let cx = context();
+    let count = cx.signal(0);
+    let mut ui = settled(&cx, counter(count.clone()));
     let button = ui.find_by_key("button").unwrap();
     let button_before = ui.node_rect(button).unwrap();
 
@@ -126,8 +137,9 @@ fn growing_text_also_damages_the_siblings_it_pushes() {
 
 #[test]
 fn clicking_runs_the_handler_and_updates_the_label() {
-    let count = signal(0);
-    let mut ui = settled(counter(count));
+    let cx = context();
+    let count = cx.signal(0);
+    let mut ui = settled(&cx, counter(count.clone()));
     click(&mut ui, "button");
     assert_eq!(count.get_untracked(), 1);
     ui.update(VIEWPORT);
@@ -139,8 +151,9 @@ fn clicking_runs_the_handler_and_updates_the_label() {
 
 #[test]
 fn click_damage_stays_inside_the_row() {
-    let count = signal(0);
-    let mut ui = settled(counter(count));
+    let cx = context();
+    let count = cx.signal(0);
+    let mut ui = settled(&cx, counter(count.clone()));
     click(&mut ui, "button");
     let damaged = regions(ui.update(VIEWPORT));
     let row = ui.node_rect(ui.find_by_key("row").unwrap()).unwrap();
@@ -152,8 +165,9 @@ fn click_damage_stays_inside_the_row() {
 
 #[test]
 fn releasing_outside_the_pressed_node_does_not_click() {
-    let count = signal(0);
-    let mut ui = settled(counter(count));
+    let cx = context();
+    let count = cx.signal(0);
+    let mut ui = settled(&cx, counter(count.clone()));
     ui.handle_event(InputEvent::PointerMoved {
         position: center_of(&ui, "button"),
     });
@@ -173,7 +187,8 @@ fn releasing_outside_the_pressed_node_does_not_click() {
 
 #[test]
 fn hover_applies_the_hover_variant_and_pointer_cursor() {
-    let mut ui = settled(counter(signal(0)));
+    let cx = context();
+    let mut ui = settled(&cx, counter(cx.signal(0)));
     let button = ui.find_by_key("button").unwrap();
     let colors = ui.theme().tokens().colors.clone();
 
@@ -201,14 +216,16 @@ fn hover_applies_the_hover_variant_and_pointer_cursor() {
 
 #[test]
 fn hover_handlers_fire_on_enter_and_leave() {
-    let hovered = signal(false);
+    let cx = context();
+    let hovered = cx.signal(false);
+    let hovered_flag = hovered.clone();
     let root = div().class("app").child(
         div()
             .key("target")
             .style(StyleRefinement::default().size(50))
-            .on_hover(move |is_over| hovered.set(is_over)),
+            .on_hover(move |is_over| hovered_flag.set(is_over)),
     );
-    let mut ui = settled(root);
+    let mut ui = settled(&cx, root);
     ui.handle_event(InputEvent::PointerMoved {
         position: center_of(&ui, "target"),
     });
@@ -219,7 +236,8 @@ fn hover_handlers_fire_on_enter_and_leave() {
 
 #[test]
 fn switching_theme_repaints_without_moving_anything() {
-    let mut ui = settled(counter(signal(0)));
+    let cx = context();
+    let mut ui = settled(&cx, counter(cx.signal(0)));
     let rects: Vec<_> = (0..6)
         .map(|index| ui.node_rect(NodeId::from_index(index)))
         .collect();
@@ -244,12 +262,14 @@ fn switching_theme_repaints_without_moving_anything() {
 
 #[test]
 fn theme_signal_shared_with_the_scene_switches_theme() {
-    let theme = signal(Arc::new(Theme::light()));
+    let cx = context();
+    let theme = cx.signal(Arc::new(Theme::light()));
+    let theme_click = theme.clone();
     let toggle = div()
         .key("toggle")
         .style(StyleRefinement::default().size(40))
         .on_click(move |_| {
-            theme.update(|current| {
+            theme_click.update(|current| {
                 *current = Arc::new(if current.name() == "light" {
                     Theme::dark()
                 } else {
@@ -257,7 +277,7 @@ fn theme_signal_shared_with_the_scene_switches_theme() {
                 });
             });
         });
-    let mut ui = Ui::with_theme_signal(div().class("app").child(toggle), theme);
+    let mut ui = Ui::with_theme_signal(&cx, div().class("app").child(toggle), theme);
     ui.update(VIEWPORT);
     click(&mut ui, "toggle");
     ui.update(VIEWPORT);
@@ -266,7 +286,8 @@ fn theme_signal_shared_with_the_scene_switches_theme() {
 
 #[test]
 fn resizing_relayouts_and_repaints_everything() {
-    let mut ui = settled(counter(signal(0)));
+    let cx = context();
+    let mut ui = settled(&cx, counter(cx.signal(0)));
     let resized = FrameInput::new(400, 300, 1.0);
     assert_eq!(
         ui.update(resized),
@@ -282,7 +303,8 @@ fn resizing_relayouts_and_repaints_everything() {
 
 #[test]
 fn scale_factor_keeps_logical_layout() {
-    let mut ui = settled(counter(signal(0)));
+    let cx = context();
+    let mut ui = settled(&cx, counter(cx.signal(0)));
     let label_rect = ui.node_rect(ui.find_by_key("label").unwrap());
     ui.update(FrameInput::new(1600, 1200, 2.0));
     assert_eq!(ui.node_rect(ui.find_by_key("label").unwrap()), label_rect);
@@ -293,8 +315,9 @@ fn scale_factor_keeps_logical_layout() {
 
 #[test]
 fn waker_fires_when_a_signal_needs_the_ui() {
-    let count = signal(0);
-    let mut ui = settled(counter(count));
+    let cx = context();
+    let count = cx.signal(0);
+    let mut ui = settled(&cx, counter(count.clone()));
     let wakes = Rc::new(Cell::new(0));
     let counter_handle = wakes.clone();
     ui.set_waker(move || counter_handle.set(counter_handle.get() + 1));
@@ -304,23 +327,26 @@ fn waker_fires_when_a_signal_needs_the_ui() {
 
 #[test]
 fn dynamic_classes_and_styles_rebind() {
-    let active = signal(false);
+    let cx = context();
+    let active = cx.signal(false);
+    let active_class = active.clone();
+    let active_style = active.clone();
     let root = div().class("app").child(
         div()
             .key("chip")
             .class_dyn(move || {
-                if active.get() {
+                if active_class.get() {
                     "btn btn-primary".into()
                 } else {
                     "btn".into()
                 }
             })
             .style_dyn(move || {
-                let width = if active.get() { 120 } else { 80 };
+                let width = if active_style.get() { 120 } else { 80 };
                 StyleRefinement::default().width(width)
             }),
     );
-    let mut ui = settled(root);
+    let mut ui = settled(&cx, root);
     let chip = ui.find_by_key("chip").unwrap();
     active.set(true);
     ui.update(VIEWPORT);
@@ -331,7 +357,8 @@ fn dynamic_classes_and_styles_rebind() {
 
 #[test]
 fn text_inherits_color_from_its_ancestors() {
-    let ui = settled(counter(signal(0)));
+    let cx = context();
+    let ui = settled(&cx, counter(cx.signal(0)));
     let button = ui.find_by_key("button").unwrap();
     let label = ui.node_children(button)[0];
     assert_eq!(
@@ -342,7 +369,8 @@ fn text_inherits_color_from_its_ancestors() {
 
 #[test]
 fn display_list_paints_back_to_front() {
-    let ui = settled(counter(signal(0)));
+    let cx = context();
+    let ui = settled(&cx, counter(cx.signal(0)));
     let list = ui.display_list();
     let Primitive::Quad(first) = &list[0] else {
         panic!("root background must come first")
@@ -360,6 +388,7 @@ fn display_list_paints_back_to_front() {
 
 #[test]
 fn hidden_nodes_are_not_painted_or_hit() {
+    let cx = context();
     let root = div().class("app").child(
         div()
             .key("hidden")
@@ -370,7 +399,7 @@ fn hidden_nodes_are_not_painted_or_hit() {
             )
             .child(text("secret")),
     );
-    let ui = settled(root);
+    let ui = settled(&cx, root);
     assert!(
         ui.display_list()
             .iter()
@@ -381,45 +410,54 @@ fn hidden_nodes_are_not_painted_or_hit() {
 
 #[test]
 fn prepare_frame_before_update_is_none() {
-    let mut ui = Ui::new(div(), Theme::light());
+    let cx = context();
+    let mut ui = Ui::new(&cx, div(), Theme::light());
     assert!(ui.prepare_frame().is_none());
 }
 
 #[test]
 fn component_stylesheet_covers_the_rendered_tree() {
-    use std::sync::LazyLock;
+    let cx = context();
+    use std::sync::Arc;
 
-    use crate::Component;
+    use crate::{Component, HasContext};
     use cappy_style::{Color, Stylesheet};
 
-    fn sheet() -> &'static Stylesheet {
-        static SHEET: LazyLock<Stylesheet> = LazyLock::new(|| {
+    fn sheet() -> Arc<Stylesheet> {
+        Arc::new(
             Stylesheet::default()
                 .with_class("card", StyleRefinement::default().background(Color::BLACK))
                 .with_class(
                     "panel-skin",
                     StyleRefinement::default().background(Color::BLACK),
-                )
-        });
-        &SHEET
+                ),
+        )
     }
 
-    fn own_sheet() -> &'static Stylesheet {
-        static SHEET: LazyLock<Stylesheet> = LazyLock::new(|| {
+    fn own_sheet() -> Arc<Stylesheet> {
+        Arc::new(
             Stylesheet::default()
-                .with_class("card", StyleRefinement::default().background(Color::WHITE))
-        });
-        &SHEET
+                .with_class("card", StyleRefinement::default().background(Color::WHITE)),
+        )
     }
 
-    struct Panel;
+    #[derive(Clone)]
+    struct Panel {
+        context: Context,
+    }
+
+    impl HasContext for Panel {
+        fn context(&self) -> &Context {
+            &self.context
+        }
+    }
 
     impl Component for Panel {
-        fn stylesheet() -> &'static Stylesheet {
-            sheet()
+        fn stylesheet() -> Option<Arc<Stylesheet>> {
+            Some(sheet())
         }
 
-        fn render(self) -> Element {
+        fn render(&self, _context: &Context) -> Element {
             div().class("card").key("panel").children([
                 div().class("card").key("inner"),
                 div().class("card").key("own").stylesheet(own_sheet()),
@@ -427,7 +465,13 @@ fn component_stylesheet_covers_the_rendered_tree() {
         }
     }
 
-    let ui = settled(Panel.into());
+    let ui = settled(
+        &cx,
+        Panel {
+            context: cx.clone(),
+        }
+        .into(),
+    );
     assert!(!ui.theme().has_class("panel-skin"));
     let panel = ui.node_style(ui.find_by_key("panel").unwrap()).unwrap();
     let inner = ui.node_style(ui.find_by_key("inner").unwrap()).unwrap();
@@ -439,12 +483,13 @@ fn component_stylesheet_covers_the_rendered_tree() {
 
 #[test]
 fn unfilled_slots_are_not_mounted() {
+    let cx = context();
     let tree = div().key("root").children([
         text("a").key("a"),
         slot(Slot::<(), Element>::new(0)),
         text("b").key("b"),
     ]);
-    let ui = settled(tree);
+    let ui = settled(&cx, tree);
     let root = ui.find_by_key("root").unwrap();
     assert_eq!(ui.node_children(root).len(), 2);
     assert_eq!(ui.node_text(ui.find_by_key("a").unwrap()), Some("a"));
@@ -465,18 +510,23 @@ fn paints(ui: &Ui, text: &str) -> bool {
 
 #[test]
 fn show_hides_without_dropping_state() {
-    let open = signal(true);
-    let label = signal(String::from("one"));
-    let state = Rc::new(Cell::new(None));
+    let cx = context();
+    let open = cx.signal(true);
+    let label = cx.signal(String::from("one"));
+    let state = Rc::new(RefCell::new(None));
     let state_slot = Rc::clone(&state);
-    let mut ui = settled(div().key("root").children([
+    let open_visible = open.clone();
+    let label_text = label.clone();
+    let cx_view = cx.clone();
+    let mut ui = settled(&cx, div().key("root").children([
         text("head").key("head"),
         show(
-            move || open.get(),
+            move || open_visible.get(),
             move || {
-                let count = signal(1);
-                state_slot.set(Some(count));
-                text_dyn(move || format!("{}:{}", label.get(), count.get())).key("body")
+                let count = cx_view.signal(1);
+                state_slot.borrow_mut().replace(count.clone());
+                let label_text = label_text.clone();
+                text_dyn(move || format!("{}:{}", label_text.get(), count.get())).key("body")
             },
         ),
         text("tail").key("tail"),
@@ -487,10 +537,10 @@ fn show_hides_without_dropping_state() {
     let tail = ui.find_by_key("tail").unwrap();
     assert_eq!(ui.node_children(root), &[head, body, tail]);
     assert_eq!(ui.node_text(body), Some("one:1"));
-    let signals = live_signal_count();
-    let label_subs = signal_subscriber_count(label);
-    let open_subs = signal_subscriber_count(open);
-    let count = state.get().unwrap();
+    let signals = live_signal_count(&cx.runtime);
+    let label_subs = signal_subscriber_count(&label);
+    let open_subs = signal_subscriber_count(&open);
+    let count = state.borrow().clone().unwrap();
 
     open.set(false);
     ui.update(VIEWPORT);
@@ -509,10 +559,10 @@ fn show_hides_without_dropping_state() {
     ui.update(VIEWPORT);
     assert_eq!(ui.node_text(body), Some("two:5"));
     assert!(!paints(&ui, "two:5"));
-    assert_eq!(signal_subscriber_count(label), label_subs);
-    assert_eq!(signal_subscriber_count(open), open_subs);
-    assert_eq!(live_signal_count(), signals);
-    assert!(signal_is_alive(count));
+    assert_eq!(signal_subscriber_count(&label), label_subs);
+    assert_eq!(signal_subscriber_count(&open), open_subs);
+    assert_eq!(live_signal_count(&cx.runtime), signals);
+    assert!(signal_is_alive(&count));
 
     open.set(true);
     ui.update(VIEWPORT);
@@ -528,32 +578,41 @@ fn show_hides_without_dropping_state() {
         ))
         .contains(&body));
     assert!(ui.node_rect(tail).unwrap().x > tail_hidden.x + 1.0);
-    assert_eq!(signal_subscriber_count(label), label_subs);
-    assert_eq!(signal_subscriber_count(open), open_subs);
-    assert_eq!(live_signal_count(), signals);
+    assert_eq!(signal_subscriber_count(&label), label_subs);
+    assert_eq!(signal_subscriber_count(&open), open_subs);
+    assert_eq!(live_signal_count(&cx.runtime), signals);
     assert_eq!(count.get(), 5);
 }
 
 #[test]
 fn if_else_disposes_the_branch_it_leaves() {
-    let flag = signal(true);
-    let left = signal(1);
-    let right = signal(2);
-    let created = Rc::new(Cell::new(None));
+    let cx = context();
+    let flag = cx.signal(true);
+    let left = cx.signal(1);
+    let right = cx.signal(2);
+    let created = Rc::new(RefCell::new(None));
     let slot = Rc::clone(&created);
-    let mut ui = settled(div().key("root").children([
+    let flag_branch = flag.clone();
+    let left_text = left.clone();
+    let right_text = right.clone();
+    let cx_view = cx.clone();
+    let mut ui = settled(&cx, div().key("root").children([
         text("head").key("head"),
         if_else(
-            move || flag.get(),
+            move || flag_branch.get(),
             {
                 let slot = Rc::clone(&slot);
                 move || {
-                    let inner = signal(9);
-                    slot.set(Some(inner));
-                    text_dyn(move || left.get().to_string()).key("branch")
+                    let inner = cx_view.signal(9);
+                    slot.borrow_mut().replace(inner);
+                    let left_text = left_text.clone();
+                    text_dyn(move || left_text.get().to_string()).key("branch")
                 }
             },
-            move || text_dyn(move || right.get().to_string()).key("branch"),
+            move || {
+                let right_text = right_text.clone();
+                text_dyn(move || right_text.get().to_string()).key("branch")
+            },
         ),
         text("tail").key("tail"),
     ]));
@@ -563,11 +622,11 @@ fn if_else_disposes_the_branch_it_leaves() {
     let first = ui.find_by_key("branch").unwrap();
     assert_eq!(ui.node_children(root), &[head, first, tail]);
     assert_eq!(ui.node_text(first), Some("1"));
-    let inner = created.get().unwrap();
-    assert_eq!(signal_subscriber_count(left), 1);
-    assert_eq!(signal_subscriber_count(right), 0);
-    assert_eq!(signal_subscriber_count(flag), 1);
-    let while_then = live_signal_count();
+    let inner = created.borrow().clone().unwrap();
+    assert_eq!(signal_subscriber_count(&left), 1);
+    assert_eq!(signal_subscriber_count(&right), 0);
+    assert_eq!(signal_subscriber_count(&flag), 1);
+    let while_then = live_signal_count(&cx.runtime);
 
     flag.set(false);
     ui.update(VIEWPORT);
@@ -575,23 +634,23 @@ fn if_else_disposes_the_branch_it_leaves() {
     assert_ne!(other, first);
     assert_eq!(ui.node_children(root), &[head, other, tail]);
     assert_eq!(ui.node_text(other), Some("2"));
-    assert!(!signal_is_alive(inner));
-    assert_eq!(signal_subscriber_count(left), 0);
-    assert_eq!(signal_subscriber_count(right), 1);
-    assert_eq!(signal_subscriber_count(flag), 1);
-    assert!(live_signal_count() < while_then);
+    assert!(!signal_is_alive(&inner));
+    assert_eq!(signal_subscriber_count(&left), 0);
+    assert_eq!(signal_subscriber_count(&right), 1);
+    assert_eq!(signal_subscriber_count(&flag), 1);
+    assert!(live_signal_count(&cx.runtime) < while_then);
 
     flag.set(true);
     ui.update(VIEWPORT);
     let again = ui.find_by_key("branch").unwrap();
     assert_ne!(again, first);
     assert_ne!(again, other);
-    let restarted = created.get().unwrap();
+    let restarted = created.borrow().clone().unwrap();
     assert_ne!(restarted, inner);
-    assert!(signal_is_alive(restarted));
+    assert!(signal_is_alive(&restarted));
     assert_eq!(restarted.get(), 9);
-    assert_eq!(signal_subscriber_count(left), 1);
-    assert_eq!(signal_subscriber_count(right), 0);
+    assert_eq!(signal_subscriber_count(&left), 1);
+    assert_eq!(signal_subscriber_count(&right), 0);
 
     for _ in 0..4 {
         flag.set(false);
@@ -599,19 +658,21 @@ fn if_else_disposes_the_branch_it_leaves() {
         flag.set(true);
         ui.update(VIEWPORT);
     }
-    assert_eq!(signal_subscriber_count(left), 1);
-    assert_eq!(signal_subscriber_count(right), 0);
-    assert_eq!(signal_subscriber_count(flag), 1);
+    assert_eq!(signal_subscriber_count(&left), 1);
+    assert_eq!(signal_subscriber_count(&right), 0);
+    assert_eq!(signal_subscriber_count(&flag), 1);
     assert_eq!(ui.node_children(root).len(), 3);
 }
 
 #[test]
 fn if_without_else_removes_its_content() {
-    let open = signal(true);
-    let mut ui = settled(div().key("root").children([
+    let cx = context();
+    let open = cx.signal(true);
+    let open_visible = open.clone();
+    let mut ui = settled(&cx, div().key("root").children([
         text("head").key("head"),
         if_else(
-            move || open.get(),
+            move || open_visible.get(),
             || text("yes").key("yes"),
             || fragment(Vec::<Element>::new()),
         ),
@@ -637,7 +698,8 @@ fn if_without_else_removes_its_content() {
 
 #[test]
 fn for_keeps_rows_by_key() {
-    let items = signal(vec![
+    let cx = context();
+    let items = cx.signal(vec![
         Row {
             id: 1,
             title: "a".into(),
@@ -649,11 +711,12 @@ fn for_keeps_rows_by_key() {
     ]);
     let rows = Rc::new(RefCell::new(Vec::new()));
     let captured = Rc::clone(&rows);
-    let mut ui = settled(div().key("root").children([
+    let items_source = items.clone();
+    let mut ui = settled(&cx, div().key("root").children([
         text("head").key("head"),
         for_each(
             move |visit| {
-                items.with(|list| {
+                items_source.with(|list| {
                     for item in list {
                         visit(item);
                     }
@@ -663,7 +726,7 @@ fn for_keeps_rows_by_key() {
             {
                 let captured = Rc::clone(&captured);
                 move |item: Signal<Row>| {
-                    captured.borrow_mut().push(item);
+                    captured.borrow_mut().push(item.clone());
                     let key = item.with_untracked(|row| row.id.to_string());
                     text_dyn(move || item.with(|row| row.title.clone())).key(key)
                 }
@@ -679,8 +742,8 @@ fn for_keeps_rows_by_key() {
     assert_eq!(ui.node_children(root), &[head, first, second, tail]);
     let row_signals = rows.borrow().clone();
     assert_eq!(row_signals.len(), 2);
-    let signals = live_signal_count();
-    assert_eq!(signal_subscriber_count(items), 1);
+    let signals = live_signal_count(&cx.runtime);
+    assert_eq!(signal_subscriber_count(&items), 1);
 
     items.set(vec![
         Row {
@@ -697,9 +760,9 @@ fn for_keeps_rows_by_key() {
     assert_eq!(ui.find_by_key("2"), Some(second));
     assert_eq!(ui.node_children(root), &[head, second, first, tail]);
     assert_eq!(rows.borrow().len(), 2);
-    assert_eq!(live_signal_count(), signals);
-    assert!(signal_is_alive(row_signals[0]));
-    assert!(signal_is_alive(row_signals[1]));
+    assert_eq!(live_signal_count(&cx.runtime), signals);
+    assert!(signal_is_alive(&row_signals[0]));
+    assert!(signal_is_alive(&row_signals[1]));
 
     items.set(vec![
         Row {
@@ -716,7 +779,7 @@ fn for_keeps_rows_by_key() {
     assert_eq!(ui.node_text(first), Some("a"));
     assert_eq!(row_signals[1].with_untracked(|row| row.title.clone()), "b2");
     assert_eq!(ui.find_by_key("1"), Some(first));
-    assert_eq!(live_signal_count(), signals);
+    assert_eq!(live_signal_count(&cx.runtime), signals);
     assert_eq!(rows.borrow().len(), 2);
 
     items.set(vec![Row {
@@ -726,19 +789,19 @@ fn for_keeps_rows_by_key() {
     ui.update(VIEWPORT);
     assert_eq!(ui.find_by_key("1"), Some(first));
     assert!(ui.find_by_key("2").is_none());
-    assert!(!signal_is_alive(row_signals[1]));
-    assert_eq!(signal_subscriber_count(row_signals[1]), 0);
-    assert!(signal_is_alive(row_signals[0]));
+    assert!(!signal_is_alive(&row_signals[1]));
+    assert_eq!(signal_subscriber_count(&row_signals[1]), 0);
+    assert!(signal_is_alive(&row_signals[0]));
     assert_eq!(ui.node_children(root), &[head, first, tail]);
-    assert_eq!(signal_subscriber_count(items), 1);
+    assert_eq!(signal_subscriber_count(&items), 1);
 
-    let after_delete = live_signal_count();
+    let after_delete = live_signal_count(&cx.runtime);
     items.set(vec![Row {
         id: 1,
         title: "a".into(),
     }]);
     ui.update(VIEWPORT);
-    assert_eq!(live_signal_count(), after_delete);
+    assert_eq!(live_signal_count(&cx.runtime), after_delete);
     assert_eq!(ui.find_by_key("1"), Some(first));
     assert_eq!(rows.borrow().len(), 2);
 }
@@ -746,8 +809,9 @@ fn for_keeps_rows_by_key() {
 #[test]
 #[should_panic(expected = "duplicate key in for")]
 fn duplicate_for_key_panics() {
-    let items = signal(vec![1_u64, 1]);
-    let _ui = Ui::new(
+    let cx = context();
+    let items = cx.signal(vec![1_u64, 1]);
+    let _ui = Ui::new(&cx, 
         for_each(
             move |visit| {
                 items.with(|list| {
@@ -765,11 +829,12 @@ fn duplicate_for_key_panics() {
 
 #[test]
 fn switching_if_disposes_hidden_show_rows_and_nested_if() {
-    let outer = signal(true);
-    let panel = signal(true);
-    let shown = signal(String::from("keep"));
-    let nested = signal(String::from("nest"));
-    let items = signal(vec![
+    let cx = context();
+    let outer = cx.signal(true);
+    let panel = cx.signal(true);
+    let shown = cx.signal(String::from("keep"));
+    let nested = cx.signal(String::from("nest"));
+    let items = cx.signal(vec![
         Row {
             id: 1,
             title: "a".into(),
@@ -780,34 +845,50 @@ fn switching_if_disposes_hidden_show_rows_and_nested_if() {
         },
     ]);
     let rows = Rc::new(RefCell::new(Vec::new()));
-    let inner_state = Rc::new(Cell::new(None));
-    let mut ui = settled(if_else(
-        move || outer.get(),
+    let inner_state = Rc::new(RefCell::new(None));
+    let outer_branch = outer.clone();
+    let panel_open = panel.clone();
+    let shown_text = shown.clone();
+    let nested_text = nested.clone();
+    let items_source = items.clone();
+    let cx_view = cx.clone();
+    let mut ui = settled(&cx, if_else(
+        move || outer_branch.get(),
         {
             let rows = Rc::clone(&rows);
             let inner_state = Rc::clone(&inner_state);
             move || {
+                let cx_view = cx_view.clone();
                 fragment([
                     show(
-                        move || panel.get(),
                         {
-                            let shown = shown;
-                            move || text_dyn(move || shown.get()).key("hidden-show")
+                            let panel_open = panel_open.clone();
+                            move || panel_open.get()
+                        },
+                        {
+                            let shown_text = shown_text.clone();
+                            move || {
+                                let shown_text = shown_text.clone();
+                                text_dyn(move || shown_text.get()).key("hidden-show")
+                            }
                         },
                     ),
                     for_each(
-                        move |visit| {
-                            items.with(|list| {
-                                for item in list {
-                                    visit(item);
-                                }
-                            });
+                        {
+                            let items_source = items_source.clone();
+                            move |visit| {
+                                items_source.with(|list| {
+                                    for item in list {
+                                        visit(item);
+                                    }
+                                });
+                            }
                         },
                         |item| &item.id,
                         {
                             let rows = Rc::clone(&rows);
                             move |item: Signal<Row>| {
-                                rows.borrow_mut().push(item);
+                                rows.borrow_mut().push(item.clone());
                                 text_dyn(move || item.with(|row| row.title.clone()))
                             }
                         },
@@ -816,10 +897,12 @@ fn switching_if_disposes_hidden_show_rows_and_nested_if() {
                         || true,
                         {
                             let inner_state = Rc::clone(&inner_state);
+                            let nested_text = nested_text.clone();
                             move || {
-                                let state = signal(3);
-                                inner_state.set(Some(state));
-                                text_dyn(move || nested.get()).key("nested")
+                                let state = cx_view.signal(3);
+                                inner_state.borrow_mut().replace(state);
+                                let nested_text = nested_text.clone();
+                                text_dyn(move || nested_text.get()).key("nested")
                             }
                         },
                         || text("no"),
@@ -833,24 +916,24 @@ fn switching_if_disposes_hidden_show_rows_and_nested_if() {
     let hidden = ui.find_by_key("hidden-show").unwrap();
     assert_eq!(ui.node_text(hidden), Some("keep"));
     assert_eq!(ui.node_text(ui.find_by_key("nested").unwrap()), Some("nest"));
-    assert_eq!(signal_subscriber_count(shown), 1);
-    assert_eq!(signal_subscriber_count(nested), 1);
-    assert_eq!(signal_subscriber_count(items), 1);
+    assert_eq!(signal_subscriber_count(&shown), 1);
+    assert_eq!(signal_subscriber_count(&nested), 1);
+    assert_eq!(signal_subscriber_count(&items), 1);
     let row_signals = rows.borrow().clone();
     assert_eq!(row_signals.len(), 2);
-    let state = inner_state.get().unwrap();
-    assert!(row_signals.iter().all(|row| signal_is_alive(*row)));
-    assert!(signal_is_alive(state));
+    let state = inner_state.borrow().clone().unwrap();
+    assert!(row_signals.iter().all(|row| signal_is_alive(&*row)));
+    assert!(signal_is_alive(&state));
 
     panel.set(false);
     ui.update(VIEWPORT);
     assert_eq!(ui.find_by_key("hidden-show"), Some(hidden));
     assert_eq!(ui.node_rect(hidden).unwrap().width, 0.0);
-    assert_eq!(signal_subscriber_count(shown), 1);
-    assert_eq!(signal_subscriber_count(nested), 1);
-    assert_eq!(signal_subscriber_count(items), 1);
-    assert!(row_signals.iter().all(|row| signal_is_alive(*row)));
-    assert!(signal_is_alive(state));
+    assert_eq!(signal_subscriber_count(&shown), 1);
+    assert_eq!(signal_subscriber_count(&nested), 1);
+    assert_eq!(signal_subscriber_count(&items), 1);
+    assert!(row_signals.iter().all(|row| signal_is_alive(&*row)));
+    assert!(signal_is_alive(&state));
     assert!(ui.find_by_key("nested").is_some());
 
     outer.set(false);
@@ -858,29 +941,32 @@ fn switching_if_disposes_hidden_show_rows_and_nested_if() {
     assert_eq!(ui.node_text(ui.find_by_key("other").unwrap()), Some("other"));
     assert!(ui.find_by_key("hidden-show").is_none());
     assert!(ui.find_by_key("nested").is_none());
-    assert_eq!(signal_subscriber_count(shown), 0);
-    assert_eq!(signal_subscriber_count(nested), 0);
-    assert_eq!(signal_subscriber_count(items), 0);
-    assert_eq!(signal_subscriber_count(panel), 0);
-    assert!(row_signals.iter().all(|row| !signal_is_alive(*row)));
-    assert!(row_signals.iter().all(|row| signal_subscriber_count(*row) == 0));
-    assert!(!signal_is_alive(state));
-    assert_eq!(signal_subscriber_count(state), 0);
+    assert_eq!(signal_subscriber_count(&shown), 0);
+    assert_eq!(signal_subscriber_count(&nested), 0);
+    assert_eq!(signal_subscriber_count(&items), 0);
+    assert_eq!(signal_subscriber_count(&panel), 0);
+    assert!(row_signals.iter().all(|row| !signal_is_alive(&*row)));
+    assert!(row_signals.iter().all(|row| signal_subscriber_count(&*row) == 0));
+    assert!(!signal_is_alive(&state));
+    assert_eq!(signal_subscriber_count(&state), 0);
 }
 
 #[test]
 fn switching_branches_and_rows_reuses_slots() {
-    let flag = signal(true);
-    let items = signal(vec![1_u64, 2]);
-    let mut ui = settled(div().children([
+    let cx = context();
+    let flag = cx.signal(true);
+    let items = cx.signal(vec![1_u64, 2]);
+    let flag_branch = flag.clone();
+    let items_source = items.clone();
+    let mut ui = settled(&cx, div().children([
         if_else(
-            move || flag.get(),
+            move || flag_branch.get(),
             || text_dyn(|| "yes".to_owned()).key("branch"),
             || text_dyn(|| "no".to_owned()).key("branch"),
         ),
         for_each(
             move |visit| {
-                items.with(|list| {
+                items_source.with(|list| {
                     for item in list {
                         visit(item);
                     }
@@ -892,7 +978,7 @@ fn switching_branches_and_rows_reuses_slots() {
     ]));
     let nodes = ui.node_slots();
     let bindings = ui.binding_slots();
-    let signals = live_signal_count();
+    let signals = live_signal_count(&cx.runtime);
     for turn in 0..40 {
         flag.update(|value| *value = !*value);
         if turn % 2 == 0 {
@@ -905,28 +991,32 @@ fn switching_branches_and_rows_reuses_slots() {
     assert_eq!(ui.node_text(ui.find_by_key("branch").unwrap()), Some("yes"));
     assert_eq!(ui.node_slots(), nodes);
     assert_eq!(ui.binding_slots(), bindings);
-    assert_eq!(live_signal_count(), signals);
+    assert_eq!(live_signal_count(&cx.runtime), signals);
 }
 
 #[test]
 fn add_and_drop_returns_resources_to_the_baseline() {
-    let items = signal(Vec::<u64>::new());
-    let mut ui = settled(div().child(for_each(
+    let cx = context();
+    let items = cx.signal(Vec::<u64>::new());
+    let items_source = items.clone();
+    let cx_row = cx.clone();
+    let mut ui = settled(&cx, div().child(for_each(
         move |visit| {
-            items.with(|list| {
+            items_source.with(|list| {
                 for item in list {
                     visit(item);
                 }
             });
         },
         |item| item,
-        |item| {
-            let flag = signal(false);
+        move |item| {
+            let flag = cx_row.signal(false);
+            let shown = flag.clone();
             let id = item.get_untracked();
             div().key(format!("row-{id}")).children([
                 text_dyn(move || item.get().to_string()).key(format!("label-{id}")),
                 text_dyn(move || {
-                    if flag.get() {
+                    if shown.get() {
                         "on".to_owned()
                     } else {
                         "off".to_owned()

@@ -1,6 +1,6 @@
 //! cappy: a retained-mode GUI framework on wgpu that repaints only what changed and stays idle
-//! otherwise. It owns no window; hosts (winit, tao, mobile shells) feed input, call
-//! [`Ui::update`], and render the resulting frame.
+//! otherwise. It owns no window; a winit host feeds input, calls [`Ui::update`], and renders the
+//! resulting frame.
 //!
 //! Features:
 //! - `basic` (default): reactive core, styles and themes, layout, text, the renderer-independent
@@ -14,16 +14,19 @@
 //! ```
 //! use cappy::prelude::*;
 //!
-//! let count = signal(0);
-//! let app = ui! {
+//! let application = Application::new();
+//! let cx = application.context();
+//! let count = cx.signal(0);
+//! let label = count.clone();
+//! let root = ui! {
 //!     div(class = "app") {
-//!         text(:format!("Clicked {} times", count.get()))
+//!         text(:format!("Clicked {} times", label.get()))
 //!         div(class = "btn btn-primary", on_click = move |_| count.update(|n| *n += 1)) {
 //!             text("Click")
 //!         }
 //!     }
 //! };
-//! let mut ui = Ui::new(app, Theme::light());
+//! let mut ui = Ui::new(cx, root, Theme::light());
 //! assert!(ui.update(FrameInput::new(800, 600, 1.0)).needs_redraw());
 //! ```
 
@@ -66,10 +69,10 @@ pub use cappy_components as components;
 #[cfg(feature = "basic")]
 pub mod prelude {
     pub use cappy_core::{
-        Align, Color, ColorToken, Component, Display, Dynamic, Element, FlexDirection, FontSize,
-        FontWeight, FrameInput, IntoReactive, Justify, Radius, Reactive, Signal, Slot, Space,
-        StyleRefinement, Stylesheet, Theme, Ui, UpdateOutcome, div, for_each, fragment, hex,
-        if_else, percent, reactive, show, signal, slot, text, text_dyn,
+        Align, Application, Color, ColorToken, Component, Context, Display, Dynamic, Element,
+        FlexDirection, FontSize, FontWeight, FrameInput, HasContext, IntoReactive, Justify, Radius,
+        Reactive, Signal, Slot, Space, StyleRefinement, Stylesheet, Theme, Ui, UpdateOutcome, div,
+        for_each, fragment, hex, if_else, percent, show, slot, text, text_dyn,
     };
     pub use cappy_dsl::{style, theme, ui};
     pub use cappy_macros::{ClassName, Props, component, reactive, stylesheet};

@@ -7,8 +7,14 @@ license.workspace = true
 authors.workspace = true
 publish = false
 
+[features]
+default = []
+gpu = ["dep:cappy-winit", "cappy-winit/gpu"]
+cpu = ["dep:cappy-winit", "cappy-winit/cpu"]
+
 [dependencies]
 cappy = { workspace = true, features = ["basic"] }
+cappy-winit = { workspace = true, optional = true }
 env_logger.workspace = true
 
 [dev-dependencies]

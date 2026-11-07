@@ -4,7 +4,7 @@
 //!   between themes;
 //! - [`style`]: the stylesheet, i.e. the classes the layout uses, applied to every theme;
 //! - [`layout`]: the node tree, its state and its event handlers, with no styling of its own;
-//! - [`counter`]: a composable with one thread-local singleton and separate `new` instances;
+//! - [`counter`]: a composable with one singleton per context and separate `new` instances;
 //! - [`badge`]: a single-file component with its own state, props, event, slots and sheet.
 
 mod badge;
@@ -19,13 +19,17 @@ use std::sync::Arc;
 use cappy::prelude::*;
 
 /// Header with a theme switcher, a counter (`show` / `if`), selectable tiles and a keyed task list.
-pub fn showcase() -> Ui {
-    // Test workers reuse threads, so a previous scene can leave this singleton dirty.
-    counter::Counter::singleton().reset();
+pub fn showcase(cx: &Context) -> Ui {
+    // A context reused for another scene still holds the previous singleton.
+    cx.singleton(counter::Counter).reset();
     let themes: Rc<[Arc<Theme>]> = theme::themes()
         .into_iter()
         .map(|tokens| Arc::new(style::stylesheet(tokens)))
         .collect();
-    let active_theme = signal(Arc::clone(&themes[0]));
-    Ui::with_theme_signal(layout::root(reactive(active_theme), themes), active_theme)
+    let active_theme = cx.signal(Arc::clone(&themes[0]));
+    Ui::with_theme_signal(
+        cx,
+        layout::root(cx, cx.reactive(active_theme.clone()), themes),
+        active_theme,
+    )
 }

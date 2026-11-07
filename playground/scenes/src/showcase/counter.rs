@@ -1,4 +1,4 @@
-//! Shared counter. `singleton` is one value on this thread; `new` is a separate instance.
+//! Shared counter. `singleton` is one value in a context; `new` is a separate instance.
 
 use cappy::prelude::*;
 

@@ -1,6 +1,6 @@
 //! The window-manager independent half of a desktop host: owns the [`Ui`] and its renderer,
 //! turns input into redraw requests and redraws into presented frames. Integrations such as
-//! winit and tao only translate their events and forward them here.
+//! winit only translates its events and forwards them here.
 
 #[cfg(debug_assertions)]
 use cappy_core::ResourceCensus;
@@ -234,18 +234,34 @@ impl WindowHost {
     ) -> Result<RedrawResult, RendererError> {
         let input = FrameInput::new(physical_size.0, physical_size.1, scale);
         self.last_input = Some(input);
+        let first_frame = self.frames == 0;
+        if first_frame {
+            memory_mark("frame 1 before update");
+        }
         self.ui.update(input);
+        if first_frame {
+            memory_mark("frame 1 after update");
+        }
         let frame = self
             .ui
             .prepare_frame()
             .expect("a frame is always available after an update");
+        if first_frame {
+            memory_mark("frame 1 after prepare");
+        }
         let background = self.ui.theme().tokens().colors.background;
         let size = (physical_size.0, physical_size.1);
         if self.presented.map(|frame| frame.size) != Some(size) {
             self.renderer.resize(size);
             log::debug!("resized to {:?}", size);
+            if first_frame {
+                memory_mark("frame 1 after resize");
+            }
         }
         let present = self.renderer.present(&frame, background)?;
+        if first_frame {
+            memory_mark("frame 1 after present");
+        }
         if matches!(present, PresentOutcome::Presented { .. }) {
             self.presented = Some(PresentedFrame {
                 size: (physical_size.0, physical_size.1),
@@ -292,9 +308,9 @@ impl WindowHost {
             return;
         }
         if let Some((private_bytes, working_set)) = memory {
-            let delta = private_delta.unwrap_or(0);
+            let delta_kib = private_delta.unwrap_or(0) / 1024;
             log::info!(
-                "memory private {} KiB ({delta:+} KiB) working {} KiB | cappy nodes {}/{} layout {}/{} text {} signals {} bindings {}/{}",
+                "memory private {} KiB ({delta_kib:+} KiB) working {} KiB | cappy nodes {}/{} layout {}/{} text {} signals {} bindings {}/{} listeners {}/{} singletons {}",
                 private_bytes / 1024,
                 working_set / 1024,
                 resources.nodes,
@@ -305,6 +321,9 @@ impl WindowHost {
                 resources.live_signals,
                 resources.bindings,
                 resources.binding_capacity,
+                resources.live_listeners,
+                resources.listener_capacity,
+                resources.singletons,
             );
             self.traced_private_bytes = Some(private_bytes);
         } else {
@@ -330,6 +349,32 @@ impl WindowHost {
             cursor
         })
     }
+}
+
+/// Logs this process's private bytes at `stage`, and how much they moved since the previous mark.
+///
+/// Debug builds only. The delta is in KiB, same as the totals. Release builds record nothing.
+#[cfg(not(debug_assertions))]
+pub fn memory_mark(_stage: &str) {}
+
+#[cfg(debug_assertions)]
+pub fn memory_mark(stage: &str) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static PREVIOUS: AtomicUsize = AtomicUsize::new(0);
+    let Some((private_bytes, working_set)) = process_memory() else {
+        return;
+    };
+    let previous = PREVIOUS.swap(private_bytes, Ordering::Relaxed);
+    let delta_kib = if previous == 0 {
+        0
+    } else {
+        (private_bytes as isize - previous as isize) / 1024
+    };
+    log::info!(
+        "memory stage {stage}: private {} KiB ({delta_kib:+} KiB) working {} KiB",
+        private_bytes / 1024,
+        working_set / 1024,
+    );
 }
 
 /// Private bytes and working set of this process. Private bytes are what the process has asked

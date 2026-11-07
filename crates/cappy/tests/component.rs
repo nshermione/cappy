@@ -1,8 +1,9 @@
 use std::cell::Cell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use cappy::prelude::*;
-use cappy::{ButtonState, Class as ThemeClass, InputEvent, PointerButton};
+use cappy::{ButtonState, Class as ThemeClass, ClickEvent, InputEvent, PointerButton};
 
 #[component]
 struct Badge {
@@ -27,19 +28,19 @@ stylesheet! {
 }
 
 impl Badge {
-    fn press(&self) {
+    fn press(&self, _event: &ClickEvent) {
         self.on_click.emit(self.label.get());
     }
 }
 
 impl Component for Badge {
-    fn stylesheet() -> &'static Stylesheet {
-        BadgeClass::sheet()
+    fn stylesheet() -> Option<Arc<Stylesheet>> {
+        Some(BadgeClass::sheet())
     }
 
-    fn render(self) -> Element {
+    fn render(&self, cx: &Context) -> Element {
         ui! {
-            div(class = BadgeClass::Root, key = "badge-root", on_click = move |_| self.press()) {
+            div(class = BadgeClass::Root, key = "badge-root", on_click = cx.on(Self::press)) {
                 text(:format!("{}:{}", self.text, self.label), class = BadgeClass::Label, key = "badge-label")
             }
         }
@@ -59,8 +60,12 @@ const VIEWPORT: FrameInput = FrameInput {
     scale_factor: 1.0,
 };
 
-fn settled(root: Element) -> Ui {
-    let mut ui = Ui::new(root, Theme::light());
+fn context() -> Context {
+    Application::new().context().clone()
+}
+
+fn settled(cx: &Context, root: Element) -> Ui {
+    let mut ui = Ui::new(cx, root, Theme::light());
     ui.update(VIEWPORT);
     ui.prepare_frame();
     ui
@@ -80,10 +85,11 @@ fn click(ui: &mut Ui, key: &str) {
 
 #[test]
 fn plain_fields_and_shared_props_update_rendered_text() {
-    let label = reactive(String::from("new"));
-    let badge = Badge::default().label(label);
+    let cx = context();
+    let label = cx.reactive(String::from("new"));
+    let badge = Badge::open(&cx).label(label.clone());
     badge.text.set(String::from("note"));
-    let mut ui = settled(badge.render());
+    let mut ui = settled(&cx, Element::from(badge.clone()));
     let text = ui.find_by_key("badge-label").unwrap();
     assert_eq!(ui.node_text(text), Some("note:new"));
 
@@ -95,24 +101,26 @@ fn plain_fields_and_shared_props_update_rendered_text() {
 
 #[test]
 fn owned_prop_does_not_follow_another_signal() {
-    let badge = Badge::default().label("once");
-    let mut ui = settled(badge.render());
+    let cx = context();
+    let badge = Badge::open(&cx).label("once");
+    let mut ui = settled(&cx, Element::from(badge));
     let text = ui.find_by_key("badge-label").unwrap();
     assert_eq!(ui.node_text(text), Some(":once"));
 
-    reactive(String::from("other")).set(String::from("changed"));
+    cx.reactive(String::from("other")).set(String::from("changed"));
     ui.update(VIEWPORT);
     assert_eq!(ui.node_text(text), Some(":once"));
 }
 
 #[test]
 fn parent_passes_props_events_host_attributes_and_children() {
-    let label = reactive(String::from("new"));
+    let cx = context();
+    let label = cx.reactive(String::from("new"));
     let seen = Rc::new(Cell::new(String::new()));
     let record = Rc::clone(&seen);
-    let mut ui = settled(ui! {
+    let mut ui = settled(&cx, ui! {
         @Badge(
-            label = label,
+            label = label.clone(),
             on_click = move |value: &String| record.set(value.clone()),
             class = ThemeClass::Muted,
             key = "hosted",
@@ -159,7 +167,7 @@ fn parent_passes_props_events_host_attributes_and_children() {
 fn unit_event_emits_without_a_payload() {
     let hit = Rc::new(Cell::new(false));
     let flag = Rc::clone(&hit);
-    let ping = Ping::default().on_ping(move || flag.set(true));
+    let ping = Ping::open(&context()).on_ping(move || flag.set(true));
     ping.on_ping.emit(());
     assert!(hit.get());
     let _ = format!("{ping:?}");
@@ -174,7 +182,7 @@ struct Panel {
 }
 
 impl Component for Panel {
-    fn render(self) -> Element {
+    fn render(&self, _cx: &Context) -> Element {
         ui! {
             div(key = "panel") {
                 slot(icon)
@@ -191,7 +199,7 @@ struct Frame {
 }
 
 impl Component for Frame {
-    fn render(self) -> Element {
+    fn render(&self, _cx: &Context) -> Element {
         ui! {
             div(key = "frame") {
                 text("before", key = "before")
@@ -209,7 +217,7 @@ struct Inner {
 }
 
 impl Component for Inner {
-    fn render(self) -> Element {
+    fn render(&self, _cx: &Context) -> Element {
         ui! {
             div(key = "inner") { slot(body) }
         }
@@ -223,7 +231,7 @@ struct Outer {
 }
 
 impl Component for Outer {
-    fn render(self) -> Element {
+    fn render(&self, cx: &Context) -> Element {
         ui! {
             div(key = "outer") {
                 slot(body)
@@ -235,10 +243,11 @@ impl Component for Outer {
 
 #[test]
 fn slots_land_in_declaration_order_and_drop_the_rest() {
-    let panel = Panel::default();
-    let _rendered = panel.render();
-    let _again = panel;
-    let ui = settled(ui! {
+    let cx = context();
+    let panel = Panel::open(&cx);
+    let _rendered = panel.render(&cx);
+    let _again = panel.clone();
+    let ui = settled(&cx, ui! {
         @Panel(class = ThemeClass::Muted, key = "hosted") {
             text("default", key = "default"),
             text("named", key = "named", slot = body),
@@ -263,7 +272,8 @@ fn slots_land_in_declaration_order_and_drop_the_rest() {
 
 #[test]
 fn an_unnamed_child_is_placed_where_the_slot_is() {
-    let ui = settled(ui! {
+    let cx = context();
+    let ui = settled(&cx, ui! {
         @Frame {
             text("middle", key = "middle"),
             text("dropped", key = "dropped"),
@@ -280,7 +290,8 @@ fn an_unnamed_child_is_placed_where_the_slot_is() {
 
 #[test]
 fn nested_components_keep_their_own_slots() {
-    let ui = settled(ui! {
+    let cx = context();
+    let ui = settled(&cx, ui! {
         @Outer {
             text("outer-text", key = "outer-text")
         }

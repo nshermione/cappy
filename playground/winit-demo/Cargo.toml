@@ -9,12 +9,11 @@ publish = false
 
 [features]
 default = ["gpu"]
-gpu = ["cappy-winit/gpu"]
-cpu = ["cappy-winit/cpu"]
+gpu = ["playground-scenes/gpu"]
+cpu = ["playground-scenes/cpu"]
 
 [dependencies]
 playground-scenes.workspace = true
-cappy-winit.workspace = true
 
 [lints]
 workspace = true

@@ -1,4 +1,4 @@
-//! Owns a wgpu device and window surface for hosts without their own renderer (winit, tao).
+//! Owns a wgpu device and window surface for hosts without their own renderer.
 
 use std::fmt;
 
@@ -77,11 +77,17 @@ impl WindowSurface {
         physical_size: (u32, u32),
         fonts: &FontContext,
     ) -> Result<Self, SurfaceError> {
+        #[cfg(debug_assertions)]
+        cappy_host::memory_mark("gpu before instance");
         let instance =
             wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        #[cfg(debug_assertions)]
+        cappy_host::memory_mark("gpu after instance");
         let surface = instance
             .create_surface(window)
             .map_err(SurfaceError::CreateSurface)?;
+        #[cfg(debug_assertions)]
+        cappy_host::memory_mark("gpu after surface");
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::from_env().unwrap_or_default(),
@@ -90,6 +96,8 @@ impl WindowSurface {
             })
             .await
             .map_err(SurfaceError::RequestAdapter)?;
+        #[cfg(debug_assertions)]
+        cappy_host::memory_mark("gpu after adapter");
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("cappy device"),
@@ -99,8 +107,12 @@ impl WindowSurface {
             })
             .await
             .map_err(SurfaceError::RequestDevice)?;
+        #[cfg(debug_assertions)]
+        cappy_host::memory_mark("gpu after device");
         let config = surface_config(&surface, &adapter, physical_size)?;
         surface.configure(&device, &config);
+        #[cfg(debug_assertions)]
+        cappy_host::memory_mark("gpu after configure");
         log::info!(
             "cappy surface on {} ({:?}), format {:?}",
             adapter.get_info().name,
@@ -108,6 +120,8 @@ impl WindowSurface {
             config.format
         );
         let renderer = Renderer::new(&device, &queue, fonts);
+        #[cfg(debug_assertions)]
+        cappy_host::memory_mark("gpu after renderer");
         Ok(Self {
             device,
             queue,

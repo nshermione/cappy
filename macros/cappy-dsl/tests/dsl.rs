@@ -1,6 +1,6 @@
 use cappy_core::{
-    Color, ColorToken, Component, Element, FrameInput, Radius, Space, StyleRefinement, Theme, Ui,
-    div, signal, text,
+    Application, Color, ColorToken, Component, Context, Element, FrameInput, HasContext, Radius,
+    Space, StyleRefinement, Theme, Ui, div, text, text_dyn,
 };
 use cappy_dsl::{style, theme, ui};
 
@@ -10,8 +10,12 @@ const VIEWPORT: FrameInput = FrameInput {
     scale_factor: 1.0,
 };
 
-fn mounted(tree: Element) -> Ui {
-    let mut ui = Ui::new(tree, Theme::light());
+fn context() -> Context {
+    Application::new().context().clone()
+}
+
+fn mounted(context: &Context, tree: Element) -> Ui {
+    let mut ui = Ui::new(context, tree, Theme::light());
     ui.update(VIEWPORT);
     ui
 }
@@ -24,27 +28,45 @@ fn card() -> Element {
     div().class("card").child(text("card body"))
 }
 
-#[derive(Default)]
+#[derive(Clone)]
 struct Badge {
+    context: Context,
     label: String,
 }
 
 impl Badge {
+    fn open(context: &Context) -> Self {
+        Self {
+            context: context.clone(),
+            label: String::new(),
+        }
+    }
+
     fn label(mut self, label: &str) -> Self {
         self.label = label.to_owned();
         self
     }
 }
 
+impl HasContext for Badge {
+    fn context(&self) -> &Context {
+        &self.context
+    }
+}
+
 impl Component for Badge {
-    fn render(self) -> Element {
-        div().class("badge").key("badge").child(text(self.label))
+    fn render(&self, _context: &Context) -> Element {
+        div()
+            .class("badge")
+            .key("badge")
+            .child(text(self.label.clone()))
     }
 }
 
 #[test]
 fn ui_builds_nested_nodes_with_attributes() {
-    let ui = mounted(ui! {
+    let cx = context();
+    let ui = mounted(&cx, ui! {
         div(class = "app", key = "root") {
             text("Title", class = "title", key = "title")
             div(class = "row", key = "row") {
@@ -62,10 +84,12 @@ fn ui_builds_nested_nodes_with_attributes() {
 
 #[test]
 fn closure_text_is_reactive() {
-    let count = signal(1);
-    let mut ui = mounted(ui! {
+    let cx = context();
+    let count = cx.signal(1);
+    let label = count.clone();
+    let mut ui = mounted(&cx, ui! {
         div {
-            text(:format!("Count: {}", count.get()), key = "label")
+            text(:format!("Count: {}", label.get()), key = "label")
         }
     });
     count.set(2);
@@ -75,14 +99,17 @@ fn closure_text_is_reactive() {
 
 #[test]
 fn colon_fields_rebind_classes_and_styles() {
-    let active = signal(false);
-    let mut ui = mounted(ui! {
+    let cx = context();
+    let active = cx.signal(false);
+    let active_class = active.clone();
+    let active_style = active.clone();
+    let mut ui = mounted(&cx, ui! {
         div {
             div(
                 key = "chip",
                 class = "btn",
-                :class = if active.get() { "btn-primary" } else { "" },
-                :style = style! { width: if active.get() { 120 } else { 80 } },
+                :class = if active_class.get() { "btn-primary" } else { "" },
+                :style = style! { width: if active_style.get() { 120 } else { 80 } },
             )
         }
     });
@@ -126,7 +153,8 @@ fn class_list_adds_every_item() {
 
 #[test]
 fn fields_after_a_class_list_still_apply() {
-    let ui = mounted(ui! {
+    let cx = context();
+    let ui = mounted(&cx, ui! {
         div {
             div(class = ["card"], key = "box")
             text("Title", class = ["title", "muted",], key = "title")
@@ -138,12 +166,14 @@ fn fields_after_a_class_list_still_apply() {
 
 #[test]
 fn colon_class_list_rebinds_every_item() {
-    let active = signal(false);
-    let mut ui = mounted(ui! {
+    let cx = context();
+    let active = cx.signal(false);
+    let active_class = active.clone();
+    let mut ui = mounted(&cx, ui! {
         div {
             div(
                 key = "chip",
-                :class = ["btn", if active.get() { "btn-primary" } else { "" }],
+                :class = ["btn", if active_class.get() { "btn-primary" } else { "" }],
             )
         }
     });
@@ -160,18 +190,20 @@ fn colon_class_list_rebinds_every_item() {
 
 #[test]
 fn handlers_pass_through_as_attributes() {
-    let clicked = signal(false);
+    let cx = context();
+    let clicked = cx.signal(false);
     let tree = ui! {
         div(key = "button", on_click = move |_| clicked.set(true), style = style! { size: 40 })
     };
-    let ui = mounted(div().child(tree));
+    let ui = mounted(&cx, div().child(tree));
     assert!(ui.find_by_key("button").is_some());
 }
 
 #[test]
 fn embedded_expressions_iterators_functions_and_components() {
     let items = ["one", "two", "three"];
-    let ui = mounted(ui! {
+    let cx = context();
+    let ui = mounted(&cx, ui! {
         div(key = "root") {
             { text("embedded") }
             div(key = "list") {
@@ -192,11 +224,13 @@ fn embedded_expressions_iterators_functions_and_components() {
 
 #[test]
 fn component_root_keeps_host_attributes_and_appended_children() {
+    let cx = context();
     assert_classes(
         &ui! { @Badge(label = "new", class = ["wrap", "wide"]) },
         r#"["badge", "wrap", "wide"]"#,
     );
-    let ui = mounted(ui! {
+    let cx = context();
+    let ui = mounted(&cx, ui! {
         @Badge(label = "new", class = "wrap", key = "hosted") {
             text("extra", key = "extra")
         }
@@ -214,7 +248,8 @@ fn label(content: &str) -> Element {
 
 #[test]
 fn any_element_function_takes_content_fields_and_comma_separated_children() {
-    let ui = mounted(ui! {
+    let cx = context();
+    let ui = mounted(&cx, ui! {
         div(key = "root") {
             label("hello", key = "label"),
             div,
@@ -274,26 +309,43 @@ fn control_flow_macros_mount_show_if_and_for() {
         title: String,
     }
 
-    let open = signal(true);
-    let ready = signal(false);
-    let mode = signal(0);
-    let items = signal(vec![Row {
+    let cx = context();
+    let open = cx.signal(true);
+    let ready = cx.signal(false);
+    let mode = cx.signal(0);
+    let items = cx.signal(vec![Row {
         id: 1,
         title: "row".into(),
     }]);
-    let mut ui = mounted(ui! {
+    let open_visible = open.clone();
+    let open_text = open.clone();
+    let ready_branch = ready.clone();
+    let mode_branch = mode.clone();
+    let items_source = items.clone();
+    let mut ui = mounted(&cx, ui! {
         div(key = "root") {
-            show (:open.get()) {
-                text(:format!("open {}", open.get()), key = "panel")
+            show (:open_visible.get()) {
+                {{
+                    let open_text = open_text.clone();
+                    text_dyn(move || format!("open {}", open_text.get())).key("panel")
+                }}
             }
-            if (:ready.get()) {
+            if (:ready_branch.get()) {
                 text("yes", key = "state")
-            } else if (:mode.get() == 1) {
-                text("mid", key = "state")
             } else {
-                text("no", key = "state")
+                {{
+                    let mode_branch = mode_branch.clone();
+                    text_dyn(move || {
+                        if mode_branch.get() == 1 {
+                            "mid".to_owned()
+                        } else {
+                            "no".to_owned()
+                        }
+                    })
+                    .key("state")
+                }}
             }
-            for (item in :items, key = item.id) {
+            for (item in :items_source, key = item.id) {
                 text(:item.with(|row| row.title.clone()), key = "row")
             }
         }

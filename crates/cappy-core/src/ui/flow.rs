@@ -333,7 +333,7 @@ impl Ui {
             self.refresh_pointer();
             return;
         }
-        let guard = enter_owner();
+        let guard = enter_owner(&self.queue.runtime);
         let owner = guard.id();
         let element = match &self.flows[id.index()].runtime {
             FlowRuntime::Show(state) => (state.view)(),
@@ -362,9 +362,9 @@ impl Ui {
         self.reflatten(parent);
         self.dispose_parts(old_parts);
         if let Some(owner) = old_owner {
-            dispose_owner(owner);
+            dispose_owner(&self.queue.runtime, owner);
         }
-        let guard = enter_owner();
+        let guard = enter_owner(&self.queue.runtime);
         let owner = guard.id();
         let element = if choice {
             (state.then_branch)()
@@ -519,7 +519,7 @@ impl Ui {
                 self.reflatten(parent);
                 self.dispose_parts(parts);
                 if let Some(owner) = owner {
-                    dispose_owner(owner);
+                    dispose_owner(&self.queue.runtime, owner);
                 }
             }
         }
@@ -660,7 +660,7 @@ where
                 && let Some(row) = row.take()
             {
                 ui.dispose_parts(row.parts);
-                dispose_owner(row.owner);
+                dispose_owner(&ui.queue.runtime, row.owner);
             }
         }
         let suppressed = ui.flow_is_suppressed(flow);
@@ -695,7 +695,7 @@ where
     fn dispose(&mut self, ui: &mut Ui) {
         for row in self.rows.drain(..) {
             ui.dispose_parts(row.parts);
-            dispose_owner(row.owner);
+            dispose_owner(&ui.queue.runtime, row.owner);
         }
         self.index.clear();
     }
@@ -717,10 +717,10 @@ fn mount_list_row<T, K>(
 where
     T: 'static,
 {
-    let guard = enter_owner();
+    let guard = enter_owner(&ui.queue.runtime);
     let owner = guard.id();
-    let signal = Signal::new(value);
-    let element = view(signal);
+    let signal = Signal::create(&ui.queue.runtime, value, false);
+    let element = view(signal.clone());
     drop(guard);
     let parts = ui.adopt(parent, element, suppressed);
     ListRow {

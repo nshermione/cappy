@@ -1,9 +1,10 @@
-use cappy::Damage;
+use cappy::{Application, Damage};
 use cappy_testing::TestUi;
 use playground_scenes::showcase;
 
 fn harness() -> TestUi {
-    TestUi::from_ui(showcase())
+    let application = Application::new();
+    TestUi::from_ui(showcase(application.context()))
 }
 
 #[test]

@@ -265,19 +265,15 @@ pub fn expand(input: &Input) -> syn::Result<TokenStream> {
             }
 
             /// Rules for these classes. Merging this into a theme makes them available on every node.
-            pub fn sheet() -> &'static Stylesheet {
-                static SHEET: ::std::sync::LazyLock<Stylesheet> =
-                    ::std::sync::LazyLock::new(|| {
-                        let mut sheet = Stylesheet::default();
-                        #(#rules)*
-                        sheet
-                    });
-                &SHEET
+            pub fn sheet() -> ::std::sync::Arc<Stylesheet> {
+                let mut sheet = Stylesheet::default();
+                #(#rules)*
+                ::std::sync::Arc::new(sheet)
             }
 
             /// Merges this sheet into `theme`.
             pub fn apply(theme: Theme) -> Theme {
-                theme.with_sheet(#name::sheet())
+                theme.with_sheet(&#name::sheet())
             }
         }
 

@@ -56,7 +56,7 @@ pub(crate) struct Node {
     pub(crate) classes: Vec<ClassName>,
     pub(crate) dynamic_classes: Vec<ClassName>,
     /// Sheet of this node only. Children do not inherit it.
-    pub(crate) stylesheet: Option<&'static Stylesheet>,
+    pub(crate) stylesheet: Option<Arc<Stylesheet>>,
     pub(crate) inline_style: StyleRefinement,
     pub(crate) dynamic_style: StyleRefinement,
     pub(crate) style: Style,

@@ -4,11 +4,15 @@
 
 use std::process::ExitCode;
 
-use playground_scenes::{init_logging, showcase, window_options};
+use playground_scenes::{Application, Run, init_logging, showcase, window_options};
 
 fn main() -> ExitCode {
     init_logging();
-    match cappy_winit::run(window_options("cappy playground (winit)"), showcase()) {
+    let application = Application::new();
+    match application.run(
+        window_options("cappy playground (winit)"),
+        showcase(application.context()),
+    ) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("winit demo failed: {error}");

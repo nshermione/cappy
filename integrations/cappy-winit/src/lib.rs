@@ -3,11 +3,18 @@
 //! Presents stay on the resize interval, then one more frame is presented when the size settles.
 //!
 //! ```no_run
-//! use cappy_core::{Theme, Ui, div, text};
-//! use cappy_winit::{WindowOptions, run};
+//! use cappy_core::{Application, Theme, Ui, div, text};
+//! use cappy_winit::{Run, WindowOptions};
 //!
-//! let ui = Ui::new(div().class("app").child(text("Hello")), Theme::light());
-//! run(WindowOptions::new("Hello"), ui).expect("app failed");
+//! let application = Application::new();
+//! let ui = Ui::new(
+//!     application.context(),
+//!     div().class("app").child(text("Hello")),
+//!     Theme::light(),
+//! );
+//! application
+//!     .run(WindowOptions::new("Hello"), ui)
+//!     .expect("app failed");
 //! ```
 //!
 //! Features pick the renderer backends compiled in: `gpu` (wgpu, default) and `cpu`
@@ -21,7 +28,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Instant;
 
-use cappy_core::{CursorIcon, InputEvent, Ui};
+use cappy_core::{Application, CursorIcon, InputEvent, Ui};
 use cappy_host::{RendererError, RendererSelectionError, WindowHost, select_renderer};
 use cappy_text::FontContext;
 use winit::application::ApplicationHandler;
@@ -76,6 +83,8 @@ pub enum RunError {
     EventLoop(winit::error::EventLoopError),
     CreateWindow(winit::error::OsError),
     Renderer(RendererError),
+    /// `ui` was built from a different [`Application`] than the one [`Run::run`] was called on.
+    ContextMismatch,
 }
 
 impl fmt::Display for RunError {
@@ -85,6 +94,9 @@ impl fmt::Display for RunError {
             Self::EventLoop(error) => write!(f, "winit event loop failed: {error}"),
             Self::CreateWindow(error) => write!(f, "failed to create the window: {error}"),
             Self::Renderer(error) => write!(f, "{error}"),
+            Self::ContextMismatch => {
+                write!(f, "ui was built with a different context than the application")
+            }
         }
     }
 }
@@ -96,18 +108,32 @@ impl std::error::Error for RunError {
             Self::EventLoop(error) => Some(error),
             Self::CreateWindow(error) => Some(error),
             Self::Renderer(error) => Some(error),
+            Self::ContextMismatch => None,
         }
     }
 }
 
-/// Opens a window showing `ui` and runs until it is closed.
-pub fn run(options: WindowOptions, ui: Ui) -> Result<(), RunError> {
+/// Opens a window for an [`Application`] and runs until it is closed.
+pub trait Run {
+    fn run(&self, options: WindowOptions, ui: Ui) -> Result<(), RunError>;
+}
+
+impl Run for Application {
+    fn run(&self, options: WindowOptions, ui: Ui) -> Result<(), RunError> {
+        run_window(self, options, ui)
+    }
+}
+
+fn run_window(application: &Application, options: WindowOptions, ui: Ui) -> Result<(), RunError> {
+    if !ui.shares_context(application.context()) {
+        return Err(RunError::ContextMismatch);
+    }
     let renderer =
         select_renderer(options.renderer, AVAILABLE_RENDERERS).map_err(RunError::SelectRenderer)?;
     let event_loop = EventLoop::<Wake>::with_user_event()
         .build()
         .map_err(RunError::EventLoop)?;
-    let mut app = App {
+    let mut app = WinitHost {
         options,
         renderer,
         proxy: event_loop.create_proxy(),
@@ -131,7 +157,7 @@ struct Running {
     settle_at: Option<Instant>,
 }
 
-struct App {
+struct WinitHost {
     options: WindowOptions,
     renderer: RendererKind,
     proxy: EventLoopProxy<Wake>,
@@ -140,18 +166,28 @@ struct App {
     error: Option<RunError>,
 }
 
-impl App {
+impl WinitHost {
     fn start(&mut self, event_loop: &ActiveEventLoop, ui: Ui) -> Result<Running, RunError> {
+        #[cfg(debug_assertions)]
+        cappy_host::memory_mark("start before window");
         let attributes = window_attributes(&self.options, self.renderer);
         let window = Arc::new(
             event_loop
                 .create_window(attributes)
                 .map_err(RunError::CreateWindow)?,
         );
+        #[cfg(debug_assertions)]
+        cappy_host::memory_mark("start after window");
         let fonts = FontContext::from_system();
+        #[cfg(debug_assertions)]
+        cappy_host::memory_mark("start after fonts");
         let renderer =
             renderer::open_renderer(self.renderer, &window, &fonts).map_err(RunError::Renderer)?;
+        #[cfg(debug_assertions)]
+        cappy_host::memory_mark("start after renderer");
         let mut host = WindowHost::new(renderer, &fonts, ui);
+        #[cfg(debug_assertions)]
+        cappy_host::memory_mark("start after host");
         host.set_debug_damage(self.options.debug_damage);
         let proxy = self.proxy.clone();
         host.set_waker(move || {
@@ -174,7 +210,7 @@ impl App {
     }
 }
 
-impl ApplicationHandler<Wake> for App {
+impl ApplicationHandler<Wake> for WinitHost {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let Some(ui) = self.pending_ui.take() else {
             return;

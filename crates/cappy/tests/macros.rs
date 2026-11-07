@@ -9,8 +9,9 @@ enum Class {
 }
 
 /// A labelled card.
-#[derive(Default, Props)]
+#[derive(Clone, Props)]
 struct InfoCard {
+    context: Context,
     /// Shown in bold at the top.
     title: String,
     subtitle: Option<String>,
@@ -19,16 +20,31 @@ struct InfoCard {
     internal_counter: u32,
 }
 
+impl HasContext for InfoCard {
+    fn context(&self) -> &Context {
+        &self.context
+    }
+}
+
 impl Component for InfoCard {
-    fn render(self) -> Element {
+    fn render(&self, _context: &Context) -> Element {
         let mut card = div()
             .class(Class::Card.as_str())
             .key("card")
-            .child(text(self.title).class(Class::Heading.as_str()));
-        if let Some(subtitle) = self.subtitle {
+            .child(text(self.title.clone()).class(Class::Heading.as_str()));
+        if let Some(subtitle) = self.subtitle.clone() {
             card = card.child(text(subtitle));
         }
         card
+    }
+}
+
+fn info_card(context: &Context) -> InfoCard {
+    InfoCard {
+        context: context.clone(),
+        title: String::new(),
+        subtitle: None,
+        internal_counter: 0,
     }
 }
 
@@ -39,7 +55,9 @@ struct Generic<T: Clone> {
 
 #[test]
 fn props_setters_accept_conversions_and_wrap_options() {
-    let card = InfoCard::default().title("Hello").subtitle("world");
+    let card = info_card(&Application::new().context().clone())
+        .title("Hello")
+        .subtitle("world");
     assert_eq!(card.title, "Hello");
     assert_eq!(card.subtitle.as_deref(), Some("world"));
 }
@@ -52,8 +70,10 @@ fn props_work_with_generic_structs() {
 
 #[test]
 fn derived_component_mounts_with_typed_classes() {
+    let context = Application::new().context().clone();
     let mut ui = Ui::new(
-        div().child(InfoCard::default().title("Hello").subtitle("world")),
+        &context,
+        div().child(info_card(&context).title("Hello").subtitle("world")),
         Theme::light(),
     );
     ui.update(FrameInput::new(320, 240, 1.0));
@@ -96,7 +116,8 @@ struct Row {
 
 #[test]
 fn nested_reactive_fields_are_independent() {
-    let state = AppState::new(CounterState::new(1), "a".into());
+    let context = Application::new().context().clone();
+    let state = AppState::new(&context, CounterState::new(&context, 1), "a".into());
     state.counter.count.set(2);
     assert_eq!(state.counter.count.get(), 2);
     assert_eq!(state.name.get(), "a");
@@ -105,20 +126,21 @@ fn nested_reactive_fields_are_independent() {
 
 #[test]
 fn already_reactive_field_keeps_its_handle() {
-    let label = reactive(String::from("hi"));
-    let row = Row::new(1, label);
+    let context = Application::new().context().clone();
+    let label = context.reactive(String::from("hi"));
+    let row = Row::new(&context, 1, label.clone());
     assert_eq!(row.label, label);
     label.set(String::from("yo"));
     assert_eq!(row.label.get(), "yo");
 }
 
-#[reactive]
+#[component]
 struct Badge {
     label: String,
 }
 
 impl Component for Badge {
-    fn render(self) -> Element {
+    fn render(&self, _context: &Context) -> Element {
         ui! {
             div(class = "badge", key = "badge") {
                 text(:format!("{}", self.label))
@@ -144,37 +166,39 @@ struct Pair<T> {
 
 #[test]
 fn singleton_is_shared_and_new_is_separate() {
-    let shared = SharedCount::singleton();
+    let context = Application::new().context().clone();
+    let shared = context.singleton(SharedCount);
     shared.count.set(0);
-    let again = SharedCount::singleton();
+    let again = context.singleton(SharedCount);
     shared.count.set(4);
     assert_eq!(again.count.get(), 4);
 
-    let local = SharedCount::new(1);
+    let local = SharedCount::new(&context, 1);
     assert_eq!(local.count.get(), 1);
     local.count.set(9);
     assert_eq!(shared.count.get(), 4);
 
-    let name = SharedName::singleton();
+    let name = context.singleton(SharedName);
     name.name.set(String::from("a"));
-    assert_eq!(SharedName::singleton().name.get(), "a");
-    assert_eq!(SharedName::new(String::from("b")).name.get(), "b");
+    assert_eq!(context.singleton(SharedName).name.get(), "a");
+    assert_eq!(SharedName::new(&context, String::from("b")).name.get(), "b");
     assert_eq!(shared.count.get(), 4);
     shared.count.set(0);
 
-    let ints = Pair::<i64>::singleton();
+    let ints = context.singleton(Pair::<i64>());
     ints.value.set(3);
-    assert_eq!(Pair::<i64>::singleton().value.get(), 3);
-    assert!(!Pair::<bool>::singleton().value.get());
-    assert_eq!(Pair::new(9_i64).value.get(), 9);
+    assert_eq!(context.singleton(Pair::<i64>()).value.get(), 3);
+    assert!(!context.singleton(Pair::<bool>()).value.get());
+    assert_eq!(Pair::new(&context, 9_i64).value.get(), 9);
     assert_eq!(ints.value.get(), 3);
     ints.value.set(0);
 }
 
 #[test]
 fn reactive_component_label_updates_after_mount() {
-    let badge = Badge::new(String::from("new"));
-    let mut ui = Ui::new(badge.render(), Theme::light());
+    let context = Application::new().context().clone();
+    let badge = Badge::new(&context, String::from("new"));
+    let mut ui = Ui::new(&context, badge.clone(), Theme::light());
     let viewport = FrameInput::new(320, 240, 1.0);
     ui.update(viewport);
     let node = ui.find_by_key("badge").unwrap();

@@ -76,7 +76,7 @@ pub struct Element {
     pub(crate) style: StyleRefinement,
     pub(crate) style_binding: Option<StyleBinding>,
     /// Sheet for this element only. Children do not inherit it.
-    pub(crate) stylesheet: Option<&'static Stylesheet>,
+    pub(crate) stylesheet: Option<Arc<Stylesheet>>,
     pub(crate) on_click: Option<ClickHandler>,
     pub(crate) on_hover: Option<HoverHandler>,
     pub(crate) children: Vec<Element>,
@@ -233,7 +233,7 @@ impl Element {
     /// Stylesheet for this element only. Class names it defines win over the theme on this
     /// element; child elements keep resolving against the theme.
     #[must_use]
-    pub fn stylesheet(mut self, stylesheet: &'static Stylesheet) -> Self {
+    pub fn stylesheet(mut self, stylesheet: Arc<Stylesheet>) -> Self {
         self.stylesheet = Some(stylesheet);
         self
     }
@@ -399,30 +399,36 @@ impl fmt::Debug for Element {
 ///
 /// [`stylesheet`](Component::stylesheet) is stamped onto every node `render` returns that does not
 /// already carry a sheet. It is not registered on the theme. A class the sheet does not define
-/// still resolves against the theme. [`Stylesheet::empty`] is not stamped.
-pub trait Component {
-    fn render(self) -> Element;
+/// still resolves against the theme. `None` is not stamped.
+pub trait HasContext {
+    fn context(&self) -> &crate::Context;
+}
 
-    fn stylesheet() -> &'static Stylesheet {
-        Stylesheet::empty()
+pub trait Component: HasContext + Clone {
+    fn render(&self, context: &crate::Context) -> Element;
+
+    fn stylesheet() -> Option<Arc<Stylesheet>> {
+        None
     }
 }
 
-impl<C: Component> From<C> for Element {
+impl<C: Component + 'static> From<C> for Element {
     fn from(component: C) -> Self {
-        let mut element = component.render();
-        element.slot_owner = COMPONENT_SLOT_OWNER;
-        let sheet = C::stylesheet();
-        if !std::ptr::eq(sheet, Stylesheet::empty()) {
-            stamp_stylesheet(&mut element, sheet);
-        }
-        element
+        let context = component.context().clone();
+        context.with(&component, || {
+            let mut element = component.render(&context);
+            element.slot_owner = COMPONENT_SLOT_OWNER;
+            if let Some(sheet) = C::stylesheet() {
+                stamp_stylesheet(&mut element, &sheet);
+            }
+            element
+        })
     }
 }
 
-fn stamp_stylesheet(element: &mut Element, sheet: &'static Stylesheet) {
+fn stamp_stylesheet(element: &mut Element, sheet: &Arc<Stylesheet>) {
     if element.stylesheet.is_none() {
-        element.stylesheet = Some(sheet);
+        element.stylesheet = Some(Arc::clone(sheet));
     }
     for child in &mut element.children {
         stamp_stylesheet(child, sheet);
@@ -433,11 +439,21 @@ fn stamp_stylesheet(element: &mut Element, sheet: &'static Stylesheet) {
 mod tests {
     use super::*;
 
-    struct Badge(&'static str);
+    #[derive(Clone)]
+    struct Badge {
+        context: crate::Context,
+        text: &'static str,
+    }
+
+    impl HasContext for Badge {
+        fn context(&self) -> &crate::Context {
+            &self.context
+        }
+    }
 
     impl Component for Badge {
-        fn render(self) -> Element {
-            text(self.0).class("badge")
+        fn render(&self, _context: &crate::Context) -> Element {
+            text(self.text).class("badge")
         }
     }
 
@@ -450,7 +466,10 @@ mod tests {
 
     #[test]
     fn components_convert_into_elements() {
-        let element = div().child(Badge("new"));
+        let element = div().child(Badge {
+            context: crate::Application::new().context().clone(),
+            text: "new",
+        });
         assert!(element.children[0].is_text());
         assert_eq!(element.children[0].classes[0].as_str(), "badge");
     }

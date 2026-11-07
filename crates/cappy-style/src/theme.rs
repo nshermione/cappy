@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use crate::{Style, StyleRefinement, TextStyle, Tokens};
 
@@ -95,12 +95,6 @@ pub struct Stylesheet {
 }
 
 impl Stylesheet {
-    /// A sheet with no classes. Component stylesheets fall back to this.
-    pub fn empty() -> &'static Self {
-        static EMPTY: LazyLock<Stylesheet> = LazyLock::new(Stylesheet::default);
-        &EMPTY
-    }
-
     /// Defines or replaces a class. `selector` may end in `:hover` or `:active`.
     pub fn set_class(&mut self, selector: impl AsRef<str>, refinement: StyleRefinement) {
         let (name, variant) = ClassVariant::split(selector.as_ref());

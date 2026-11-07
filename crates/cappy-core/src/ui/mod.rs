@@ -16,6 +16,7 @@ use cappy_style::{Style, Theme};
 use crate::element::Element;
 use crate::paint::{Primitive, RenderFrame};
 use crate::reactive::{BindingQueue, Signal};
+use crate::Context;
 use crate::{CursorIcon, Damage, DamageTracker};
 use bindings::{Binding, BindingKind};
 pub use node::NodeId;
@@ -50,6 +51,10 @@ pub struct ResourceCensus {
     pub owner_capacity: usize,
     pub live_owners: usize,
     pub text_measurements: usize,
+    pub listeners: usize,
+    pub listener_capacity: usize,
+    pub live_listeners: usize,
+    pub singletons: usize,
 }
 
 /// Size and scale of the surface the UI is drawn on.
@@ -124,18 +129,28 @@ impl Ui {
     /// Mounts `root` with a fixed theme. Use [`Ui::set_theme`] or [`Ui::theme_signal`] to switch.
     ///
     /// The theme signal created here is disposed when this `Ui` drops.
-    pub fn new(root: impl Into<Element>, theme: Theme) -> Self {
-        Self::with_owned_theme(root, Signal::new(Arc::new(theme)), true)
+    pub fn new(context: &Context, root: impl Into<Element>, theme: Theme) -> Self {
+        Self::with_owned_theme(
+            context,
+            root,
+            context.signal(Arc::new(theme)),
+            true,
+        )
     }
 
     /// Mounts `root` and follows `theme`: setting the signal restyles the whole UI.
     ///
     /// `theme` stays alive after this `Ui` drops. The caller owns that signal.
-    pub fn with_theme_signal(root: impl Into<Element>, theme: Signal<Arc<Theme>>) -> Self {
-        Self::with_owned_theme(root, theme, false)
+    pub fn with_theme_signal(
+        context: &Context,
+        root: impl Into<Element>,
+        theme: Signal<Arc<Theme>>,
+    ) -> Self {
+        Self::with_owned_theme(context, root, theme, false)
     }
 
     fn with_owned_theme(
+        context: &Context,
         root: impl Into<Element>,
         theme: Signal<Arc<Theme>>,
         owns_theme: bool,
@@ -148,7 +163,7 @@ impl Ui {
             bindings: Vec::new(),
             free_bindings: Vec::new(),
             flows: Vec::new(),
-            queue: Rc::new(BindingQueue::default()),
+            queue: Rc::new(BindingQueue::new(Rc::clone(&context.runtime))),
             theme_signal: theme,
             owns_theme,
             theme: initial_theme,
@@ -197,7 +212,12 @@ impl Ui {
     /// copy kept outside panics on the next read. A signal passed to [`Ui::with_theme_signal`]
     /// is not disposed.
     pub fn theme_signal(&self) -> Signal<Arc<Theme>> {
-        self.theme_signal
+        self.theme_signal.clone()
+    }
+
+    /// True when `context` is the runtime this UI mounts signals into.
+    pub fn shares_context(&self, context: &Context) -> bool {
+        Rc::ptr_eq(&self.queue.runtime, &context.runtime)
     }
 
     pub fn set_theme(&mut self, theme: Theme) {
@@ -359,15 +379,15 @@ impl Ui {
         if self.pressed.is_some_and(|id| !self.is_current(id)) {
             self.pressed = None;
         }
-        crate::reactive::reclaim_unused_slots();
+        crate::reactive::reclaim_unused_slots(&self.queue.runtime);
     }
 
-    /// Counts every arena this UI and the thread-local reactive runtime still hold.
+    /// Counts the arenas this UI still holds, including signals and owners in its context.
     ///
-    /// Take a snapshot, run the operation, and compare. The reactive fields cover the whole
-    /// thread, so compare two snapshots from the same thread.
+    /// Take a snapshot, run the operation, and compare. Another `Ui` on another context has its
+    /// own counts.
     pub fn resources(&self) -> ResourceCensus {
-        let runtime = crate::reactive::runtime_census();
+        let runtime = crate::reactive::runtime_census(&self.queue.runtime);
         ResourceCensus {
             nodes: self.nodes.len(),
             node_capacity: self.nodes.capacity(),
@@ -391,6 +411,10 @@ impl Ui {
             owner_capacity: runtime.owner_capacity,
             live_owners: runtime.live_owners,
             text_measurements: self.measurer.cached_measurements(),
+            listeners: runtime.listeners,
+            listener_capacity: runtime.listener_capacity,
+            live_listeners: runtime.live_listeners,
+            singletons: runtime.singletons,
         }
     }
 }
@@ -399,7 +423,7 @@ impl Drop for Ui {
     fn drop(&mut self) {
         self.dispose_tree();
         if self.owns_theme {
-            self.theme_signal.dispose();
+            self.theme_signal.clone().dispose();
         }
     }
 }

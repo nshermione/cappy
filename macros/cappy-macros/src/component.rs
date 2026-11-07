@@ -5,7 +5,7 @@ use syn::{Attribute, DeriveInput, Field, Generics, Token, Type, parse_quote, spa
 
 use crate::reactive::{named_fields, tracked_impls, with_into_reactive};
 
-const RESERVED: &[&str] = &["class", "style", "key"];
+const RESERVED: &[&str] = &["class", "style", "key", "context"];
 
 enum FieldKind {
     State,
@@ -41,8 +41,7 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     let vis = &input.vis;
     let name = &input.ident;
     let attrs = without_default_derive(&input.attrs)?;
-    let generics = with_into_reactive(&input.generics);
-    let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
+    let mut generics = with_into_reactive(&input.generics);
     let struct_fields = fields
         .iter()
         .zip(&kinds)
@@ -75,7 +74,6 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
             pub const #name: ::cappy::Slot<Self, #ty> = ::cappy::Slot::new(#index);
         })
     });
-    let default_impl = default_impl(&generics, name, &fields, &kinds);
     let copy_types: Vec<TokenStream> = fields
         .iter()
         .zip(&kinds)
@@ -87,26 +85,43 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
             }
         })
         .collect();
+    {
+        let predicates = &mut generics.make_where_clause().predicates;
+        for ty in &copy_types {
+            predicates.push(parse_quote!(#ty: ::core::clone::Clone));
+        }
+    }
+    let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
     let tracked = tracked_impls(name, &generics, &copy_types);
 
+    let open = open_method(&generics, name, &fields, &kinds);
     Ok(quote! {
+        #[derive(Clone)]
         #(#attrs)*
         #vis struct #name #impl_generics #where_clause {
+            context: ::cappy::Context,
             #(#struct_fields)*
         }
 
         impl #impl_generics #name #type_generics #where_clause {
-            pub fn new(#(#new_args),*) -> Self {
+            pub fn new(cx: &::cappy::Context, #(#new_args),*) -> Self {
                 Self {
+                    context: cx.clone(),
                     #(#new_inits,)*
                 }
             }
 
+            #open
             #(#setters)*
             #(#slot_consts)*
         }
 
-        #default_impl
+        impl #impl_generics ::cappy::HasContext for #name #type_generics #where_clause {
+            fn context(&self) -> &::cappy::Context {
+                &self.context
+            }
+        }
+
         #tracked
     })
 }
@@ -250,19 +265,20 @@ fn field_init(field: &Field, kind: &FieldKind, default_value: bool) -> TokenStre
     let name = field.ident.as_ref().expect("named field");
     let ty = &field.ty;
     match kind {
-        FieldKind::Event => quote!(#name: ::cappy::Listener::empty()),
+        FieldKind::Event => quote!(#name: ::cappy::Listener::empty(cx)),
         FieldKind::Slot(index) => quote!(#name: ::cappy::Slot::new(#index)),
         FieldKind::Prop if default_value => {
             quote!(
                 #name: <#ty as ::cappy::IntoReactive>::into_prop_default(
-                    <#ty as ::core::default::Default>::default()
+                    <#ty as ::core::default::Default>::default(),
+                    cx,
                 )
             )
         }
         FieldKind::State if default_value => {
-            quote!(#name: ::cappy::reactive(<#ty as ::core::default::Default>::default()))
+            quote!(#name: cx.reactive(<#ty as ::core::default::Default>::default()))
         }
-        FieldKind::State | FieldKind::Prop => quote!(#name: ::cappy::reactive(#name)),
+        FieldKind::State | FieldKind::Prop => quote!(#name: cx.reactive(#name)),
     }
 }
 
@@ -282,7 +298,7 @@ fn setter(field: &Field, kind: &FieldKind) -> Option<TokenStream> {
             where
                 __Value: ::cappy::PropInput<#ty, __Marker>,
             {
-                let previous = self.#name;
+                let previous = self.#name.clone();
                 ::cappy::PropInput::apply(value, &mut self.#name);
                 if previous != self.#name {
                     ::cappy::RetirePlaceholder::dispose_if_placeholder(previous);
@@ -319,33 +335,42 @@ fn is_unit(ty: &Type) -> bool {
     matches!(ty, Type::Tuple(tuple) if tuple.elems.is_empty())
 }
 
-fn default_impl(
+/// `open` is what `ui!` `@Type` calls. State and props start from [`Default`].
+fn open_method(
     generics: &Generics,
-    name: &syn::Ident,
+    _name: &syn::Ident,
     fields: &[&Field],
     kinds: &[FieldKind],
 ) -> TokenStream {
-    let mut generics = generics.clone();
-    {
-        let predicates = &mut generics.make_where_clause().predicates;
-        for (field, kind) in fields.iter().zip(kinds) {
+    let _ = generics;
+    let bounds: Vec<_> = fields
+        .iter()
+        .zip(kinds)
+        .filter_map(|(field, kind)| {
             if matches!(kind, FieldKind::State | FieldKind::Prop) {
                 let ty = &field.ty;
-                predicates.push(parse_quote!(#ty: ::core::default::Default));
+                Some(quote!(#ty: ::core::default::Default))
+            } else {
+                None
             }
-        }
-    }
+        })
+        .collect();
+    let where_clause = if bounds.is_empty() {
+        quote!()
+    } else {
+        quote!(where #(#bounds,)*)
+    };
     let inits = fields
         .iter()
         .zip(kinds)
         .map(|(field, kind)| field_init(field, kind, true));
-    let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
     quote! {
-        impl #impl_generics ::core::default::Default for #name #type_generics #where_clause {
-            fn default() -> Self {
-                Self {
-                    #(#inits,)*
-                }
+        pub fn open(cx: &::cappy::Context) -> Self
+        #where_clause
+        {
+            Self {
+                context: cx.clone(),
+                #(#inits,)*
             }
         }
     }

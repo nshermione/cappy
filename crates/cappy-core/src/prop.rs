@@ -39,7 +39,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::PropInput;
-    use crate::reactive;
+    use crate::Application;
 
     fn write<T, Value, Marker>(slot: &mut crate::Reactive<T>, value: Value)
     where
@@ -51,14 +51,15 @@ mod tests {
 
     #[test]
     fn values_write_through_and_handles_alias() {
-        let mut slot = reactive(String::from("old"));
-        let original = slot;
+        let context = Application::new().context().clone();
+        let mut slot = context.reactive(String::from("old"));
+        let original = slot.clone();
         write(&mut slot, "next");
         assert_eq!(slot.get(), "next");
         assert_eq!(original.get(), "next");
 
-        let handle = reactive(String::from("alias"));
-        write(&mut slot, handle);
+        let handle = context.reactive(String::from("alias"));
+        write(&mut slot, handle.clone());
         assert_eq!(slot, handle);
         handle.set(String::from("updated"));
         assert_eq!(slot.get(), "updated");

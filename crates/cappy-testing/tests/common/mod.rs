@@ -5,8 +5,8 @@
 use std::sync::{Arc, OnceLock};
 
 use cappy_core::{
-    Color, ColorToken, Damage, Element, FrameInput, Radius, RenderFrame, Signal, Theme, Ui, div,
-    text,
+    Application, Color, ColorToken, Context, Damage, Element, FrameInput, Radius, RenderFrame,
+    Signal, Theme, Ui, div, text,
 };
 use cappy_dsl::{style, ui};
 use cappy_testing::TestUi;
@@ -23,8 +23,12 @@ pub fn fonts() -> &'static FontContext {
     FONTS.get_or_init(FontContext::from_system)
 }
 
-pub fn harness(root: Element) -> TestUi {
-    let mut ui = Ui::new(root, Theme::light());
+pub fn context() -> Context {
+    Application::new().context().clone()
+}
+
+pub fn harness(context: &Context, root: Element) -> TestUi {
+    let mut ui = Ui::new(context, root, Theme::light());
     ui.set_text_measurer(CosmicTextMeasurer::new(fonts()));
     let mut harness = TestUi::from_ui(ui);
     harness.resize(VIEWPORT);
@@ -36,10 +40,11 @@ pub fn background() -> Color {
 }
 
 pub fn counter(count: Signal<i32>) -> Element {
+    let label = count.clone();
     ui! {
         div(class = "app") {
             div(class = "row", key = "row") {
-                text(:format!("Count: {}", count.get()), key = "label")
+                text(:format!("Count: {}", label.get()), key = "label")
                 div(class = "btn btn-primary", key = "increment", on_click = move |_| count.update(|n| *n += 1)) {
                     text("+1")
                 }

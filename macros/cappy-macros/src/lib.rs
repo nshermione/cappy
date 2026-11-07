@@ -4,7 +4,7 @@
 //! - `#[derive(ClassName)]` turns a fieldless enum into typo-proof theme class names.
 //! - `stylesheet!` defines those class names together with their style rules.
 //! - `#[reactive]` rewrites a struct in place so each field is tracked and the struct keeps its name.
-//!   `#[reactive(singleton)]` also adds one thread-local `singleton()`.
+//!   `#[reactive(singleton)]` is read with `cx.singleton(Type)`.
 //! - `#[component]` is a reactive struct whose plain fields are state, `#[prop]` fields are inputs,
 //!   `#[event]` fields are listeners and `#[slot]` fields are positions for parent children.
 
@@ -13,6 +13,7 @@ mod component;
 mod props;
 mod reactive;
 mod stylesheet;
+mod ui_closure;
 
 use proc_macro::TokenStream;
 use quote::quote;
@@ -77,9 +78,11 @@ pub fn derive_class_name(input: TokenStream) -> TokenStream {
 /// its name. `new` passes each argument through `reactive`. A field that is already reactive stays
 /// that handle.
 ///
-/// `#[reactive(singleton)]` also adds `singleton()`: one value per thread, stored inside that
-/// function, starting from [`Default`](core::default::Default) for each field. The struct must
-/// stay [`Copy`](core::marker::Copy), which it does when every tracked field is.
+/// `#[reactive(singleton)]` implements [`Singleton`](cappy::Singleton) and a marker with the
+/// struct's name. `cx.singleton(Type)` returns the one value stored in that
+/// [`Context`](cappy::Context), starting from
+/// [`Default`](core::default::Default) for each field. The struct stays
+/// [`Clone`](core::clone::Clone) when every tracked field is.
 ///
 /// A `#[component]` struct is already tracked. Remove `#[reactive]` from it.
 #[proc_macro_attribute]
@@ -112,7 +115,7 @@ fn singleton_attribute(attr: TokenStream) -> syn::Result<bool> {
 /// A single-file component. Plain fields become reactive state, `#[prop]` fields are parent
 /// inputs, `#[event]` fields are listeners, and `#[slot]` fields are positions for parent children.
 /// A slot field is stored as a [`Copy`](core::marker::Copy) marker, not the child element, and its
-/// type must be `Element`. The macro implements [`Default`](core::default::Default).
+/// type must be `Element`. The macro adds `new(cx, ...)`, `open(cx)` and [`Clone`](core::clone::Clone).
 /// Do not also derive `Default` or apply `#[reactive]`. `render` stays a handwritten `Component` impl.
 ///
 /// `class`, `style` and `key` are reserved for the root element.
@@ -132,6 +135,16 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
         .into()
 }
 
+/// Expands to the caller's `cx`. The anchor's span is the call site, so `cx` resolves there
+/// instead of inside `ui!`.
+#[doc(hidden)]
+#[proc_macro]
+pub fn context_in_scope(input: TokenStream) -> TokenStream {
+    let anchor = parse_macro_input!(input as Ident);
+    let cx = Ident::new("cx", anchor.span());
+    quote!(#cx).into()
+}
+
 /// Expands to `self.field` in the caller's method, so `slot(field)` inside `ui!` reads that field.
 #[doc(hidden)]
 #[proc_macro]
@@ -139,6 +152,16 @@ pub fn slot_self(input: TokenStream) -> TokenStream {
     let field = parse_macro_input!(input as Ident);
     let receiver = Ident::new("self", field.span());
     quote!(#receiver.#field).into()
+}
+
+/// Clones each `self.field` used in a `ui!` closure, then builds that closure.
+///
+/// The lets sit outside the closure, so `text(:format!("{}", self.label))` does not capture
+/// `&self`.
+#[doc(hidden)]
+#[proc_macro]
+pub fn ui_closure(input: TokenStream) -> TokenStream {
+    ui_closure::expand(input.into()).into()
 }
 
 /// Defines class names and their style rules together.
