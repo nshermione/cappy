@@ -199,6 +199,36 @@ fn singleton_is_shared_and_new_is_separate() {
     ints.value.set(0);
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Reactive)]
+struct Label(String);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Reactive)]
+enum Mode {
+    #[default]
+    One,
+    Two,
+}
+
+#[derive(Copy)]
+#[store]
+struct Screen {
+    tab: Mode,
+}
+
+#[test]
+fn derive_reactive_wraps_a_plain_value() {
+    let context = Application::new().context().clone();
+    let label = context.reactive(Label(String::from("a")));
+    assert_eq!(label.get(), Label(String::from("a")));
+    label.set(Label(String::from("b")));
+    assert_eq!(label.get(), Label(String::from("b")));
+
+    let screen = context.use_store(Screen);
+    assert_eq!(screen.tab.get(), Mode::One);
+    screen.tab.set(Mode::Two);
+    assert_eq!(context.use_store(Screen).tab.get(), Mode::Two);
+}
+
 #[test]
 fn reactive_component_label_updates_after_mount() {
     let context = Application::new().context().clone();

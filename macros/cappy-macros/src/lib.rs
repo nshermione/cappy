@@ -2,6 +2,9 @@
 //!
 //! - `#[derive(Props)]` generates builder setters for a component's fields.
 //! - `#[derive(ClassName)]` turns a fieldless enum into typo-proof theme class names.
+//! - `#[derive(Reactive)]` stores a plain `'static` struct or enum in a [`Reactive`](cappy::Reactive)
+//!   handle. [`Reactive`](cappy::Reactive) itself, a [`Signal`](cappy::Signal), and a `#[store]` or
+//!   `#[component]` struct stay as they are, so this cannot be a blanket impl.
 //! - `stylesheet!` defines those class names together with their style rules.
 //! - `#[store]` rewrites a struct in place so each field is tracked and the struct keeps its name.
 //!   `cx.use_store(Type)` returns the one value of that struct in the context.
@@ -12,6 +15,7 @@
 
 mod class_name;
 mod component;
+mod derive_reactive;
 mod props;
 mod reactive;
 mod stylesheet;
@@ -49,6 +53,30 @@ pub fn derive_props(input: TokenStream) -> TokenStream {
         .into()
 }
 
+/// Stores a plain `'static` struct or enum in a [`Reactive`](cappy::Reactive) handle.
+///
+/// The generated [`IntoReactive`](cappy::IntoReactive) impl is the one a hand-written plain type
+/// would use: [`Reactive::new`](cappy::Reactive::new). Primitives, [`String`](String) and
+/// [`Option`](Option) stay special because their prop default is a placeholder. A blanket impl
+/// would also clash with [`Reactive`](cappy::Reactive), [`Signal`](cappy::Signal), and with
+/// `#[store]` and `#[component]` structs, which must come back unchanged.
+///
+/// ```ignore
+/// #[derive(Clone, Copy, PartialEq, Eq, Default, Reactive)]
+/// enum Tab {
+///     #[default]
+///     Counter,
+///     Paint,
+/// }
+/// ```
+#[proc_macro_derive(Reactive)]
+pub fn derive_reactive(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    derive_reactive::expand(&input)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
 /// Maps each variant of a fieldless enum to a kebab-case class name (`BtnPrimary` becomes
 /// `"btn-primary"`), overridable with `#[class(name = "...")]`. Generates `as_str`, `ALL`,
 /// `Display` and `AsRef<str>`.
@@ -68,6 +96,7 @@ pub fn derive_props(input: TokenStream) -> TokenStream {
 /// assert_eq!(Class::Heading.to_string(), "title");
 /// assert_eq!(Class::ALL.len(), 3);
 /// ```
+
 #[proc_macro_derive(ClassName, attributes(class))]
 pub fn derive_class_name(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);

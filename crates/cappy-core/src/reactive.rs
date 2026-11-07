@@ -831,6 +831,11 @@ impl<T: Clone + 'static> Reactive<T> {
 }
 
 /// A value [`Context::reactive`] can turn into a tracked handle, or leave unchanged when it already is one.
+///
+/// `#[derive(Reactive)]` writes the plain impl for a `'static` struct or enum. A blanket impl would
+/// clash with [`Reactive`], [`Signal`], and with a `#[store]` or `#[component]` struct, which stay
+/// as they are. Primitives, [`String`] and [`Option`] also stay separate: their prop default is a
+/// placeholder the setter can drop.
 pub trait IntoReactive {
     /// The tracked form of this value.
     type Output;
@@ -870,7 +875,7 @@ impl crate::Context {
     /// A primitive, [`String`], [`Option`], [`Vec`] or [`Arc`](std::sync::Arc) becomes one
     /// [`Reactive`] handle. A `#[store]` struct is already tracked, so it is returned as itself.
     /// [`Reactive`] and [`Signal`] become a [`Reactive`] handle without wrapping them again.
-    /// Another plain type does the same when it implements [`IntoReactive`] with [`Reactive::new`].
+    /// Another plain type does the same through `#[derive(Reactive)]`.
     pub fn reactive<T: IntoReactive>(&self, value: T) -> T::Output {
         value.into_reactive(self)
     }

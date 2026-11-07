@@ -1,0 +1,5 @@
+error: #[derive(Reactive)] only supports structs and enums
+ --> tests/compile_fail/reactive_derive_union.rs:4:7
+  |
+4 | union Bits {
+  |       ^^^^

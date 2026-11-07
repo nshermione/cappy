@@ -2,21 +2,13 @@
 
 use cappy::prelude::*;
 
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default, Reactive)]
 pub enum Tab {
     #[default]
     Counter,
     Tiles,
     Checklist,
     Paint,
-}
-
-impl IntoReactive for Tab {
-    type Output = Reactive<Tab>;
-
-    fn into_reactive(self, context: &Context) -> Self::Output {
-        Reactive::new(context, self)
-    }
 }
 
 #[derive(Copy)]

@@ -1,0 +1,5 @@
+error: #[derive(Reactive)] only supports 'static types
+ --> tests/compile_fail/reactive_derive_lifetime.rs:4:17
+  |
+4 | struct Borrowed<'a> {
+  |                 ^^
