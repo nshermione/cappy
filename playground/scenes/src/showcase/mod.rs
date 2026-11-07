@@ -3,26 +3,36 @@
 //! - [`theme`]: design tokens (colors, spacing, radius, font sizes), the only thing that differs
 //!   between themes;
 //! - [`style`]: the stylesheet, i.e. the classes the layout uses, applied to every theme;
-//! - [`layout`]: the node tree, its state and its event handlers, with no styling of its own;
-//! - [`counter`]: a composable with one singleton per context and separate `new` instances;
-//! - [`badge`]: a single-file component with its own state, props, event, slots and sheet.
-//!   Its demo nests one badge inside another's slot.
+//! - [`layout`]: the shell (header and tab bar). Each tab is its own component;
+//! - [`store`]: singletons for one context. [`store::Counter`] is the shared count.
+//!   [`store::App`] is the open tab;
+//! - [`counter`]: the counter tab. It reads [`store::Counter`] and hosts one badge;
+//! - [`badge`]: a component with its own state, a prop, an event, slots and a sheet.
+//!   The counter tab hosts one. Badges are not nested;
+//! - [`tiles`]: the tiles tab;
+//! - [`checklist`]: the checklist tab;
+//! - [`paint`]: the paint tab (linear gradients, drop shadows and a fitted image).
 
 mod badge;
+mod checklist;
 mod counter;
 mod layout;
+mod paint;
+mod store;
 mod style;
 mod theme;
+mod tiles;
 
 use std::rc::Rc;
 use std::sync::Arc;
 
 use cappy::prelude::*;
 
-/// Header with a theme switcher, and one tab per demo: counter, tiles, checklist, nested badge.
+/// Header with a theme switcher, and one tab per demo: counter, tiles, checklist, paint.
 pub fn showcase(cx: &Context) -> Ui {
-    // A context reused for another scene still holds the previous singleton.
-    cx.use_store(counter::Counter).reset();
+    // A context reused for another scene still holds the previous singletons.
+    cx.use_store(store::Counter).reset();
+    cx.use_store(store::App).select(store::Tab::Counter);
     let themes: Rc<[Arc<Theme>]> = theme::themes()
         .into_iter()
         .map(|tokens| Arc::new(style::stylesheet(tokens)))

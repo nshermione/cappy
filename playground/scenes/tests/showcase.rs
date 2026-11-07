@@ -1,4 +1,4 @@
-use cappy::{Application, Damage};
+use cappy::{Application, Background, Damage};
 use cappy_testing::TestUi;
 use playground_scenes::showcase;
 
@@ -138,40 +138,73 @@ fn for_keeps_a_task_row_when_it_moves() {
 }
 
 #[test]
-fn badge_slots_sit_on_either_side_of_the_label() {
+fn badge_sits_with_the_counter() {
     let mut harness = harness();
-    open_tab(&mut harness, "tab-badge");
 
-    let outer = harness.node("outer-badge");
-    let outer_children = harness.ui().node_children(outer).to_vec();
-    let inner = harness.node("inner-badge");
-    let inner_children = harness.ui().node_children(inner).to_vec();
-    assert_eq!(outer_children.len(), 3);
-    assert_eq!(outer_children[0], inner);
-    assert_eq!(outer_children[2], harness.node("outer-tail"));
-    assert_eq!(
-        harness.ui().node_text(outer_children[1]),
-        Some("Outer (0) c:0")
-    );
-    assert_eq!(harness.ui().node_text(outer_children[2]), Some("end"));
-    assert_eq!(inner_children.len(), 2);
-    assert_eq!(inner_children[0], harness.node("inner-mark"));
-    assert_eq!(harness.ui().node_text(inner_children[0]), Some("•"));
-    assert_eq!(
-        harness.ui().node_text(inner_children[1]),
-        Some("Inner (0) c:0")
-    );
+    let badge = harness.node("counter-badge");
+    let children = harness.ui().node_children(badge).to_vec();
+    assert_eq!(children.len(), 3);
+    assert_eq!(children[0], harness.node("badge-mark"));
+    assert_eq!(harness.ui().node_text(children[0]), Some("•"));
+    assert_eq!(harness.ui().node_text(children[1]), Some("Badge (0) c:0"));
+    assert_eq!(children[2], harness.node("badge-tail"));
+    assert_eq!(harness.ui().node_text(children[2]), Some("end"));
 
-    harness.click("inner-badge");
+    harness.click("counter-badge");
     harness.update();
-    assert_eq!(
-        harness.ui().node_text(inner_children[1]),
-        Some("Inner (1) c:1")
+    assert_eq!(harness.ui().node_text(children[1]), Some("Badge (1) c:1"));
+    assert_eq!(harness.text("count"), "Count: 1");
+    assert_eq!(harness.text("count-mirror"), "Count: 1");
+    assert_eq!(harness.text("count-local"), "Local: 0");
+}
+
+#[test]
+fn paint_tab_uses_gradient_shadow_and_image() {
+    let mut harness = harness();
+    open_tab(&mut harness, "tab-paint");
+
+    let gradient = harness
+        .ui()
+        .node_style(harness.node("gradient-right"))
+        .unwrap();
+    assert!(matches!(
+        gradient.visual.background,
+        Background::Linear { .. }
+    ));
+    assert!(
+        harness
+            .ui()
+            .node_style(harness.node("shadow-soft"))
+            .unwrap()
+            .visual
+            .shadow
+            .is_visible()
     );
-    assert_eq!(
-        harness.ui().node_text(outer_children[1]),
-        Some("Outer (0) c:1")
-    );
+    assert_eq!(harness.text("shadow-state"), "Resting");
+    let resting = harness
+        .ui()
+        .node_style(harness.node("shadow-card"))
+        .unwrap()
+        .visual
+        .shadow
+        .offset_y;
+
+    harness.click("shadow-toggle");
+    assert!(matches!(harness.damage(), Damage::Regions(_)));
+    harness.update();
+    assert_eq!(harness.text("shadow-state"), "Lifted");
+    let lifted = harness
+        .ui()
+        .node_style(harness.node("shadow-card"))
+        .unwrap()
+        .visual
+        .shadow
+        .offset_y;
+    assert!(lifted > resting);
+
+    assert!(harness.rect("picture-contain").width > 0.0);
+    assert!(harness.rect("picture-cover").width > 0.0);
+    assert!(harness.rect("picture-fill").width > 0.0);
 }
 
 #[test]

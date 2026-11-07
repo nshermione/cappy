@@ -40,6 +40,55 @@ stylesheet! {
             text_color: ColorToken::OnPrimary,
         }
         TaskDone { text_color: ColorToken::TextMuted }
+        /// Shared size of the paint-tab specimens.
+        Specimen {
+            direction: FlexDirection::Column,
+            align: Align::Center,
+            gap: Space::Sm,
+        }
+        Swatch {
+            width: 128,
+            height: 72,
+            radius: Radius::Md,
+        }
+        GradientRight {
+            @include Swatch,
+            background: linear(ColorToken::Primary, ColorToken::Success).to_right(),
+        }
+        GradientDown {
+            @include Swatch,
+            background: linear(ColorToken::Warning, ColorToken::Danger).to_bottom(),
+        }
+        GradientLeft {
+            @include Swatch,
+            background: linear(ColorToken::Primary, ColorToken::Warning).to_left(),
+        }
+        ShadowCard {
+            width: 120,
+            height: 72,
+            radius: Radius::Lg,
+            background: ColorToken::Surface,
+            align: Align::Center,
+            justify: Justify::Center,
+        }
+        ShadowSoft {
+            @include ShadowCard,
+            shadow: shadow(0, 8, 18, 0, Color::rgba(15, 23, 42, 90)),
+        }
+        ShadowHard {
+            @include ShadowCard,
+            shadow: shadow(6, 6, 0, 0, Color::rgba(15, 23, 42, 120)),
+        }
+        ShadowGlow {
+            @include ShadowCard,
+            shadow: shadow(0, 10, 22, 0, Color::rgba(14, 165, 233, 160)),
+        }
+        Picture {
+            width: 112,
+            height: 112,
+            radius: Radius::Lg,
+            background: ColorToken::SurfaceAlt,
+        }
     }
     TileSelected:hover { background: ColorToken::PrimaryHover }
     TabActive:hover { background: ColorToken::PrimaryHover }
@@ -48,6 +97,15 @@ stylesheet! {
 /// Adds the scene's own classes to `theme`.
 pub fn stylesheet(theme: Theme) -> Theme {
     Class::apply(theme)
+}
+
+/// The class list for a `:class` binding that adds `class` only while `active`.
+pub fn class_when(active: bool, class: Class) -> String {
+    if active {
+        class.to_string()
+    } else {
+        String::new()
+    }
 }
 
 #[cfg(test)]
