@@ -6,6 +6,7 @@
 //! - [`layout`]: the node tree, its state and its event handlers, with no styling of its own;
 //! - [`counter`]: a composable with one singleton per context and separate `new` instances;
 //! - [`badge`]: a single-file component with its own state, props, event, slots and sheet.
+//!   Its demo nests one badge inside another's slot.
 
 mod badge;
 mod counter;
@@ -18,7 +19,7 @@ use std::sync::Arc;
 
 use cappy::prelude::*;
 
-/// Header with a theme switcher, a counter (`show` / `if`), selectable tiles and a keyed task list.
+/// Header with a theme switcher, and one tab per demo: counter, tiles, checklist, nested badge.
 pub fn showcase(cx: &Context) -> Ui {
     // A context reused for another scene still holds the previous singleton.
     cx.use_store(counter::Counter).reset();
@@ -26,10 +27,10 @@ pub fn showcase(cx: &Context) -> Ui {
         .into_iter()
         .map(|tokens| Arc::new(style::stylesheet(tokens)))
         .collect();
-    let active_theme = cx.signal(Arc::clone(&themes[0]));
+    let active_theme = cx.reactive(Arc::clone(&themes[0]));
     Ui::with_theme_signal(
         cx,
-        layout::root(cx, cx.reactive(active_theme.clone()), themes),
+        layout::root(cx, active_theme.clone(), themes),
         active_theme,
     )
 }

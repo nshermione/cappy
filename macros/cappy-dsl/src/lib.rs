@@ -17,13 +17,12 @@ pub use cappy_macros::{context_in_scope, slot_self, ui_closure};
 ///
 /// let application = Application::new();
 /// let cx = application.context();
-/// let count = cx.signal(0);
-/// let label = count.clone();
+/// let count = cx.reactive(0_i32);
 /// let tree = ui! {
 ///     div(class = "app") {
 ///         text("Counter", class = "title"),
 ///         div(class = "row", style = style! { gap: Space::Sm }) {
-///             text(:format!("Count: {}", label.get()), key = "label"),
+///             text(:format!("Count: {}", count.get()), key = "label"),
 ///             div(class = "btn btn-primary", on_click = move |_| count.update(|n| *n += 1)) {
 ///                 text("+1")
 ///             }
@@ -57,8 +56,8 @@ pub use cappy_macros::{context_in_scope, slot_self, ui_closure};
 /// Every `field = value` calls the builder method `field(value)`. A leading `:` makes the value
 /// reactive: `:field = value` calls `field(Dynamic(move || value))` and the content `:value`
 /// calls `name(Dynamic(move || value))`, so the value is recomputed whenever a signal it reads
-/// changes. `self.field` inside that expression, and inside `show`, `if` and `for`, is cloned
-/// before the closure. The setter must accept [`Dynamic`](cappy_core::Dynamic), as `text`, `class`
+/// changes. `self.field` inside that expression, and inside `show`, `if` and `for`, is copied
+/// out before the closure. The setter must accept [`Dynamic`](cappy_core::Dynamic), as `text`, `class`
 /// and `style` do.
 ///
 /// `class` takes one class or a list: `class = [a, b]` is shorthand for `class = a, class = b`,

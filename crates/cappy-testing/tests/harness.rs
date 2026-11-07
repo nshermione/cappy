@@ -1,4 +1,4 @@
-use cappy_core::{Application, Damage, Element, Signal, Theme, UpdateOutcome, div, text};
+use cappy_core::{Application, Damage, Element, Reactive, Theme, UpdateOutcome, div, text};
 use cappy_dsl::ui;
 use cappy_testing::TestUi;
 
@@ -6,7 +6,7 @@ fn context() -> cappy_core::Context {
     Application::new().context().clone()
 }
 
-fn counter(count: Signal<i32>) -> Element {
+fn counter(count: Reactive<i32>) -> Element {
     let label = count.clone();
     ui! {
         div(class = "app") {
@@ -23,7 +23,7 @@ fn counter(count: Signal<i32>) -> Element {
 #[test]
 fn clicking_updates_the_label() {
     let cx = context();
-    let count = cx.signal(0);
+    let count = cx.reactive(0);
     let mut harness = TestUi::new(&cx, counter(count.clone()), Theme::light());
     harness.click("increment");
     harness.click("increment");
@@ -35,7 +35,7 @@ fn clicking_updates_the_label() {
 #[test]
 fn click_damage_stays_within_the_row() {
     let cx = context();
-    let mut harness = TestUi::new(&cx, counter(cx.signal(0)), Theme::light());
+    let mut harness = TestUi::new(&cx, counter(cx.reactive(0)), Theme::light());
     harness.click("increment");
     let Damage::Regions(regions) = harness.damage() else {
         panic!("a click should cause partial damage");
@@ -47,7 +47,7 @@ fn click_damage_stays_within_the_row() {
 #[test]
 fn ui_is_idle_once_settled() {
     let cx = context();
-    let mut harness = TestUi::new(&cx, counter(cx.signal(0)), Theme::light());
+    let mut harness = TestUi::new(&cx, counter(cx.reactive(0)), Theme::light());
     assert_eq!(harness.update(), UpdateOutcome::Idle);
     assert_eq!(harness.damage(), Damage::None);
 }
@@ -55,6 +55,6 @@ fn ui_is_idle_once_settled() {
 #[test]
 fn text_falls_back_to_the_first_text_child() {
     let cx = context();
-    let harness = TestUi::new(&cx, counter(cx.signal(0)), Theme::light());
+    let harness = TestUi::new(&cx, counter(cx.reactive(0)), Theme::light());
     assert_eq!(harness.text("increment"), "+1");
 }

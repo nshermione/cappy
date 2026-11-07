@@ -48,6 +48,6 @@ fn shapes_look_the_same_on_both_renderers() {
 #[test]
 fn text_and_buttons_look_the_same_on_both_renderers() {
     let cx = context();
-    let (gpu, cpu) = render_both(&cx, counter(cx.signal(0)));
+    let (gpu, cpu) = render_both(&cx, counter(cx.reactive(0)));
     assert_close("counter", &gpu, &cpu);
 }

@@ -29,7 +29,7 @@ fn shapes_match_snapshot() {
 #[test]
 fn colors_land_where_layout_put_them() {
     let cx = context();
-    let mut harness = harness(&cx, counter(cx.signal(0)));
+    let mut harness = harness(&cx, counter(cx.reactive(0)));
     let image = renderer().render(&harness.frame(), background());
     let colors = Theme::light().tokens().colors.clone();
     assert_eq!(image.pixel(1, 1), colors.background.to_rgba8());
@@ -44,7 +44,7 @@ fn colors_land_where_layout_put_them() {
 #[test]
 fn text_is_drawn_inside_its_rect() {
     let cx = context();
-    let mut harness = harness(&cx, counter(cx.signal(0)));
+    let mut harness = harness(&cx, counter(cx.reactive(0)));
     let image = renderer().render(&harness.frame(), background());
     let label = harness.rect("label");
     let background = background().to_rgba8();
@@ -61,7 +61,7 @@ fn text_is_drawn_inside_its_rect() {
 #[test]
 fn partial_repaint_matches_a_full_repaint() {
     let cx = context();
-    let mut harness = harness(&cx, counter(cx.signal(0)));
+    let mut harness = harness(&cx, counter(cx.reactive(0)));
     let mut incremental = renderer();
     incremental.render(&harness.frame(), background());
 
@@ -82,7 +82,7 @@ fn partial_repaint_matches_a_full_repaint() {
 #[test]
 fn idle_frames_keep_the_previous_pixels() {
     let cx = context();
-    let mut harness = harness(&cx, counter(cx.signal(0)));
+    let mut harness = harness(&cx, counter(cx.reactive(0)));
     let mut renderer = renderer();
     let first = renderer.render(&harness.frame(), background());
     let idle_frame = harness.frame();

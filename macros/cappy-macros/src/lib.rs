@@ -150,9 +150,9 @@ pub fn slot_self(input: TokenStream) -> TokenStream {
     quote!(#receiver.#field).into()
 }
 
-/// Clones each `self.field` used in a `ui!` closure, then builds that closure.
+/// Copies each `self.field` used in a `ui!` closure, then builds that closure.
 ///
-/// The lets sit outside the closure, so `text(:format!("{}", self.label))` does not capture
+/// The copies sit outside the closure, so `text(:format!("{}", self.label))` does not capture
 /// `&self`.
 #[doc(hidden)]
 #[proc_macro]

@@ -12,10 +12,15 @@ stylesheet! {
             align: Align::Center,
             justify: Justify::SpaceBetween,
         }
-        CardRow {
+        TabBar {
             direction: FlexDirection::Row,
-            align: Align::Stretch,
-            gap: Space::Lg,
+            align: Align::Center,
+            gap: Space::Sm,
+        }
+        TabActive {
+            background: ColorToken::Primary,
+            border_color: ColorToken::Primary,
+            text_color: ColorToken::OnPrimary,
         }
         Grow { flex_grow: 1.0 }
         Count { font_size: FontSize::Xl }
@@ -37,6 +42,7 @@ stylesheet! {
         TaskDone { text_color: ColorToken::TextMuted }
     }
     TileSelected:hover { background: ColorToken::PrimaryHover }
+    TabActive:hover { background: ColorToken::PrimaryHover }
 }
 
 /// Adds the scene's own classes to `theme`.

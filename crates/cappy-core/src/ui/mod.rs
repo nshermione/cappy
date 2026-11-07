@@ -16,7 +16,7 @@ use cappy_style::{Style, Theme};
 use crate::Context;
 use crate::element::Element;
 use crate::paint::{Primitive, RenderFrame};
-use crate::reactive::{BindingQueue, Signal};
+use crate::reactive::{BindingQueue, Reactive, Signal};
 use crate::{CursorIcon, Damage, DamageTracker};
 use bindings::{Binding, BindingKind};
 pub use node::NodeId;
@@ -133,15 +133,15 @@ impl Ui {
         Self::with_owned_theme(context, root, context.signal(Arc::new(theme)), true)
     }
 
-    /// Mounts `root` and follows `theme`: setting the signal restyles the whole UI.
+    /// Mounts `root` and follows `theme`: setting the handle restyles the whole UI.
     ///
-    /// `theme` stays alive after this `Ui` drops. The caller owns that signal.
+    /// `theme` stays alive after this `Ui` drops. The caller owns that handle.
     pub fn with_theme_signal(
         context: &Context,
         root: impl Into<Element>,
-        theme: Signal<Arc<Theme>>,
+        theme: Reactive<Arc<Theme>>,
     ) -> Self {
-        Self::with_owned_theme(context, root, theme, false)
+        Self::with_owned_theme(context, root, theme.as_signal(), false)
     }
 
     fn with_owned_theme(
@@ -204,7 +204,7 @@ impl Ui {
     /// The theme this UI follows.
     ///
     /// When the UI was built with [`Ui::new`], the signal is disposed as the `Ui` drops, and any
-    /// copy kept outside panics on the next read. A signal passed to [`Ui::with_theme_signal`]
+    /// copy kept outside panics on the next read. A handle passed to [`Ui::with_theme_signal`]
     /// is not disposed.
     pub fn theme_signal(&self) -> Signal<Arc<Theme>> {
         self.theme_signal.clone()

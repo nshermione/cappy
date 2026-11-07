@@ -1,7 +1,9 @@
-//! One file for the badge: state, a parent prop, a click event, two slots and its sheet.
+//! One file for the badge: state, a parent prop, a click event, two slots, its sheet, and a
+//! demo that nests one badge in another's slot.
 
 use std::sync::Arc;
 
+use cappy::Class as ThemeClass;
 use cappy::ClickEvent;
 use cappy::prelude::*;
 
@@ -47,6 +49,24 @@ impl Component for Badge {
                 slot(icon)
                 text(:format!("{} ({}) c:{}", self.label, self.hits, counter.count), key = "badge-label")
                 slot(tail)
+            }
+        }
+    }
+}
+
+/// An outer badge whose icon slot is another badge. Each instance keeps its own `hits`.
+pub fn nested(cx: &Context) -> Element {
+    ui! {
+        div(class = ThemeClass::Column) {
+            text(
+                "Each badge keeps its own hits. c: is the shared counter.",
+                class = ThemeClass::Muted,
+            )
+            @Badge(label = "Outer", key = "outer-badge") {
+                @Badge(label = "Inner", key = "inner-badge", slot = icon) {
+                    text("•", key = "inner-mark", slot = icon)
+                }
+                text("end", key = "outer-tail", slot = tail)
             }
         }
     }

@@ -6,7 +6,7 @@ use std::sync::{Arc, OnceLock};
 
 use cappy_core::{
     Application, Color, ColorToken, Context, Damage, Element, FrameInput, Radius, RenderFrame,
-    Signal, Theme, Ui, div, text,
+    Reactive, Theme, Ui, div, text,
 };
 use cappy_dsl::{style, ui};
 use cappy_testing::TestUi;
@@ -39,7 +39,7 @@ pub fn background() -> Color {
     Theme::light().tokens().colors.background
 }
 
-pub fn counter(count: Signal<i32>) -> Element {
+pub fn counter(count: Reactive<i32>) -> Element {
     let label = count.clone();
     ui! {
         div(class = "app") {

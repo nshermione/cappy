@@ -86,9 +86,33 @@ fn ui_builds_nested_nodes_with_attributes() {
 }
 
 #[test]
+fn one_reactive_is_read_from_two_bindings_and_a_click() {
+    let cx = context();
+    let count = cx.reactive(0_i32);
+    let mut ui = mounted(
+        &cx,
+        ui! {
+            div {
+                text(:format!("{}", count.get()), key = "a")
+                text(:format!("{}", count.get()), key = "b")
+                div(key = "up", on_click = move |_| count.update(|value| *value += 1)) {
+                    text("+")
+                }
+            }
+        },
+    );
+    assert_eq!(text_of(&ui, "a").as_deref(), Some("0"));
+    assert_eq!(text_of(&ui, "b").as_deref(), Some("0"));
+    count.set(2);
+    ui.update(VIEWPORT);
+    assert_eq!(text_of(&ui, "a").as_deref(), Some("2"));
+    assert_eq!(text_of(&ui, "b").as_deref(), Some("2"));
+}
+
+#[test]
 fn closure_text_is_reactive() {
     let cx = context();
-    let count = cx.signal(1);
+    let count = cx.reactive(1_i32);
     let label = count.clone();
     let mut ui = mounted(
         &cx,
@@ -106,7 +130,7 @@ fn closure_text_is_reactive() {
 #[test]
 fn colon_fields_rebind_classes_and_styles() {
     let cx = context();
-    let active = cx.signal(false);
+    let active = cx.reactive(false);
     let active_class = active.clone();
     let active_style = active.clone();
     let mut ui = mounted(
@@ -179,7 +203,7 @@ fn fields_after_a_class_list_still_apply() {
 #[test]
 fn colon_class_list_rebinds_every_item() {
     let cx = context();
-    let active = cx.signal(false);
+    let active = cx.reactive(false);
     let active_class = active.clone();
     let mut ui = mounted(
         &cx,
@@ -206,7 +230,7 @@ fn colon_class_list_rebinds_every_item() {
 #[test]
 fn handlers_pass_through_as_attributes() {
     let cx = context();
-    let clicked = cx.signal(false);
+    let clicked = cx.reactive(false);
     let tree = ui! {
         div(key = "button", on_click = move |_| clicked.set(true), style = style! { size: 40 })
     };
@@ -334,10 +358,10 @@ fn control_flow_macros_mount_show_if_and_for() {
     }
 
     let cx = context();
-    let open = cx.signal(true);
-    let ready = cx.signal(false);
-    let mode = cx.signal(0);
-    let items = cx.signal(vec![Row {
+    let open = cx.reactive(true);
+    let ready = cx.reactive(false);
+    let mode = cx.reactive(0_i32);
+    let items = cx.reactive(vec![Row {
         id: 1,
         title: "row".into(),
     }]);

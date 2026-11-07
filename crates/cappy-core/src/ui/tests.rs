@@ -263,7 +263,7 @@ fn switching_theme_repaints_without_moving_anything() {
 #[test]
 fn theme_signal_shared_with_the_scene_switches_theme() {
     let cx = context();
-    let theme = cx.signal(Arc::new(Theme::light()));
+    let theme = cx.reactive(Arc::new(Theme::light()));
     let theme_click = theme.clone();
     let toggle = div()
         .key("toggle")

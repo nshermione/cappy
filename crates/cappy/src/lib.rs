@@ -16,11 +16,10 @@
 //!
 //! let application = Application::new();
 //! let cx = application.context();
-//! let count = cx.signal(0);
-//! let label = count.clone();
+//! let count = cx.reactive(0_i32);
 //! let root = ui! {
 //!     div(class = "app") {
-//!         text(:format!("Clicked {} times", label.get()))
+//!         text(:format!("Clicked {} times", count.get()))
 //!         div(class = "btn btn-primary", on_click = move |_| count.update(|n| *n += 1)) {
 //!             text("Click")
 //!         }

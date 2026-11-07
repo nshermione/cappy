@@ -1,4 +1,7 @@
-//! Hoists `self.field` out of a `ui!` closure so the closure can be `'static`.
+//! Copies `self.field` out of a `ui!` closure so the closure does not capture `&self`.
+//!
+//! State and prop fields are [`Copy`] handles. The copy sits outside the closure, so
+//! `text(:format!("{}", self.label))` stays `'static`.
 
 use proc_macro2::{Group, Ident, Span, TokenStream, TokenTree};
 use quote::quote;
@@ -23,7 +26,7 @@ pub fn expand(input: TokenStream) -> TokenStream {
         let receiver = Ident::new("self", capture.self_span);
         let field = &capture.field;
         let local = &capture.local;
-        quote!(let #local = #receiver.#field.clone();)
+        quote!(let #local = #receiver.#field;)
     });
     quote! {
         {
@@ -74,7 +77,7 @@ fn rewrite(input: TokenStream, captures: &mut Vec<Capture>) -> TokenStream {
                     if let Some(TokenTree::Ident(field)) = tokens.peek().cloned() {
                         tokens.next();
                         let local = capture(captures, ident.span(), field);
-                        output.extend(quote!(#local.clone()));
+                        output.extend(quote!(#local));
                         continue;
                     }
                     output.extend([TokenTree::Ident(ident), dot]);

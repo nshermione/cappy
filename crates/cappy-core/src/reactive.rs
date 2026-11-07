@@ -1,8 +1,9 @@
 //! Fine-grained reactive signals.
 //!
-//! A [`Signal`] is a [`Clone`] handle to a value stored in a [`crate::Context`] runtime. Reading a
+//! A [`Signal`] is a [`Copy`] handle to a value stored in a [`crate::Context`] runtime. Reading a
 //! signal inside a tracked scope subscribes that scope; writing the signal queues every subscriber
-//! so the UI re-evaluates only the bindings that depend on it.
+//! so the UI re-evaluates only the bindings that depend on it. The handle stores the runtime's
+//! index, not an [`Rc`](std::rc::Rc), so copying it does not clone anything.
 //!
 //! [`Context::reactive`] turns a primitive into a [`Reactive`] handle. `#[store]` on a struct keeps the
 //! struct's name and tracks each field. A value that is already reactive is returned as itself.
@@ -225,6 +226,8 @@ struct MountOwner {
 
 #[derive(Default)]
 pub(crate) struct Runtime {
+    /// Slot in [`RUNTIMES`]. `None` until the first signal is created in this runtime.
+    registry_index: Cell<Option<u32>>,
     slots: RefCell<Vec<Option<SignalSlot>>>,
     free_slots: RefCell<Vec<u32>>,
     next_generation: RefCell<u32>,
@@ -568,30 +571,61 @@ pub(crate) fn track<R>(observer: Observer, scope: impl FnOnce() -> R) -> R {
     scope()
 }
 
-/// A reactive value. Cloning clones the runtime handle; every clone refers to the same value.
+thread_local! {
+    /// Runtimes created on this thread. A `static` cannot hold them: [`Runtime`] contains
+    /// [`RefCell`]s and the handle would need [`Rc`], which is not [`Send`](std::marker::Send).
+    ///
+    /// The slot stays for the life of the thread. Reusing an index would make an old copied
+    /// handle point at a new runtime. [`Context`] also keeps its own [`Rc`], so dropping a
+    /// context does not free the runtime while this list still holds it.
+    static RUNTIMES: RefCell<Vec<Rc<Runtime>>> = RefCell::new(Vec::new());
+}
+
+/// Records `runtime` the first time a signal is created in it and returns its index.
+fn register_runtime(runtime: &Rc<Runtime>) -> u32 {
+    if let Some(index) = runtime.registry_index.get() {
+        return index;
+    }
+    RUNTIMES.with(|runtimes| {
+        let mut runtimes = runtimes.borrow_mut();
+        if let Some(index) = runtime.registry_index.get() {
+            return index;
+        }
+        let index = u32::try_from(runtimes.len()).expect("too many runtimes");
+        runtimes.push(Rc::clone(runtime));
+        runtime.registry_index.set(Some(index));
+        index
+    })
+}
+
+fn runtime_by_index(index: u32) -> Rc<Runtime> {
+    RUNTIMES.with(|runtimes| Rc::clone(runtimes.borrow().get(index as usize).expect(DEAD_SIGNAL)))
+}
+
+/// A reactive value. Copying copies its runtime index; every copy refers to the same value.
 ///
-/// The value lives until [`Signal::dispose`] or until the last [`crate::Context`] and handle drop.
+/// The value lives until [`Signal::dispose`]. The runtime stays in the thread registry, so a
+/// copy remains usable after the [`crate::Context`] that created it is dropped.
 pub struct Signal<T: 'static> {
-    runtime: Rc<Runtime>,
+    runtime_index: u32,
     index: u32,
     generation: u32,
     _value: PhantomData<fn() -> T>,
+    /// `Rc` used to make this `!Send`. The registry is thread-local, so a handle must stay that way.
+    _thread: PhantomData<*const ()>,
 }
+
+impl<T: 'static> Copy for Signal<T> {}
 
 impl<T: 'static> Clone for Signal<T> {
     fn clone(&self) -> Self {
-        Self {
-            runtime: Rc::clone(&self.runtime),
-            index: self.index,
-            generation: self.generation,
-            _value: PhantomData,
-        }
+        *self
     }
 }
 
 impl<T: 'static> PartialEq for Signal<T> {
     fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.runtime, &other.runtime)
+        self.runtime_index == other.runtime_index
             && self.index == other.index
             && self.generation == other.generation
     }
@@ -609,14 +643,20 @@ impl<T: 'static> fmt::Debug for Signal<T> {
 }
 
 impl<T: 'static> Signal<T> {
+    fn runtime(&self) -> Rc<Runtime> {
+        runtime_by_index(self.runtime_index)
+    }
+
     pub(crate) fn create(runtime: &Rc<Runtime>, value: T, ephemeral: bool) -> Self {
+        let runtime_index = register_runtime(runtime);
         let (index, generation) = runtime.create(Box::new(value), ephemeral);
         runtime.record_signal(index, generation);
         Self {
-            runtime: Rc::clone(runtime),
+            runtime_index,
             index,
             generation,
             _value: PhantomData,
+            _thread: PhantomData,
         }
     }
 
@@ -637,36 +677,37 @@ impl<T: 'static> Signal<T> {
 
     /// Mutates the value in place and notifies subscribers.
     pub fn update(&self, change: impl FnOnce(&mut T)) {
-        let value = self.runtime.read(self.index, self.generation, false);
+        let runtime = self.runtime();
+        let value = runtime.read(self.index, self.generation, false);
         {
             let mut value = value.borrow_mut();
             change(value.downcast_mut::<T>().expect(DEAD_SIGNAL));
         }
-        let subscribers = self.runtime.subscribers(self.index, self.generation);
+        let subscribers = runtime.subscribers(self.index, self.generation);
         for subscriber in subscribers {
             subscriber.notify();
         }
     }
 
-    /// Frees the value. Using any clone of this signal afterwards panics.
+    /// Frees the value. Using any copy of this signal afterwards panics.
     ///
-    /// A second call on any clone is a no-op: the slot is already on the free list, and a new
+    /// A second call on any copy is a no-op: the slot is already on the free list, and a new
     /// signal that reused the index has a different generation.
     pub fn dispose(self) {
-        self.runtime.dispose(self.index, self.generation);
+        self.runtime().dispose(self.index, self.generation);
     }
 
     fn dispose_if_placeholder(self) {
-        self.runtime
+        self.runtime()
             .dispose_if_placeholder(self.index, self.generation);
     }
 
     fn hold(self) {
-        self.runtime.hold(self.index, self.generation);
+        self.runtime().hold(self.index, self.generation);
     }
 
     fn read_value<R>(&self, track: bool, read: impl FnOnce(&T) -> R) -> R {
-        let value = self.runtime.read(self.index, self.generation, track);
+        let value = self.runtime().read(self.index, self.generation, track);
         let value = value.borrow();
         read(value.downcast_ref::<T>().expect(DEAD_SIGNAL))
     }
@@ -683,29 +724,21 @@ impl<T: Clone + 'static> Signal<T> {
     }
 }
 
-/// A [`Clone`] handle whose reads subscribe the current tracking scope.
+/// A [`Copy`] handle whose reads subscribe the current tracking scope.
 ///
 /// Built by [`Context::reactive`]. Formatting and `==` against the inner value read it. [`Reactive::set`]
 /// and [`Reactive::update`] write it. The handle does not implement [`Deref`](std::ops::Deref):
-/// the value lives in the context runtime, not inside the handle.
+/// the value lives in the context runtime, not inside the handle. Copying copies the runtime
+/// index, the same way [`Signal`] does.
 pub struct Reactive<T: 'static> {
     inner: Signal<T>,
 }
 
+impl<T: 'static> Copy for Reactive<T> {}
+
 impl<T: 'static> Clone for Reactive<T> {
     fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-        }
-    }
-}
-
-impl<T: 'static> fmt::Debug for Reactive<T> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("Reactive")
-            .field("inner", &self.inner)
-            .finish()
+        *self
     }
 }
 
@@ -716,6 +749,15 @@ impl<T: 'static> PartialEq for Reactive<T> {
 }
 
 impl<T: 'static> Eq for Reactive<T> {}
+
+impl<T: 'static> fmt::Debug for Reactive<T> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Reactive")
+            .field("inner", &self.inner)
+            .finish()
+    }
+}
 
 impl<T: fmt::Display + 'static> fmt::Display for Reactive<T> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -730,6 +772,18 @@ impl<T: PartialEq + 'static> PartialEq<T> for Reactive<T> {
 }
 
 impl<T: 'static> Reactive<T> {
+    /// Tracks `value` in `context`. [`IntoReactive`] for a plain type returns this.
+    #[must_use]
+    pub fn new(context: &crate::Context, value: T) -> Self {
+        Self {
+            inner: Signal::create(&context.runtime, value, false),
+        }
+    }
+
+    pub(crate) fn as_signal(&self) -> Signal<T> {
+        self.inner
+    }
+
     /// A component prop default. The setter disposes this signal when another handle replaces it.
     /// [`ByValue`](crate::ByValue) keeps the signal and clears that mark.
     #[must_use]
@@ -745,7 +799,7 @@ impl<T: 'static> Reactive<T> {
     }
 
     pub(crate) fn hold(&self) {
-        self.inner.clone().hold();
+        self.inner.hold();
     }
 
     /// Reads the value and subscribes the current tracking scope.
@@ -768,6 +822,11 @@ impl<T: Clone + 'static> Reactive<T> {
     /// Returns a clone of the value and subscribes the current tracking scope.
     pub fn get(&self) -> T {
         self.inner.get()
+    }
+
+    /// Returns a clone of the value without subscribing.
+    pub fn get_untracked(&self) -> T {
+        self.inner.get_untracked()
     }
 }
 
@@ -801,16 +860,17 @@ impl<T: 'static> RetirePlaceholder for Reactive<T> {
 }
 
 impl crate::Context {
-    /// Allocates a signal in this context.
-    pub fn signal<T: 'static>(&self, value: T) -> Signal<T> {
+    /// Allocates one runtime slot. Application code calls [`Context::reactive`].
+    pub(crate) fn signal<T: 'static>(&self, value: T) -> Signal<T> {
         Signal::create(&self.runtime, value, false)
     }
 
     /// Tracks `value` in this context.
     ///
-    /// A primitive, [`String`], [`Option`] or [`Vec`] becomes one [`Reactive`] handle. A
-    /// `#[store]` struct is already tracked, so it is returned as itself. [`Reactive`] and
-    /// [`Signal`] become a [`Reactive`] handle without wrapping them again.
+    /// A primitive, [`String`], [`Option`], [`Vec`] or [`Arc`](std::sync::Arc) becomes one
+    /// [`Reactive`] handle. A `#[store]` struct is already tracked, so it is returned as itself.
+    /// [`Reactive`] and [`Signal`] become a [`Reactive`] handle without wrapping them again.
+    /// Another plain type does the same when it implements [`IntoReactive`] with [`Reactive::new`].
     pub fn reactive<T: IntoReactive>(&self, value: T) -> T::Output {
         value.into_reactive(self)
     }
@@ -902,6 +962,14 @@ where
     }
 }
 
+impl<T: 'static> IntoReactive for std::sync::Arc<T> {
+    type Output = Reactive<std::sync::Arc<T>>;
+
+    fn into_reactive(self, context: &crate::Context) -> Self::Output {
+        Reactive::new(context, self)
+    }
+}
+
 impl<T: 'static> IntoReactive for Signal<T> {
     type Output = Reactive<T>;
 
@@ -988,7 +1056,7 @@ pub(crate) fn live_signal_count(runtime: &Runtime) -> usize {
 #[cfg(test)]
 pub(crate) fn signal_is_alive<T: 'static>(signal: &Signal<T>) -> bool {
     signal
-        .runtime
+        .runtime()
         .slots
         .borrow()
         .get(signal.index as usize)
@@ -999,7 +1067,7 @@ pub(crate) fn signal_is_alive<T: 'static>(signal: &Signal<T>) -> bool {
 #[cfg(test)]
 pub(crate) fn signal_subscriber_count<T: 'static>(signal: &Signal<T>) -> usize {
     signal
-        .runtime
+        .runtime()
         .slots
         .borrow()
         .get(signal.index as usize)
@@ -1033,11 +1101,25 @@ mod tests {
     }
 
     #[test]
-    fn clones_share_the_same_value() {
+    fn copies_share_the_same_value() {
         let name = context().signal(String::from("a"));
-        let copy = name.clone();
+        let copy = name;
         copy.update(|value| value.push('b'));
         assert_eq!(name.get(), "ab");
+    }
+
+    #[test]
+    fn each_context_is_registered_once() {
+        let first_context = context();
+        let first = first_context.signal(1);
+        let second = first_context.signal(2);
+        assert_eq!(first.runtime_index, second.runtime_index);
+
+        let other = context().signal(1);
+        assert_ne!(first.runtime_index, other.runtime_index);
+        first.set(3);
+        assert_eq!(second.get(), 2);
+        assert_eq!(other.get(), 1);
     }
 
     #[test]
@@ -1325,10 +1407,11 @@ mod tests {
         use crate::{Theme, Ui, div};
 
         let context = context();
-        let theme = context.signal(Arc::new(Theme::light()));
+        let theme = context.reactive(Arc::new(Theme::light()));
         let before = live_signal_count(&context.runtime);
-        drop(Ui::with_theme_signal(&context, div(), theme.clone()));
-        assert!(signal_is_alive(&theme));
+        let signal = theme.as_signal();
+        drop(Ui::with_theme_signal(&context, div(), theme));
+        assert!(signal_is_alive(&signal));
         assert_eq!(live_signal_count(&context.runtime), before);
     }
 

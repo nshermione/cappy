@@ -2,6 +2,7 @@
 
 use cappy::prelude::*;
 
+#[derive(Copy)]
 #[store]
 pub struct Counter {
     pub count: i64,

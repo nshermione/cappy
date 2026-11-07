@@ -7,6 +7,11 @@ fn harness() -> TestUi {
     TestUi::from_ui(showcase(application.context()))
 }
 
+fn open_tab(harness: &mut TestUi, tab: &str) {
+    harness.click(tab);
+    harness.update();
+}
+
 #[test]
 fn counter_buttons_change_the_count() {
     let mut harness = harness();
@@ -53,6 +58,7 @@ fn theme_button_cycles_themes_without_moving_nodes() {
 #[test]
 fn selecting_a_tile_updates_the_caption() {
     let mut harness = harness();
+    open_tab(&mut harness, "tab-tiles");
     harness.click("tile-3");
     harness.update();
     assert_eq!(harness.text("selection"), "Selected tile 4");
@@ -61,6 +67,7 @@ fn selecting_a_tile_updates_the_caption() {
 #[test]
 fn tasks_toggle_between_todo_and_done() {
     let mut harness = harness();
+    open_tab(&mut harness, "tab-checklist");
     harness.click("task-title-1");
     harness.update();
     let row = harness.node("task-1");
@@ -72,6 +79,7 @@ fn tasks_toggle_between_todo_and_done() {
 #[test]
 fn show_keeps_its_count_and_if_starts_over() {
     let mut harness = harness();
+    open_tab(&mut harness, "tab-checklist");
     harness.click("show-increment");
     harness.update();
     assert_eq!(harness.text("show-count"), "Kept: 1");
@@ -103,6 +111,7 @@ fn show_keeps_its_count_and_if_starts_over() {
 #[test]
 fn for_keeps_a_task_row_when_it_moves() {
     let mut harness = harness();
+    open_tab(&mut harness, "tab-checklist");
     harness.click("task-title-1");
     harness.update();
     harness.click("task-up-1");
@@ -130,19 +139,38 @@ fn for_keeps_a_task_row_when_it_moves() {
 
 #[test]
 fn badge_slots_sit_on_either_side_of_the_label() {
-    let harness = harness();
-    assert_eq!(harness.text("badge-icon"), "in");
-    assert_eq!(harness.text("badge-label"), "Badge (0)");
-    assert_eq!(harness.text("badge-tail"), "out");
-    let badge = harness.node("demo-badge");
-    let children = harness.ui().node_children(badge);
+    let mut harness = harness();
+    open_tab(&mut harness, "tab-badge");
+
+    let outer = harness.node("outer-badge");
+    let outer_children = harness.ui().node_children(outer).to_vec();
+    let inner = harness.node("inner-badge");
+    let inner_children = harness.ui().node_children(inner).to_vec();
+    assert_eq!(outer_children.len(), 3);
+    assert_eq!(outer_children[0], inner);
+    assert_eq!(outer_children[2], harness.node("outer-tail"));
     assert_eq!(
-        children,
-        [
-            harness.node("badge-icon"),
-            harness.node("badge-label"),
-            harness.node("badge-tail"),
-        ]
+        harness.ui().node_text(outer_children[1]),
+        Some("Outer (0) c:0")
+    );
+    assert_eq!(harness.ui().node_text(outer_children[2]), Some("end"));
+    assert_eq!(inner_children.len(), 2);
+    assert_eq!(inner_children[0], harness.node("inner-mark"));
+    assert_eq!(harness.ui().node_text(inner_children[0]), Some("•"));
+    assert_eq!(
+        harness.ui().node_text(inner_children[1]),
+        Some("Inner (0) c:0")
+    );
+
+    harness.click("inner-badge");
+    harness.update();
+    assert_eq!(
+        harness.ui().node_text(inner_children[1]),
+        Some("Inner (1) c:1")
+    );
+    assert_eq!(
+        harness.ui().node_text(outer_children[1]),
+        Some("Outer (0) c:1")
     );
 }
 
