@@ -125,10 +125,7 @@ pub fn fragment(children: impl IntoIterator<Item = impl Into<Element>>) -> Eleme
 /// `for_each` that drops this `show` disposes it, hidden or not. Keep [`slot`] out of `view`:
 /// slots are filled before mount.
 #[must_use]
-pub fn show(
-    when: impl Fn() -> bool + 'static,
-    view: impl Fn() -> Element + 'static,
-) -> Element {
+pub fn show(when: impl Fn() -> bool + 'static, view: impl Fn() -> Element + 'static) -> Element {
     Element::new(ElementContent::Flow(crate::ui::flow::show_spec(when, view)))
 }
 

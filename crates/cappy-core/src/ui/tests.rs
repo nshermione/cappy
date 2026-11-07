@@ -503,9 +503,9 @@ struct Row {
 }
 
 fn paints(ui: &Ui, text: &str) -> bool {
-    ui.display_list().iter().any(|primitive| {
-        matches!(primitive, Primitive::Text(painted) if painted.text.as_ref() == text)
-    })
+    ui.display_list().iter().any(
+        |primitive| matches!(primitive, Primitive::Text(painted) if painted.text.as_ref() == text),
+    )
 }
 
 #[test]
@@ -518,19 +518,22 @@ fn show_hides_without_dropping_state() {
     let open_visible = open.clone();
     let label_text = label.clone();
     let cx_view = cx.clone();
-    let mut ui = settled(&cx, div().key("root").children([
-        text("head").key("head"),
-        show(
-            move || open_visible.get(),
-            move || {
-                let count = cx_view.signal(1);
-                state_slot.borrow_mut().replace(count.clone());
-                let label_text = label_text.clone();
-                text_dyn(move || format!("{}:{}", label_text.get(), count.get())).key("body")
-            },
-        ),
-        text("tail").key("tail"),
-    ]));
+    let mut ui = settled(
+        &cx,
+        div().key("root").children([
+            text("head").key("head"),
+            show(
+                move || open_visible.get(),
+                move || {
+                    let count = cx_view.signal(1);
+                    state_slot.borrow_mut().replace(count.clone());
+                    let label_text = label_text.clone();
+                    text_dyn(move || format!("{}:{}", label_text.get(), count.get())).key("body")
+                },
+            ),
+            text("tail").key("tail"),
+        ]),
+    );
     let root = ui.find_by_key("root").unwrap();
     let head = ui.find_by_key("head").unwrap();
     let body = ui.find_by_key("body").unwrap();
@@ -571,12 +574,13 @@ fn show_hides_without_dropping_state() {
     assert!(paints(&ui, "two:5"));
     assert!(ui.node_rect(body).unwrap().width > 0.0);
     let body_rect = ui.node_rect(body).unwrap();
-    assert!(ui
-        .hit_path(Point::new(
+    assert!(
+        ui.hit_path(Point::new(
             body_rect.x + body_rect.width / 2.0,
             body_rect.y + body_rect.height / 2.0,
         ))
-        .contains(&body));
+        .contains(&body)
+    );
     assert!(ui.node_rect(tail).unwrap().x > tail_hidden.x + 1.0);
     assert_eq!(signal_subscriber_count(&label), label_subs);
     assert_eq!(signal_subscriber_count(&open), open_subs);
@@ -596,26 +600,29 @@ fn if_else_disposes_the_branch_it_leaves() {
     let left_text = left.clone();
     let right_text = right.clone();
     let cx_view = cx.clone();
-    let mut ui = settled(&cx, div().key("root").children([
-        text("head").key("head"),
-        if_else(
-            move || flag_branch.get(),
-            {
-                let slot = Rc::clone(&slot);
+    let mut ui = settled(
+        &cx,
+        div().key("root").children([
+            text("head").key("head"),
+            if_else(
+                move || flag_branch.get(),
+                {
+                    let slot = Rc::clone(&slot);
+                    move || {
+                        let inner = cx_view.signal(9);
+                        slot.borrow_mut().replace(inner);
+                        let left_text = left_text.clone();
+                        text_dyn(move || left_text.get().to_string()).key("branch")
+                    }
+                },
                 move || {
-                    let inner = cx_view.signal(9);
-                    slot.borrow_mut().replace(inner);
-                    let left_text = left_text.clone();
-                    text_dyn(move || left_text.get().to_string()).key("branch")
-                }
-            },
-            move || {
-                let right_text = right_text.clone();
-                text_dyn(move || right_text.get().to_string()).key("branch")
-            },
-        ),
-        text("tail").key("tail"),
-    ]));
+                    let right_text = right_text.clone();
+                    text_dyn(move || right_text.get().to_string()).key("branch")
+                },
+            ),
+            text("tail").key("tail"),
+        ]),
+    );
     let root = ui.find_by_key("root").unwrap();
     let head = ui.find_by_key("head").unwrap();
     let tail = ui.find_by_key("tail").unwrap();
@@ -669,15 +676,18 @@ fn if_without_else_removes_its_content() {
     let cx = context();
     let open = cx.signal(true);
     let open_visible = open.clone();
-    let mut ui = settled(&cx, div().key("root").children([
-        text("head").key("head"),
-        if_else(
-            move || open_visible.get(),
-            || text("yes").key("yes"),
-            || fragment(Vec::<Element>::new()),
-        ),
-        text("tail").key("tail"),
-    ]));
+    let mut ui = settled(
+        &cx,
+        div().key("root").children([
+            text("head").key("head"),
+            if_else(
+                move || open_visible.get(),
+                || text("yes").key("yes"),
+                || fragment(Vec::<Element>::new()),
+            ),
+            text("tail").key("tail"),
+        ]),
+    );
     let root = ui.find_by_key("root").unwrap();
     let head = ui.find_by_key("head").unwrap();
     let yes = ui.find_by_key("yes").unwrap();
@@ -712,28 +722,31 @@ fn for_keeps_rows_by_key() {
     let rows = Rc::new(RefCell::new(Vec::new()));
     let captured = Rc::clone(&rows);
     let items_source = items.clone();
-    let mut ui = settled(&cx, div().key("root").children([
-        text("head").key("head"),
-        for_each(
-            move |visit| {
-                items_source.with(|list| {
-                    for item in list {
-                        visit(item);
+    let mut ui = settled(
+        &cx,
+        div().key("root").children([
+            text("head").key("head"),
+            for_each(
+                move |visit| {
+                    items_source.with(|list| {
+                        for item in list {
+                            visit(item);
+                        }
+                    });
+                },
+                |item| &item.id,
+                {
+                    let captured = Rc::clone(&captured);
+                    move |item: Signal<Row>| {
+                        captured.borrow_mut().push(item.clone());
+                        let key = item.with_untracked(|row| row.id.to_string());
+                        text_dyn(move || item.with(|row| row.title.clone())).key(key)
                     }
-                });
-            },
-            |item| &item.id,
-            {
-                let captured = Rc::clone(&captured);
-                move |item: Signal<Row>| {
-                    captured.borrow_mut().push(item.clone());
-                    let key = item.with_untracked(|row| row.id.to_string());
-                    text_dyn(move || item.with(|row| row.title.clone())).key(key)
-                }
-            },
-        ),
-        text("tail").key("tail"),
-    ]));
+                },
+            ),
+            text("tail").key("tail"),
+        ]),
+    );
     let root = ui.find_by_key("root").unwrap();
     let head = ui.find_by_key("head").unwrap();
     let tail = ui.find_by_key("tail").unwrap();
@@ -811,7 +824,8 @@ fn for_keeps_rows_by_key() {
 fn duplicate_for_key_panics() {
     let cx = context();
     let items = cx.signal(vec![1_u64, 1]);
-    let _ui = Ui::new(&cx, 
+    let _ui = Ui::new(
+        &cx,
         for_each(
             move |visit| {
                 items.with(|list| {
@@ -852,70 +866,76 @@ fn switching_if_disposes_hidden_show_rows_and_nested_if() {
     let nested_text = nested.clone();
     let items_source = items.clone();
     let cx_view = cx.clone();
-    let mut ui = settled(&cx, if_else(
-        move || outer_branch.get(),
-        {
-            let rows = Rc::clone(&rows);
-            let inner_state = Rc::clone(&inner_state);
-            move || {
-                let cx_view = cx_view.clone();
-                fragment([
-                    show(
-                        {
-                            let panel_open = panel_open.clone();
-                            move || panel_open.get()
-                        },
-                        {
-                            let shown_text = shown_text.clone();
-                            move || {
+    let mut ui = settled(
+        &cx,
+        if_else(
+            move || outer_branch.get(),
+            {
+                let rows = Rc::clone(&rows);
+                let inner_state = Rc::clone(&inner_state);
+                move || {
+                    let cx_view = cx_view.clone();
+                    fragment([
+                        show(
+                            {
+                                let panel_open = panel_open.clone();
+                                move || panel_open.get()
+                            },
+                            {
                                 let shown_text = shown_text.clone();
-                                text_dyn(move || shown_text.get()).key("hidden-show")
-                            }
-                        },
-                    ),
-                    for_each(
-                        {
-                            let items_source = items_source.clone();
-                            move |visit| {
-                                items_source.with(|list| {
-                                    for item in list {
-                                        visit(item);
-                                    }
-                                });
-                            }
-                        },
-                        |item| &item.id,
-                        {
-                            let rows = Rc::clone(&rows);
-                            move |item: Signal<Row>| {
-                                rows.borrow_mut().push(item.clone());
-                                text_dyn(move || item.with(|row| row.title.clone()))
-                            }
-                        },
-                    ),
-                    if_else(
-                        || true,
-                        {
-                            let inner_state = Rc::clone(&inner_state);
-                            let nested_text = nested_text.clone();
-                            move || {
-                                let state = cx_view.signal(3);
-                                inner_state.borrow_mut().replace(state);
+                                move || {
+                                    let shown_text = shown_text.clone();
+                                    text_dyn(move || shown_text.get()).key("hidden-show")
+                                }
+                            },
+                        ),
+                        for_each(
+                            {
+                                let items_source = items_source.clone();
+                                move |visit| {
+                                    items_source.with(|list| {
+                                        for item in list {
+                                            visit(item);
+                                        }
+                                    });
+                                }
+                            },
+                            |item| &item.id,
+                            {
+                                let rows = Rc::clone(&rows);
+                                move |item: Signal<Row>| {
+                                    rows.borrow_mut().push(item.clone());
+                                    text_dyn(move || item.with(|row| row.title.clone()))
+                                }
+                            },
+                        ),
+                        if_else(
+                            || true,
+                            {
+                                let inner_state = Rc::clone(&inner_state);
                                 let nested_text = nested_text.clone();
-                                text_dyn(move || nested_text.get()).key("nested")
-                            }
-                        },
-                        || text("no"),
-                    ),
-                ])
-            }
-        },
-        || text("other").key("other"),
-    ));
+                                move || {
+                                    let state = cx_view.signal(3);
+                                    inner_state.borrow_mut().replace(state);
+                                    let nested_text = nested_text.clone();
+                                    text_dyn(move || nested_text.get()).key("nested")
+                                }
+                            },
+                            || text("no"),
+                        ),
+                    ])
+                }
+            },
+            || text("other").key("other"),
+        ),
+    );
 
     let hidden = ui.find_by_key("hidden-show").unwrap();
     assert_eq!(ui.node_text(hidden), Some("keep"));
-    assert_eq!(ui.node_text(ui.find_by_key("nested").unwrap()), Some("nest"));
+    assert_eq!(
+        ui.node_text(ui.find_by_key("nested").unwrap()),
+        Some("nest")
+    );
     assert_eq!(signal_subscriber_count(&shown), 1);
     assert_eq!(signal_subscriber_count(&nested), 1);
     assert_eq!(signal_subscriber_count(&items), 1);
@@ -938,7 +958,10 @@ fn switching_if_disposes_hidden_show_rows_and_nested_if() {
 
     outer.set(false);
     ui.update(VIEWPORT);
-    assert_eq!(ui.node_text(ui.find_by_key("other").unwrap()), Some("other"));
+    assert_eq!(
+        ui.node_text(ui.find_by_key("other").unwrap()),
+        Some("other")
+    );
     assert!(ui.find_by_key("hidden-show").is_none());
     assert!(ui.find_by_key("nested").is_none());
     assert_eq!(signal_subscriber_count(&shown), 0);
@@ -946,7 +969,11 @@ fn switching_if_disposes_hidden_show_rows_and_nested_if() {
     assert_eq!(signal_subscriber_count(&items), 0);
     assert_eq!(signal_subscriber_count(&panel), 0);
     assert!(row_signals.iter().all(|row| !signal_is_alive(&*row)));
-    assert!(row_signals.iter().all(|row| signal_subscriber_count(&*row) == 0));
+    assert!(
+        row_signals
+            .iter()
+            .all(|row| signal_subscriber_count(&*row) == 0)
+    );
     assert!(!signal_is_alive(&state));
     assert_eq!(signal_subscriber_count(&state), 0);
 }
@@ -958,24 +985,27 @@ fn switching_branches_and_rows_reuses_slots() {
     let items = cx.signal(vec![1_u64, 2]);
     let flag_branch = flag.clone();
     let items_source = items.clone();
-    let mut ui = settled(&cx, div().children([
-        if_else(
-            move || flag_branch.get(),
-            || text_dyn(|| "yes".to_owned()).key("branch"),
-            || text_dyn(|| "no".to_owned()).key("branch"),
-        ),
-        for_each(
-            move |visit| {
-                items_source.with(|list| {
-                    for item in list {
-                        visit(item);
-                    }
-                });
-            },
-            |item| item,
-            |item| text_dyn(move || item.get().to_string()),
-        ),
-    ]));
+    let mut ui = settled(
+        &cx,
+        div().children([
+            if_else(
+                move || flag_branch.get(),
+                || text_dyn(|| "yes".to_owned()).key("branch"),
+                || text_dyn(|| "no".to_owned()).key("branch"),
+            ),
+            for_each(
+                move |visit| {
+                    items_source.with(|list| {
+                        for item in list {
+                            visit(item);
+                        }
+                    });
+                },
+                |item| item,
+                |item| text_dyn(move || item.get().to_string()),
+            ),
+        ]),
+    );
     let nodes = ui.node_slots();
     let bindings = ui.binding_slots();
     let signals = live_signal_count(&cx.runtime);
@@ -1000,34 +1030,37 @@ fn add_and_drop_returns_resources_to_the_baseline() {
     let items = cx.signal(Vec::<u64>::new());
     let items_source = items.clone();
     let cx_row = cx.clone();
-    let mut ui = settled(&cx, div().child(for_each(
-        move |visit| {
-            items_source.with(|list| {
-                for item in list {
-                    visit(item);
-                }
-            });
-        },
-        |item| item,
-        move |item| {
-            let flag = cx_row.signal(false);
-            let shown = flag.clone();
-            let id = item.get_untracked();
-            div().key(format!("row-{id}")).children([
-                text_dyn(move || item.get().to_string()).key(format!("label-{id}")),
-                text_dyn(move || {
-                    if shown.get() {
-                        "on".to_owned()
-                    } else {
-                        "off".to_owned()
+    let mut ui = settled(
+        &cx,
+        div().child(for_each(
+            move |visit| {
+                items_source.with(|list| {
+                    for item in list {
+                        visit(item);
                     }
-                }),
-                div()
-                    .on_click(move |_| flag.update(|value| *value = !*value))
-                    .child(text("Drop")),
-            ])
-        },
-    )));
+                });
+            },
+            |item| item,
+            move |item| {
+                let flag = cx_row.signal(false);
+                let shown = flag.clone();
+                let id = item.get_untracked();
+                div().key(format!("row-{id}")).children([
+                    text_dyn(move || item.get().to_string()).key(format!("label-{id}")),
+                    text_dyn(move || {
+                        if shown.get() {
+                            "on".to_owned()
+                        } else {
+                            "off".to_owned()
+                        }
+                    }),
+                    div()
+                        .on_click(move |_| flag.update(|value| *value = !*value))
+                        .child(text("Drop")),
+                ])
+            },
+        )),
+    );
     let baseline = ui.resources();
     let mut peak_at_thirty = None;
     for round in 0..3 {

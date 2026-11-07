@@ -95,7 +95,10 @@ impl fmt::Display for RunError {
             Self::CreateWindow(error) => write!(f, "failed to create the window: {error}"),
             Self::Renderer(error) => write!(f, "{error}"),
             Self::ContextMismatch => {
-                write!(f, "ui was built with a different context than the application")
+                write!(
+                    f,
+                    "ui was built with a different context than the application"
+                )
             }
         }
     }

@@ -122,7 +122,10 @@ fn for_keeps_a_task_row_when_it_moves() {
     harness.click("task-drop-0");
     harness.update();
     assert!(harness.ui().find_by_key("task-0").is_none());
-    assert_eq!(harness.text("task-title-1"), "Stay idle when nothing changes");
+    assert_eq!(
+        harness.text("task-title-1"),
+        "Stay idle when nothing changes"
+    );
 }
 
 #[test]

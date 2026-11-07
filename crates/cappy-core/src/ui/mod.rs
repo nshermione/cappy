@@ -13,10 +13,10 @@ use std::sync::Arc;
 use cappy_layout::{ApproximateTextMeasurer, LayoutTree, Point, Rect, Size, TextMeasurer};
 use cappy_style::{Style, Theme};
 
+use crate::Context;
 use crate::element::Element;
 use crate::paint::{Primitive, RenderFrame};
 use crate::reactive::{BindingQueue, Signal};
-use crate::Context;
 use crate::{CursorIcon, Damage, DamageTracker};
 use bindings::{Binding, BindingKind};
 pub use node::NodeId;
@@ -130,12 +130,7 @@ impl Ui {
     ///
     /// The theme signal created here is disposed when this `Ui` drops.
     pub fn new(context: &Context, root: impl Into<Element>, theme: Theme) -> Self {
-        Self::with_owned_theme(
-            context,
-            root,
-            context.signal(Arc::new(theme)),
-            true,
-        )
+        Self::with_owned_theme(context, root, context.signal(Arc::new(theme)), true)
     }
 
     /// Mounts `root` and follows `theme`: setting the signal restyles the whole UI.

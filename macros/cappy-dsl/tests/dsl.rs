@@ -66,15 +66,18 @@ impl Component for Badge {
 #[test]
 fn ui_builds_nested_nodes_with_attributes() {
     let cx = context();
-    let ui = mounted(&cx, ui! {
-        div(class = "app", key = "root") {
-            text("Title", class = "title", key = "title")
-            div(class = "row", key = "row") {
-                text("a")
-                text("b")
+    let ui = mounted(
+        &cx,
+        ui! {
+            div(class = "app", key = "root") {
+                text("Title", class = "title", key = "title")
+                div(class = "row", key = "row") {
+                    text("a")
+                    text("b")
+                }
             }
-        }
-    });
+        },
+    );
     let root = ui.find_by_key("root").unwrap();
     assert_eq!(ui.node_children(root).len(), 2);
     assert_eq!(text_of(&ui, "title").as_deref(), Some("Title"));
@@ -87,11 +90,14 @@ fn closure_text_is_reactive() {
     let cx = context();
     let count = cx.signal(1);
     let label = count.clone();
-    let mut ui = mounted(&cx, ui! {
-        div {
-            text(:format!("Count: {}", label.get()), key = "label")
-        }
-    });
+    let mut ui = mounted(
+        &cx,
+        ui! {
+            div {
+                text(:format!("Count: {}", label.get()), key = "label")
+            }
+        },
+    );
     count.set(2);
     ui.update(VIEWPORT);
     assert_eq!(text_of(&ui, "label").as_deref(), Some("Count: 2"));
@@ -103,16 +109,19 @@ fn colon_fields_rebind_classes_and_styles() {
     let active = cx.signal(false);
     let active_class = active.clone();
     let active_style = active.clone();
-    let mut ui = mounted(&cx, ui! {
-        div {
-            div(
-                key = "chip",
-                class = "btn",
-                :class = if active_class.get() { "btn-primary" } else { "" },
-                :style = style! { width: if active_style.get() { 120 } else { 80 } },
-            )
-        }
-    });
+    let mut ui = mounted(
+        &cx,
+        ui! {
+            div {
+                div(
+                    key = "chip",
+                    class = "btn",
+                    :class = if active_class.get() { "btn-primary" } else { "" },
+                    :style = style! { width: if active_style.get() { 120 } else { 80 } },
+                )
+            }
+        },
+    );
     let chip = ui.find_by_key("chip").unwrap();
     assert_eq!(ui.node_rect(chip).unwrap().width, 80.0);
     active.set(true);
@@ -154,12 +163,15 @@ fn class_list_adds_every_item() {
 #[test]
 fn fields_after_a_class_list_still_apply() {
     let cx = context();
-    let ui = mounted(&cx, ui! {
-        div {
-            div(class = ["card"], key = "box")
-            text("Title", class = ["title", "muted",], key = "title")
-        }
-    });
+    let ui = mounted(
+        &cx,
+        ui! {
+            div {
+                div(class = ["card"], key = "box")
+                text("Title", class = ["title", "muted",], key = "title")
+            }
+        },
+    );
     assert!(ui.find_by_key("box").is_some());
     assert_eq!(text_of(&ui, "title").as_deref(), Some("Title"));
 }
@@ -169,14 +181,17 @@ fn colon_class_list_rebinds_every_item() {
     let cx = context();
     let active = cx.signal(false);
     let active_class = active.clone();
-    let mut ui = mounted(&cx, ui! {
-        div {
-            div(
-                key = "chip",
-                :class = ["btn", if active_class.get() { "btn-primary" } else { "" }],
-            )
-        }
-    });
+    let mut ui = mounted(
+        &cx,
+        ui! {
+            div {
+                div(
+                    key = "chip",
+                    :class = ["btn", if active_class.get() { "btn-primary" } else { "" }],
+                )
+            }
+        },
+    );
     let chip = ui.find_by_key("chip").unwrap();
     let idle_background = ui.node_style(chip).unwrap().visual.background;
     assert_eq!(idle_background, ui.theme().tokens().colors.surface);
@@ -203,16 +218,19 @@ fn handlers_pass_through_as_attributes() {
 fn embedded_expressions_iterators_functions_and_components() {
     let items = ["one", "two", "three"];
     let cx = context();
-    let ui = mounted(&cx, ui! {
-        div(key = "root") {
-            { text("embedded") }
-            div(key = "list") {
-                { ..items.iter().map(|item| text(*item)) }
+    let ui = mounted(
+        &cx,
+        ui! {
+            div(key = "root") {
+                { text("embedded") }
+                div(key = "list") {
+                    { ..items.iter().map(|item| text(*item)) }
+                }
+                card(key = "card")
+                @Badge(label = "new")
             }
-            card(key = "card")
-            @Badge(label = "new")
-        }
-    });
+        },
+    );
     let root = ui.find_by_key("root").unwrap();
     assert_eq!(ui.node_children(root).len(), 4);
     let list = ui.find_by_key("list").unwrap();
@@ -230,11 +248,14 @@ fn component_root_keeps_host_attributes_and_appended_children() {
         r#"["badge", "wrap", "wide"]"#,
     );
     let cx = context();
-    let ui = mounted(&cx, ui! {
-        @Badge(label = "new", class = "wrap", key = "hosted") {
-            text("extra", key = "extra")
-        }
-    });
+    let ui = mounted(
+        &cx,
+        ui! {
+            @Badge(label = "new", class = "wrap", key = "hosted") {
+                text("extra", key = "extra")
+            }
+        },
+    );
     assert!(ui.find_by_key("badge").is_none());
     let hosted = ui.find_by_key("hosted").unwrap();
     assert_eq!(ui.node_children(hosted).len(), 2);
@@ -249,13 +270,16 @@ fn label(content: &str) -> Element {
 #[test]
 fn any_element_function_takes_content_fields_and_comma_separated_children() {
     let cx = context();
-    let ui = mounted(&cx, ui! {
-        div(key = "root") {
-            label("hello", key = "label"),
-            div,
-            { text("embedded") },
-        }
-    });
+    let ui = mounted(
+        &cx,
+        ui! {
+            div(key = "root") {
+                label("hello", key = "label"),
+                div,
+                { text("embedded") },
+            }
+        },
+    );
     let root = ui.find_by_key("root").unwrap();
     assert_eq!(ui.node_children(root).len(), 3);
     assert_eq!(text_of(&ui, "label").as_deref(), Some("hello"));
@@ -322,34 +346,37 @@ fn control_flow_macros_mount_show_if_and_for() {
     let ready_branch = ready.clone();
     let mode_branch = mode.clone();
     let items_source = items.clone();
-    let mut ui = mounted(&cx, ui! {
-        div(key = "root") {
-            show (:open_visible.get()) {
-                {{
-                    let open_text = open_text.clone();
-                    text_dyn(move || format!("open {}", open_text.get())).key("panel")
-                }}
+    let mut ui = mounted(
+        &cx,
+        ui! {
+            div(key = "root") {
+                show (:open_visible.get()) {
+                    {{
+                        let open_text = open_text.clone();
+                        text_dyn(move || format!("open {}", open_text.get())).key("panel")
+                    }}
+                }
+                if (:ready_branch.get()) {
+                    text("yes", key = "state")
+                } else {
+                    {{
+                        let mode_branch = mode_branch.clone();
+                        text_dyn(move || {
+                            if mode_branch.get() == 1 {
+                                "mid".to_owned()
+                            } else {
+                                "no".to_owned()
+                            }
+                        })
+                        .key("state")
+                    }}
+                }
+                for (item in :items_source, key = item.id) {
+                    text(:item.with(|row| row.title.clone()), key = "row")
+                }
             }
-            if (:ready_branch.get()) {
-                text("yes", key = "state")
-            } else {
-                {{
-                    let mode_branch = mode_branch.clone();
-                    text_dyn(move || {
-                        if mode_branch.get() == 1 {
-                            "mid".to_owned()
-                        } else {
-                            "no".to_owned()
-                        }
-                    })
-                    .key("state")
-                }}
-            }
-            for (item in :items_source, key = item.id) {
-                text(:item.with(|row| row.title.clone()), key = "row")
-            }
-        }
-    });
+        },
+    );
     assert_eq!(text_of(&ui, "panel").as_deref(), Some("open true"));
     assert_eq!(text_of(&ui, "state").as_deref(), Some("no"));
     assert_eq!(text_of(&ui, "row").as_deref(), Some("row"));

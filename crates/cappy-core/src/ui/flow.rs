@@ -7,11 +7,11 @@ use std::hash::Hash;
 
 use cappy_style::{Style, TextStyle};
 
+use super::Ui;
 use super::bindings::BindingKind;
 use super::node::{ChildPart, Node, NodeContent, NodeId};
-use super::Ui;
-use crate::element::{div, Element, ElementContent};
-use crate::reactive::{dispose_owner, enter_owner, BindingId, Observer, Signal, track};
+use crate::element::{Element, ElementContent, div};
+use crate::reactive::{BindingId, Observer, Signal, dispose_owner, enter_owner, track};
 
 /// What an [`Element`](Element) stores until mount moves it into a [`FlowState`].
 pub(crate) enum FlowSpec {
@@ -276,9 +276,11 @@ impl Ui {
         if matches!(element.content, ElementContent::Slot { .. }) {
             return Vec::new();
         }
-        vec![ChildPart::Node(
-            self.mount_node(element, Some(parent), suppressed),
-        )]
+        vec![ChildPart::Node(self.mount_node(
+            element,
+            Some(parent),
+            suppressed,
+        ))]
     }
 
     fn spawn_flow(&mut self, parent: NodeId, spec: FlowSpec, suppressed: bool) -> FlowId {
@@ -643,9 +645,10 @@ where
         }
         let structure_same = fresh.is_empty()
             && used.len() == self.rows.len()
-            && seen.iter().enumerate().all(|(position, slot)| {
-                matches!(slot, Seen::Keep(index) if *index == position)
-            });
+            && seen
+                .iter()
+                .enumerate()
+                .all(|(position, slot)| matches!(slot, Seen::Keep(index) if *index == position));
         if structure_same {
             return;
         }
@@ -653,8 +656,10 @@ where
         let parent = ui.flows[flow.index()].parent;
         ui.flows[flow.index()].parts.clear();
         ui.reflatten(parent);
-        let mut old_rows: Vec<Option<ListRow<T, K::Owned>>> =
-            std::mem::take(&mut self.rows).into_iter().map(Some).collect();
+        let mut old_rows: Vec<Option<ListRow<T, K::Owned>>> = std::mem::take(&mut self.rows)
+            .into_iter()
+            .map(Some)
+            .collect();
         for (index, row) in old_rows.iter_mut().enumerate() {
             if !used.contains(&index)
                 && let Some(row) = row.take()
@@ -676,7 +681,8 @@ where
                 }
                 Seen::Fresh(index) => {
                     let (key, value) = fresh_slots[index].take().expect("fresh row is still here");
-                    let row = mount_list_row(ui, parent, self.view.as_ref(), key, value, suppressed);
+                    let row =
+                        mount_list_row(ui, parent, self.view.as_ref(), key, value, suppressed);
                     parts.extend(row.parts.iter().copied());
                     new_rows.push(row);
                 }

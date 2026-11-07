@@ -7,6 +7,59 @@ use crate::reactive::{named_fields, tracked_impls, with_into_reactive};
 
 const RESERVED: &[&str] = &["class", "style", "key", "context"];
 
+#[derive(Clone, Copy)]
+enum Section {
+    State,
+    Prop,
+    Event,
+    Slot,
+}
+
+struct KindAttr {
+    name: &'static str,
+    section: Section,
+    /// A section marker also applies to every following field until the next one.
+    sticks: bool,
+}
+
+const KIND_ATTRS: &[KindAttr] = &[
+    KindAttr {
+        name: "prop",
+        section: Section::Prop,
+        sticks: false,
+    },
+    KindAttr {
+        name: "props",
+        section: Section::Prop,
+        sticks: true,
+    },
+    KindAttr {
+        name: "event",
+        section: Section::Event,
+        sticks: false,
+    },
+    KindAttr {
+        name: "events",
+        section: Section::Event,
+        sticks: true,
+    },
+    KindAttr {
+        name: "slot",
+        section: Section::Slot,
+        sticks: false,
+    },
+    KindAttr {
+        name: "slots",
+        section: Section::Slot,
+        sticks: true,
+    },
+    KindAttr {
+        name: "state",
+        section: Section::State,
+        sticks: true,
+    },
+];
+
 enum FieldKind {
     State,
     Prop,
@@ -27,16 +80,10 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     }
     let fields = named_fields(input, "#[component]")?;
     let mut kinds = Vec::with_capacity(fields.len());
+    let mut section = Section::State;
     let mut next_slot = 0u16;
     for field in &fields {
-        let kind = classify(field, next_slot)?;
-        if matches!(kind, FieldKind::Slot(_)) {
-            let name = field.ident.as_ref().expect("named field");
-            next_slot = next_slot
-                .checked_add(1)
-                .ok_or_else(|| syn::Error::new(name.span(), "too many #[slot] fields"))?;
-        }
-        kinds.push(kind);
+        kinds.push(classify(field, &mut section, &mut next_slot)?);
     }
     let vis = &input.vis;
     let name = &input.ident;
@@ -126,7 +173,7 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     })
 }
 
-fn classify(field: &Field, next_slot: u16) -> syn::Result<FieldKind> {
+fn classify(field: &Field, section: &mut Section, next_slot: &mut u16) -> syn::Result<FieldKind> {
     let name = field.ident.as_ref().expect("named field");
     if RESERVED.iter().any(|reserved| name == reserved) {
         return Err(syn::Error::new(
@@ -134,43 +181,32 @@ fn classify(field: &Field, next_slot: u16) -> syn::Result<FieldKind> {
             format!("`{name}` is reserved for the root element"),
         ));
     }
-    let prop = marker(field, "prop")?;
-    let event = marker(field, "event")?;
-    let slot = marker(field, "slot")?;
-    if prop && event {
-        return Err(syn::Error::new(
-            name.span(),
-            "a field cannot be both #[prop] and #[event]",
-        ));
-    }
-    if prop && slot {
-        return Err(syn::Error::new(
-            name.span(),
-            "a field cannot be both #[prop] and #[slot]",
-        ));
-    }
-    if event && slot {
-        return Err(syn::Error::new(
-            name.span(),
-            "a field cannot be both #[event] and #[slot]",
-        ));
-    }
-    if slot {
-        if !is_element_type(&field.ty) {
-            return Err(syn::Error::new(
-                field.ty.span(),
-                "#[slot] fields must have type `Element`",
-            ));
+    let chosen = match field_marker(field)? {
+        Some(marker) if marker.sticks => {
+            *section = marker.section;
+            marker.section
         }
-        return Ok(FieldKind::Slot(next_slot));
+        Some(marker) => marker.section,
+        None => *section,
+    };
+    match chosen {
+        Section::State => Ok(FieldKind::State),
+        Section::Prop => Ok(FieldKind::Prop),
+        Section::Event => Ok(FieldKind::Event),
+        Section::Slot => {
+            if !is_element_type(&field.ty) {
+                return Err(syn::Error::new(
+                    field.ty.span(),
+                    "#[slot] fields must have type `Element`",
+                ));
+            }
+            let index = *next_slot;
+            *next_slot = next_slot
+                .checked_add(1)
+                .ok_or_else(|| syn::Error::new(name.span(), "too many #[slot] fields"))?;
+            Ok(FieldKind::Slot(index))
+        }
     }
-    if event {
-        return Ok(FieldKind::Event);
-    }
-    if prop {
-        return Ok(FieldKind::Prop);
-    }
-    Ok(FieldKind::State)
 }
 
 fn is_element_type(ty: &Type) -> bool {
@@ -186,21 +222,48 @@ fn is_element_type(ty: &Type) -> bool {
     segment.ident == "Element" && segment.arguments.is_empty()
 }
 
-fn marker(field: &Field, name: &str) -> syn::Result<bool> {
-    let mut found = false;
+fn field_marker(field: &Field) -> syn::Result<Option<&KindAttr>> {
+    let mut found: Option<&KindAttr> = None;
     for attr in &field.attrs {
-        if !attr.path().is_ident(name) {
+        let Some(kind) = KIND_ATTRS
+            .iter()
+            .find(|kind| attr.path().is_ident(kind.name))
+        else {
             continue;
-        }
+        };
         if !matches!(attr.meta, syn::Meta::Path(_)) {
             return Err(syn::Error::new(
                 attr.meta.span(),
-                format!("#[{name}] does not take arguments"),
+                format!("#[{}] does not take arguments", kind.name),
             ));
         }
-        found = true;
+        if let Some(previous) = found {
+            if previous.name != kind.name {
+                return Err(syn::Error::new(
+                    field.ident.as_ref().expect("named field").span(),
+                    conflict_message(previous.name, kind.name),
+                ));
+            }
+        }
+        found = Some(kind);
     }
     Ok(found)
+}
+
+/// The three original pairs keep their wording so existing compile-fail output stays stable.
+fn conflict_message(first: &str, second: &str) -> String {
+    match (first, second) {
+        ("prop", "event") | ("event", "prop") => {
+            "a field cannot be both #[prop] and #[event]".to_string()
+        }
+        ("prop", "slot") | ("slot", "prop") => {
+            "a field cannot be both #[prop] and #[slot]".to_string()
+        }
+        ("event", "slot") | ("slot", "event") => {
+            "a field cannot be both #[event] and #[slot]".to_string()
+        }
+        _ => format!("a field cannot be both #[{first}] and #[{second}]"),
+    }
 }
 
 /// Drops a `Default` derive when it is still on the token stream. rustc usually applies derives
@@ -233,9 +296,9 @@ fn kept_attrs(field: &Field) -> Vec<&Attribute> {
         .attrs
         .iter()
         .filter(|attr| {
-            !attr.path().is_ident("prop")
-                && !attr.path().is_ident("event")
-                && !attr.path().is_ident("slot")
+            !KIND_ATTRS
+                .iter()
+                .any(|kind| attr.path().is_ident(kind.name))
         })
         .collect()
 }

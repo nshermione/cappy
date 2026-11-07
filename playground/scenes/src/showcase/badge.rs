@@ -14,9 +14,8 @@ pub struct Badge {
     label: String,
     #[event]
     on_click: String,
-    #[slot]
+    #[slots]
     icon: Element,
-    #[slot]
     tail: Element,
 }
 

@@ -115,11 +115,8 @@ impl<K: Copy + Eq + Hash + fmt::Debug> LayoutTree<K> {
         if self.retained <= live || self.retained - live < FREE_SLOTS_BEFORE_COMPACT {
             return;
         }
-        let reverse: HashMap<taffy::NodeId, K> = self
-            .nodes
-            .iter()
-            .map(|(key, id)| (*id, *key))
-            .collect();
+        let reverse: HashMap<taffy::NodeId, K> =
+            self.nodes.iter().map(|(key, id)| (*id, *key)).collect();
         let saved: Vec<(K, taffy::Style, Option<TextLeaf>, Vec<K>)> = self
             .nodes
             .iter()

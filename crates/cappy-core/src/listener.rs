@@ -7,8 +7,8 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::rc::Rc;
 
-use crate::reactive::{ListenerSlot, Runtime};
 use crate::Context;
+use crate::reactive::{ListenerSlot, Runtime};
 
 const DEAD_LISTENER: &str = "listener was disposed";
 

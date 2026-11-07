@@ -8,7 +8,7 @@ use cappy_style::Theme;
 use super::flow::FlowId;
 use super::{NodeId, Ui};
 use crate::element::{ClassBinding, StyleBinding, TextBinding};
-use crate::reactive::{detach_binding, BindingId, Observer, track};
+use crate::reactive::{BindingId, Observer, detach_binding, track};
 
 pub(super) enum BindingKind {
     Text(TextBinding),
@@ -33,9 +33,7 @@ const MAX_BINDING_PASSES: usize = 16;
 impl Ui {
     pub(super) fn alloc_binding(&mut self, node: NodeId, kind: BindingKind) -> BindingId {
         let id = if let Some(index) = self.free_bindings.pop() {
-            let generation = self.bindings[index as usize]
-                .generation
-                .wrapping_add(1);
+            let generation = self.bindings[index as usize].generation.wrapping_add(1);
             self.bindings[index as usize] = Binding {
                 node,
                 kind,

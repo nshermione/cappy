@@ -1,0 +1,5 @@
+error: a field cannot be both #[props] and #[events]
+ --> tests/compile_fail/component_two_sections.rs:7:5
+  |
+7 |     label: String,
+  |     ^^^^^

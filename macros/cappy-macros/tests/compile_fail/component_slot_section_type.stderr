@@ -1,0 +1,5 @@
+error: #[slot] fields must have type `Element`
+ --> tests/compile_fail/component_slot_section_type.rs:6:12
+  |
+6 |     label: String,
+  |            ^^^^^^

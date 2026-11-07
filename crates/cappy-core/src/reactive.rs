@@ -427,7 +427,10 @@ impl Runtime {
             let Some(slot) = owners.get_mut(id.index as usize) else {
                 return;
             };
-            if slot.as_ref().is_some_and(|owner| owner.generation != id.generation) {
+            if slot
+                .as_ref()
+                .is_some_and(|owner| owner.generation != id.generation)
+            {
                 return;
             }
             let Some(owner) = slot.take() else {
@@ -1041,7 +1044,9 @@ mod tests {
     fn tracked_reads_subscribe_and_writes_notify() {
         let (context, queue) = session();
         let count = context.signal(0);
-        track(Observer::new(&queue, BindingId::from_index(3)), || count.get());
+        track(Observer::new(&queue, BindingId::from_index(3)), || {
+            count.get()
+        });
         assert!(queue.is_empty());
         count.set(1);
         assert_eq!(queue.take(), vec![BindingId::from_index(3)]);
@@ -1063,7 +1068,9 @@ mod tests {
         let (context, queue) = session();
         let count = context.signal(0);
         for _ in 0..3 {
-            track(Observer::new(&queue, BindingId::from_index(1)), || count.get());
+            track(Observer::new(&queue, BindingId::from_index(1)), || {
+                count.get()
+            });
         }
         count.set(1);
         count.set(2);
@@ -1076,7 +1083,9 @@ mod tests {
         let outer = context.signal(0);
         let inner = context.signal(0);
         track(Observer::new(&queue, BindingId::from_index(1)), || {
-            track(Observer::new(&queue, BindingId::from_index(2)), || inner.get());
+            track(Observer::new(&queue, BindingId::from_index(2)), || {
+                inner.get()
+            });
             outer.get()
         });
         outer.set(1);
@@ -1091,7 +1100,9 @@ mod tests {
         let count = context.signal(0);
         {
             let queue = Rc::new(BindingQueue::new(Rc::clone(&context.runtime)));
-            track(Observer::new(&queue, BindingId::from_index(1)), || count.get());
+            track(Observer::new(&queue, BindingId::from_index(1)), || {
+                count.get()
+            });
         }
         count.set(1);
         assert_eq!(count.get(), 1);
@@ -1104,7 +1115,9 @@ mod tests {
         let counter = wakes.clone();
         queue.set_waker(Some(Rc::new(move || counter.set(counter.get() + 1))));
         let count = context.signal(0);
-        track(Observer::new(&queue, BindingId::from_index(1)), || count.get());
+        track(Observer::new(&queue, BindingId::from_index(1)), || {
+            count.get()
+        });
         count.set(1);
         count.set(2);
         assert_eq!(wakes.get(), 1);
@@ -1208,9 +1221,12 @@ mod tests {
         let left = context.signal(1);
         let right = context.signal(2);
         let run = || {
-            track(Observer::new(&binding_queue, BindingId::from_index(1)), || {
-                if flag.get() { left.get() } else { right.get() }
-            });
+            track(
+                Observer::new(&binding_queue, BindingId::from_index(1)),
+                || {
+                    if flag.get() { left.get() } else { right.get() }
+                },
+            );
         };
         run();
         assert_eq!(signal_subscriber_count(&flag), 1);
@@ -1229,9 +1245,10 @@ mod tests {
         let watched = context.signal(0);
         {
             let binding_queue = Rc::new(BindingQueue::new(Rc::clone(&context.runtime)));
-            track(Observer::new(&binding_queue, BindingId::from_index(7)), || {
-                watched.get()
-            });
+            track(
+                Observer::new(&binding_queue, BindingId::from_index(7)),
+                || watched.get(),
+            );
             assert_eq!(signal_subscriber_count(&watched), 1);
         }
         assert_eq!(signal_subscriber_count(&watched), 0);

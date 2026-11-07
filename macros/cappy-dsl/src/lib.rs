@@ -361,10 +361,14 @@ macro_rules! __ui_args {
 #[macro_export]
 macro_rules! __ui_bind {
     (content $name:ident, $value:expr) => {
-        $name($crate::__private::Dynamic($crate::ui_closure!(move || $value)))
+        $name($crate::__private::Dynamic($crate::ui_closure!(move || {
+            $value
+        })))
     };
     (field $builder:expr, $field:ident = $value:expr) => {
-        $builder.$field($crate::__private::Dynamic($crate::ui_closure!(move || $value)))
+        $builder.$field($crate::__private::Dynamic($crate::ui_closure!(move || {
+            $value
+        })))
     };
 }
 

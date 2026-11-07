@@ -124,7 +124,11 @@ impl Ui {
             .is_some_and(|node| node.alive && node.generation == id.generation())
     }
 
-    pub(super) fn set_interaction(&mut self, id: NodeId, change: impl FnOnce(&mut InteractionState)) {
+    pub(super) fn set_interaction(
+        &mut self,
+        id: NodeId,
+        change: impl FnOnce(&mut InteractionState),
+    ) {
         if !self.is_current(id) {
             return;
         }

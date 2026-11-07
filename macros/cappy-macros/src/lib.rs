@@ -7,6 +7,8 @@
 //!   `cx.use_store(Type)` returns the one value of that struct in the context.
 //! - `#[component]` is a reactive struct whose plain fields are state, `#[prop]` fields are inputs,
 //!   `#[event]` fields are listeners and `#[slot]` fields are positions for parent children.
+//!   `#[props]`, `#[events]`, `#[slots]` and `#[state]` start a section that runs through the
+//!   following fields. `#[props]` here is not `#[props(skip)]` from `#[derive(Props)]`.
 
 mod class_name;
 mod component;
@@ -104,9 +106,13 @@ pub fn store(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 /// A single-file component. Plain fields become reactive state, `#[prop]` fields are parent
 /// inputs, `#[event]` fields are listeners, and `#[slot]` fields are positions for parent children.
-/// A slot field is stored as a [`Copy`](core::marker::Copy) marker, not the child element, and its
-/// type must be `Element`. The macro adds `new(cx, ...)`, `open(cx)` and [`Clone`](core::clone::Clone).
-/// Do not also derive `Default` or apply `#[store]`. `render` stays a handwritten `Component` impl.
+/// Each of those markers applies to that field only. `#[props]`, `#[events]`, `#[slots]` and
+/// `#[state]` apply to that field and every following field until the next section marker.
+/// `#[props]` on a component is that section marker. It is not `#[props(skip)]` from
+/// `#[derive(Props)]`. A slot field is stored as a [`Copy`](core::marker::Copy) marker, not
+/// the child element, and its type must be `Element`. The macro adds `new(cx, ...)`, `open(cx)` and
+/// [`Clone`](core::clone::Clone). Do not also derive `Default` or apply `#[store]`. `render` stays
+/// a handwritten `Component` impl.
 ///
 /// `class`, `style` and `key` are reserved for the root element.
 #[proc_macro_attribute]
