@@ -9,6 +9,7 @@ authors.workspace = true
 [dependencies]
 cappy-core.workspace = true
 cosmic-text.workspace = true
+log.workspace = true
 
 [lints]
 workspace = true

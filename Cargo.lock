@@ -398,6 +398,7 @@ version = "0.1.0"
 dependencies = [
  "cappy-core",
  "cosmic-text",
+ "log",
 ]
 
 [[package]]

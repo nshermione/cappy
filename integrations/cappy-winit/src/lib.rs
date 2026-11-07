@@ -40,7 +40,7 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::platform::windows::WindowAttributesExtWindows;
 use winit::window::{Window, WindowAttributes, WindowId};
 
-pub use cappy_host::{RendererKind, WindowOptions};
+pub use cappy_host::{FontOptions, RendererKind, WindowOptions};
 pub use renderer::AVAILABLE_RENDERERS;
 
 const DEBUG_DAMAGE_KEY: KeyCode = KeyCode::F12;
@@ -181,7 +181,7 @@ impl WinitHost {
         );
         #[cfg(debug_assertions)]
         cappy_host::memory_mark("start after window");
-        let fonts = FontContext::from_system();
+        let fonts = FontContext::load(&self.options.fonts);
         #[cfg(debug_assertions)]
         cappy_host::memory_mark("start after fonts");
         let renderer =

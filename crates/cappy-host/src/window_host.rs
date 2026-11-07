@@ -24,6 +24,8 @@ pub struct WindowOptions {
     /// Backend to draw with; `None` picks the first one compiled in (GPU before CPU).
     /// The `CAPPY_RENDERER` environment variable overrides this.
     pub renderer: Option<RendererKind>,
+    /// Which system faces to keep, and any extra font files to load.
+    pub fonts: cappy_text::FontOptions,
 }
 
 impl Default for WindowOptions {
@@ -33,6 +35,7 @@ impl Default for WindowOptions {
             logical_size: DEFAULT_LOGICAL_SIZE,
             debug_damage: false,
             renderer: None,
+            fonts: cappy_text::FontOptions::new(),
         }
     }
 }
@@ -60,6 +63,12 @@ impl WindowOptions {
     #[must_use]
     pub fn with_renderer(mut self, renderer: RendererKind) -> Self {
         self.renderer = Some(renderer);
+        self
+    }
+
+    #[must_use]
+    pub fn with_fonts(mut self, fonts: cappy_text::FontOptions) -> Self {
+        self.fonts = fonts;
         self
     }
 }

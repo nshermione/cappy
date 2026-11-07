@@ -8,6 +8,7 @@ mod resize_pace;
 mod selection;
 mod window_host;
 
+pub use cappy_text::FontOptions;
 pub use regions::{PixelRect, physical_regions};
 pub use renderer::{
     PresentOutcome, RendererError, RendererKind, UnknownRendererError, WindowRenderer,

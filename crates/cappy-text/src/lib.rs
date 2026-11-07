@@ -8,7 +8,7 @@ mod measure;
 mod shaping;
 
 pub use cache::ShapedTextCache;
-pub use font::FontContext;
+pub use font::{FontContext, FontOptions};
 pub use measure::CosmicTextMeasurer;
 
 pub use cosmic_text;
