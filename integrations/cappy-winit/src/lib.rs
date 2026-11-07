@@ -1,6 +1,7 @@
 //! Runs a cappy [`Ui`] in a winit window. The event loop sleeps until input arrives or a signal
 //! changes, and each redraw repaints only the damaged regions. A live resize follows the pointer.
 //! Presents stay on the resize interval, then one more frame is presented when the size settles.
+//! The window stays hidden until that first frame has been presented.
 //!
 //! ```no_run
 //! use cappy_core::{Application, Theme, Ui, div, text};
@@ -29,7 +30,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use cappy_core::{Application, CursorIcon, InputEvent, Ui};
-use cappy_host::{RendererError, RendererSelectionError, WindowHost, select_renderer};
+use cappy_host::{
+    PresentOutcome, RendererError, RendererSelectionError, WindowHost, select_renderer,
+};
 use cappy_text::FontContext;
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
@@ -49,7 +52,9 @@ fn window_attributes(options: &WindowOptions, renderer: RendererKind) -> WindowA
     let (width, height) = options.logical_size;
     let attributes = Window::default_attributes()
         .with_title(options.title.clone())
-        .with_inner_size(LogicalSize::new(width, height));
+        .with_inner_size(LogicalSize::new(width, height))
+        // Shown after the first presented frame. A hidden window is not transparent on screen.
+        .with_visible(false);
     without_redirection_bitmap(attributes, renderer)
 }
 
@@ -158,6 +163,8 @@ struct Running {
     window: Arc<Window>,
     /// When set, redraw then so a resize presents on its cadence or at the resting size.
     settle_at: Option<Instant>,
+    /// Set once the first presented frame has been followed by [`Window::set_visible`].
+    shown: bool,
 }
 
 struct WinitHost {
@@ -198,12 +205,16 @@ impl WinitHost {
                 log::debug!("wake ignored: the event loop has already exited");
             }
         });
-        window.request_redraw();
-        Ok(Running {
+        let mut running = Running {
             host,
             window,
             settle_at: None,
-        })
+            shown: false,
+        };
+        // A hidden window does not receive WM_PAINT, so the first frame cannot wait for
+        // RedrawRequested. Present it here, then show the window with that frame in place.
+        redraw(&mut running)?;
+        Ok(running)
     }
 
     fn fail(&mut self, event_loop: &ActiveEventLoop, error: RunError) {
@@ -316,6 +327,11 @@ fn redraw(running: &mut Running) -> Result<(), RunError> {
     let size = running.window.inner_size();
     if size.width == 0 || size.height == 0 {
         running.settle_at = None;
+        if !running.shown {
+            // No client area yet. Showing is what lets a later resize deliver a paint.
+            running.window.set_visible(true);
+            running.shown = true;
+        }
         return Ok(());
     }
     let result = running
@@ -324,6 +340,24 @@ fn redraw(running: &mut Running) -> Result<(), RunError> {
         .map_err(RunError::Renderer)?;
     apply_cursor(&running.window, result.cursor);
     running.settle_at = result.settle_at;
+    if !running.shown {
+        match result.present {
+            PresentOutcome::Presented { .. } => {
+                running.window.set_visible(true);
+                running.shown = true;
+                log::info!("showed the window after the first presented frame");
+            }
+            // A hidden window receives no WM_PAINT, and some backends report it occluded.
+            // Show it and ask for another frame; the device is already open, so this is not
+            // the startup wait.
+            PresentOutcome::Occluded | PresentOutcome::Retry => {
+                running.window.set_visible(true);
+                running.shown = true;
+                running.window.request_redraw();
+            }
+            PresentOutcome::Deferred => {}
+        }
+    }
     if result.needs_retry() {
         running.window.request_redraw();
     }
