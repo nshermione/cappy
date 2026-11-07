@@ -6,7 +6,8 @@ use cappy_text::FontContext;
 use tiny_skia::{Pixmap, PixmapMut};
 
 use crate::blend::{over, premultiply};
-use crate::quad::paint_quad;
+use crate::image::paint_image;
+use crate::quad::{paint_quad, paint_shadow};
 use crate::text::TextPainter;
 
 /// Anti-aliasing can bleed slightly past a primitive's bounds.
@@ -115,7 +116,8 @@ impl CpuRenderer {
         let mut target = PixmapMut::from_bytes(scratch, region.width, region.height)
             .expect("physical regions are never empty");
         let bounds = region.to_rect();
-        let origin = (region.x, region.y);
+        let pixel_origin = (region.x, region.y);
+        let origin = (region.x as f32, region.y as f32);
         for primitive in frame.primitives.iter() {
             let physical_bounds = primitive
                 .bounds()
@@ -125,14 +127,15 @@ impl CpuRenderer {
                 continue;
             }
             match primitive {
-                Primitive::Quad(quad) => paint_quad(
-                    &mut target,
-                    quad,
-                    frame.scale_factor,
-                    (origin.0 as f32, origin.1 as f32),
-                ),
+                Primitive::Shadow(shadow) => {
+                    paint_shadow(&mut target, shadow, frame.scale_factor, origin)
+                }
+                Primitive::Quad(quad) => paint_quad(&mut target, quad, frame.scale_factor, origin),
+                Primitive::Image(image) => {
+                    paint_image(&mut target, image, frame.scale_factor, origin)
+                }
                 Primitive::Text(label) => {
-                    text.paint(&mut target, label, frame.scale_factor, origin)
+                    text.paint(&mut target, label, frame.scale_factor, pixel_origin)
                 }
             }
         }
@@ -181,7 +184,7 @@ mod tests {
     fn square(x: f32, color: Color) -> Primitive {
         Primitive::Quad(QuadPrimitive {
             rect: Rect::new(x, 0.0, 32.0, 32.0),
-            background: color,
+            background: cappy_core::Background::Solid(color),
             border_color: Color::TRANSPARENT,
             border_width: 0.0,
             corner_radius: 0.0,

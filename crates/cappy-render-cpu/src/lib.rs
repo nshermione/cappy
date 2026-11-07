@@ -9,6 +9,7 @@
 //! them in linear light. Glyph coverage is blended in linear light, matching glyphon.
 
 mod blend;
+mod image;
 mod overlay;
 mod painter;
 mod quad;

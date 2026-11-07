@@ -8,7 +8,7 @@ use std::path::Path;
 use cappy_core::{Damage, Theme};
 use cappy_testing::TestUi;
 use cappy_testing::gpu::{HeadlessRenderer, Image, assert_snapshot};
-use common::{background, context, counter, fonts, full_repaint, harness, shapes};
+use common::{background, context, counter, effects, fonts, full_repaint, harness, shapes};
 
 /// Channel difference allowed between GPUs for anti-aliased edges.
 const SNAPSHOT_TOLERANCE: u8 = 2;
@@ -28,6 +28,14 @@ fn shapes_match_snapshot() {
     let image = renderer().render(&harness.frame(), background()).unwrap();
     let snapshots = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots");
     assert_snapshot(&snapshots, "shapes", &image, SNAPSHOT_TOLERANCE);
+}
+
+#[test]
+fn effects_match_snapshot() {
+    let mut harness = harness(&context(), effects());
+    let image = renderer().render(&harness.frame(), background()).unwrap();
+    let snapshots = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots");
+    assert_snapshot(&snapshots, "effects", &image, SNAPSHOT_TOLERANCE);
 }
 
 #[test]

@@ -9,7 +9,7 @@ use std::path::Path;
 use cappy_core::{Damage, Point, Theme};
 use cappy_testing::assert_snapshot;
 use cappy_testing::cpu::CpuHeadlessRenderer;
-use common::{background, context, counter, fonts, full_repaint, harness, shapes};
+use common::{background, context, counter, effects, fonts, full_repaint, harness, shapes};
 
 /// The CPU renderer is deterministic, so snapshots must match exactly.
 const SNAPSHOT_TOLERANCE: u8 = 0;
@@ -24,6 +24,14 @@ fn shapes_match_snapshot() {
     let image = renderer().render(&harness.frame(), background());
     let snapshots = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots/cpu");
     assert_snapshot(&snapshots, "shapes", &image, SNAPSHOT_TOLERANCE);
+}
+
+#[test]
+fn effects_match_snapshot() {
+    let mut harness = harness(&context(), effects());
+    let image = renderer().render(&harness.frame(), background());
+    let snapshots = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots/cpu");
+    assert_snapshot(&snapshots, "effects", &image, SNAPSHOT_TOLERANCE);
 }
 
 #[test]

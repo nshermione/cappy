@@ -207,6 +207,7 @@ impl Ui {
             | ElementContent::Flow(_) => (NodeContent::Container, None),
             ElementContent::StaticText(text) => (NodeContent::Text(text), None),
             ElementContent::DynamicText(binding) => (NodeContent::Text("".into()), Some(binding)),
+            ElementContent::Image { pixels, fit } => (NodeContent::Image { pixels, fit }, None),
         };
         let initial_style = Style::inheriting(TextStyle::from_tokens(self.theme.tokens()));
         let node = Node {
@@ -229,6 +230,7 @@ impl Ui {
             generation: 0,
             bindings: Vec::new(),
             rect: cappy_layout::Rect::ZERO,
+            painted: cappy_layout::Rect::ZERO,
             style_dirty: true,
             paint_dirty: true,
         };
@@ -428,6 +430,7 @@ impl Ui {
             self.layout
                 .set_style(id, &layout_style)
                 .expect("layout tree is out of sync with the node tree");
+            self.damage.add(self.nodes[id.index()].painted);
             self.damage.add(self.nodes[id.index()].rect);
             self.mark_style_dirty(id);
             self.display_list_stale = true;
@@ -541,6 +544,7 @@ impl Ui {
         for binding in bindings {
             self.retire_binding(binding);
         }
+        self.damage.add(self.nodes[id.index()].painted);
         self.damage.add(self.nodes[id.index()].rect);
         let _ = self.layout.remove(id);
         let node = &mut self.nodes[id.index()];

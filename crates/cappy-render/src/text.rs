@@ -114,7 +114,7 @@ fn batch_texts<'a>(
         .iter()
         .filter_map(|&index| match &primitives[index] {
             Primitive::Text(text) => Some(text),
-            Primitive::Quad(_) => None,
+            Primitive::Quad(_) | Primitive::Shadow(_) | Primitive::Image(_) => None,
         })
 }
 

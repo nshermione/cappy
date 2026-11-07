@@ -1,8 +1,14 @@
 //! Rounded, bordered rectangles drawn with tiny-skia paths, matching the GPU quad shader: the
 //! background fills the whole shape and the border is painted over it as a ring.
 
-use cappy_core::{Color, QuadPrimitive, Rect};
-use tiny_skia::{FillRule, Paint, Path, PathBuilder, PixmapMut, Transform};
+use cappy_core::rounded_box_distance;
+use cappy_core::{Background, BoxShadow, Color, QuadPrimitive, Rect, ShadowPrimitive};
+use tiny_skia::{
+    FillRule, GradientStop, LinearGradient, Paint, Path, PathBuilder, PixmapMut, SpreadMode,
+    Transform,
+};
+
+use crate::blend::{blend_into, premultiply, scale};
 
 /// Distance of cubic control points from a corner, as a fraction of the radius, for the closest
 /// cubic approximation of a quarter circle.
@@ -28,7 +34,7 @@ pub(crate) fn paint_quad(
     if !quad.background.is_transparent()
         && let Some(path) = rounded_rect_path(rect, radius)
     {
-        fill(target, &path, quad.background, FillRule::Winding, transform);
+        fill_background(target, &path, quad.background, rect, transform, origin);
     }
 
     let border_width = quad.border_width * scale_factor;
@@ -46,6 +52,119 @@ pub(crate) fn paint_quad(
     }
 }
 
+/// Paints `shadow`, scaled to physical pixels, into `target`, whose top-left sits at `origin`.
+pub(crate) fn paint_shadow(
+    target: &mut PixmapMut<'_>,
+    shadow: &ShadowPrimitive,
+    scale_factor: f32,
+    origin: (f32, f32),
+) {
+    let shape = shadow.rect.scale(scale_factor);
+    if shape.is_empty() {
+        return;
+    }
+    let blur = shadow.blur * scale_factor;
+    let radius = (shadow.corner_radius * scale_factor)
+        .min(shape.width / 2.0)
+        .min(shape.height / 2.0)
+        .max(0.0);
+    let extent = BoxShadow {
+        blur,
+        ..BoxShadow::NONE
+    }
+    .blur_extent();
+    let ink = shape.inflate(extent + 1.0);
+    let left = (ink.x - origin.0).floor().max(0.0) as i32;
+    let top = (ink.y - origin.1).floor().max(0.0) as i32;
+    let right = ((ink.right() - origin.0).ceil() as i32).min(target.width() as i32);
+    let bottom = ((ink.bottom() - origin.1).ceil() as i32).min(target.height() as i32);
+    if left >= right || top >= bottom {
+        return;
+    }
+    let color = premultiply(shadow.color.to_rgba8());
+    let half_width = shape.width * 0.5;
+    let half_height = shape.height * 0.5;
+    let center_x = shape.x + half_width;
+    let center_y = shape.y + half_height;
+    let width = target.width() as usize;
+    let pixels = target.data_mut();
+    for y in top..bottom {
+        for x in left..right {
+            let world_x = x as f32 + 0.5 + origin.0;
+            let world_y = y as f32 + 0.5 + origin.1;
+            let distance = rounded_box_distance(
+                world_x - center_x,
+                world_y - center_y,
+                half_width,
+                half_height,
+                radius,
+            );
+            let coverage = BoxShadow::coverage(distance, blur);
+            if coverage <= 0.0 {
+                continue;
+            }
+            let coverage = (coverage * 255.0).round().clamp(0.0, 255.0) as u8;
+            let offset = (y as usize * width + x as usize) * 4;
+            blend_into(&mut pixels[offset..offset + 4], scale(color, coverage));
+        }
+    }
+}
+
+pub(crate) fn rounded_rect_path(rect: Rect, radius: f32) -> Option<Path> {
+    let mut builder = PathBuilder::new();
+    push_rounded_rect(&mut builder, rect, radius);
+    builder.finish()
+}
+
+fn fill_background(
+    target: &mut PixmapMut<'_>,
+    path: &Path,
+    background: Background,
+    rect: Rect,
+    transform: Transform,
+    origin: (f32, f32),
+) {
+    match background {
+        Background::Solid(color) => fill(target, path, color, FillRule::Winding, transform),
+        Background::Linear {
+            from,
+            to,
+            start,
+            end,
+        } => {
+            let start = tiny_skia::Point::from_xy(
+                rect.x + start.x * rect.width - origin.0,
+                rect.y + start.y * rect.height - origin.1,
+            );
+            let end = tiny_skia::Point::from_xy(
+                rect.x + end.x * rect.width - origin.0,
+                rect.y + end.y * rect.height - origin.1,
+            );
+            let stops = vec![
+                GradientStop::new(0.0, skia_color(from)),
+                GradientStop::new(1.0, skia_color(to)),
+            ];
+            let Some(shader) =
+                LinearGradient::new(start, end, stops, SpreadMode::Pad, Transform::identity())
+            else {
+                fill(target, path, from, FillRule::Winding, transform);
+                return;
+            };
+            let paint = Paint {
+                shader,
+                anti_alias: true,
+                ..Paint::default()
+            };
+            target.fill_path(path, &paint, FillRule::Winding, transform, None);
+        }
+    }
+}
+
+fn skia_color(color: Color) -> tiny_skia::Color {
+    let [red, green, blue, alpha] = color.to_rgba8();
+    tiny_skia::Color::from_rgba8(red, green, blue, alpha)
+}
+
 fn fill(
     target: &mut PixmapMut<'_>,
     path: &Path,
@@ -58,12 +177,6 @@ fn fill(
     paint.set_color_rgba8(red, green, blue, alpha);
     paint.anti_alias = true;
     target.fill_path(path, &paint, fill_rule, transform, None);
-}
-
-fn rounded_rect_path(rect: Rect, radius: f32) -> Option<Path> {
-    let mut builder = PathBuilder::new();
-    push_rounded_rect(&mut builder, rect, radius);
-    builder.finish()
 }
 
 /// The outer shape minus the inner one; filled with [`FillRule::EvenOdd`]. When the border is
@@ -142,7 +255,7 @@ mod tests {
     fn bordered(radius: f32) -> QuadPrimitive {
         QuadPrimitive {
             rect: Rect::new(5.0, 5.0, 30.0, 30.0),
-            background: Color::rgb(0, 0, 255),
+            background: Background::Solid(Color::rgb(0, 0, 255)),
             border_color: Color::rgb(255, 0, 0),
             border_width: 4.0,
             corner_radius: radius,
@@ -167,7 +280,7 @@ mod tests {
     #[test]
     fn translucent_background_is_not_tinted_by_the_border() {
         let mut quad = bordered(0.0);
-        quad.background = Color::rgba(0, 0, 255, 128);
+        quad.background = Background::Solid(Color::rgba(0, 0, 255, 128));
         let pixmap = render(&quad);
         let [red, _, blue, alpha] = pixel(&pixmap, 20, 20);
         assert_eq!(red, 0);
@@ -179,5 +292,44 @@ mod tests {
         let mut pixmap = Pixmap::new(SIZE, SIZE).expect("non-empty pixmap");
         paint_quad(&mut pixmap.as_mut(), &bordered(0.0), 1.0, (10.0, 10.0));
         assert_eq!(pixel(&pixmap, 10, 10), [0, 0, 255, 255]);
+    }
+
+    #[test]
+    fn a_horizontal_gradient_changes_across_the_box() {
+        use cappy_core::UnitPoint;
+
+        let mut quad = bordered(0.0);
+        quad.border_width = 0.0;
+        quad.background = Background::Linear {
+            from: Color::rgb(255, 0, 0),
+            to: Color::rgb(0, 0, 255),
+            start: UnitPoint::new(0.0, 0.5),
+            end: UnitPoint::new(1.0, 0.5),
+        };
+        let pixmap = render(&quad);
+        let left = pixel(&pixmap, 8, 20);
+        let right = pixel(&pixmap, 32, 20);
+        assert!(left[0] > left[2], "left side is red: {left:?}");
+        assert!(right[2] > right[0], "right side is blue: {right:?}");
+    }
+
+    #[test]
+    fn a_hard_shadow_paints_outside_the_box() {
+        use cappy_core::ShadowPrimitive;
+
+        let mut pixmap = Pixmap::new(SIZE, SIZE).expect("non-empty pixmap");
+        paint_shadow(
+            &mut pixmap.as_mut(),
+            &ShadowPrimitive {
+                rect: Rect::new(8.0, 8.0, 16.0, 16.0),
+                corner_radius: 0.0,
+                blur: 0.0,
+                color: Color::rgba(0, 0, 0, 255),
+            },
+            1.0,
+            (0.0, 0.0),
+        );
+        assert_eq!(pixel(&pixmap, 12, 12), [0, 0, 0, 255]);
+        assert_eq!(pixel(&pixmap, 2, 12), [0, 0, 0, 0]);
     }
 }

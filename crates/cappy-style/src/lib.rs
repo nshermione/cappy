@@ -4,17 +4,23 @@
 //! - [`Theme`]: tokens plus named classes (with `:hover` / `:active` variants).
 //! - [`Style`]: the fully resolved result used by layout and painting.
 
+mod background;
 mod classes;
 mod color;
 mod refinement;
+mod shadow;
 mod style;
 mod theme;
 mod tokens;
 mod value;
 
+pub use background::{
+    Background, BackgroundValue, GradientDirection, LinearGradient, UnitPoint, linear,
+};
 pub use classes::Class;
 pub use color::{Color, ColorParseError};
 pub use refinement::StyleRefinement;
+pub use shadow::{BoxShadow, ShadowValue, shadow};
 pub use style::{
     Align, Display, Edges, FlexDirection, FontWeight, Justify, LayoutStyle, Style, StyleChange,
     TextStyle, VisualStyle,

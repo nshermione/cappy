@@ -13,6 +13,7 @@ const CULL_MARGIN: f32 = 1.0;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct Batch {
     pub quads: Vec<usize>,
+    pub images: Vec<usize>,
     pub texts: Vec<usize>,
 }
 
@@ -25,24 +26,49 @@ pub(crate) fn plan_batches(primitives: &[Primitive], damage: &[Rect]) -> Vec<Bat
             continue;
         }
         match primitive {
-            Primitive::Quad(_) => {
-                if covers_batch_text(primitives, current(&batches), &bounds) {
+            Primitive::Quad(_) | Primitive::Shadow(_) => {
+                if overlaps_batch(primitives, current(&batches), &bounds, BatchPart::UnderQuad) {
                     batches.push(Batch::default());
                 }
                 current_mut(&mut batches).quads.push(index);
             }
+            Primitive::Image(_) => {
+                if overlaps_batch(
+                    primitives,
+                    current(&batches),
+                    &bounds,
+                    BatchPart::UnderImage,
+                ) {
+                    batches.push(Batch::default());
+                }
+                current_mut(&mut batches).images.push(index);
+            }
             Primitive::Text(_) => current_mut(&mut batches).texts.push(index),
         }
     }
-    batches.retain(|batch| !batch.quads.is_empty() || !batch.texts.is_empty());
+    batches.retain(|batch| {
+        !batch.quads.is_empty() || !batch.images.is_empty() || !batch.texts.is_empty()
+    });
     batches
 }
 
-fn covers_batch_text(primitives: &[Primitive], batch: &Batch, bounds: &Rect) -> bool {
-    batch
-        .texts
-        .iter()
-        .any(|&text| primitives[text].bounds().intersects(bounds))
+/// What a new primitive is drawn after. A quad is drawn before images and text, so it has to
+/// start a new batch when it would cover either. An image is drawn before text.
+enum BatchPart {
+    UnderQuad,
+    UnderImage,
+}
+
+fn overlaps_batch(primitives: &[Primitive], batch: &Batch, bounds: &Rect, part: BatchPart) -> bool {
+    let overlaps = |indices: &[usize]| {
+        indices
+            .iter()
+            .any(|&index| primitives[index].bounds().intersects(bounds))
+    };
+    match part {
+        BatchPart::UnderQuad => overlaps(&batch.images) || overlaps(&batch.texts),
+        BatchPart::UnderImage => overlaps(&batch.texts),
+    }
 }
 
 fn current(batches: &[Batch]) -> &Batch {
@@ -66,7 +92,7 @@ mod tests {
     fn quad(x: f32, y: f32, size: f32) -> Primitive {
         Primitive::Quad(QuadPrimitive {
             rect: Rect::new(x, y, size, size),
-            background: Color::WHITE,
+            background: cappy_core::Background::Solid(Color::WHITE),
             border_color: Color::TRANSPARENT,
             border_width: 0.0,
             corner_radius: 0.0,
@@ -98,6 +124,7 @@ mod tests {
             batches,
             [Batch {
                 quads: vec![0, 2],
+                images: vec![],
                 texts: vec![1],
             }]
         );
@@ -112,10 +139,12 @@ mod tests {
             [
                 Batch {
                     quads: vec![],
+                    images: vec![],
                     texts: vec![0],
                 },
                 Batch {
                     quads: vec![1],
+                    images: vec![],
                     texts: vec![2],
                 },
             ]
@@ -130,6 +159,7 @@ mod tests {
             batches,
             [Batch {
                 quads: vec![1],
+                images: vec![],
                 texts: vec![],
             }]
         );

@@ -147,7 +147,7 @@ mod tests {
         ClassName::parse_list(list)
     }
 
-    fn paint(theme: &Theme, list: &str, state: InteractionState) -> (Color, Color) {
+    fn paint(theme: &Theme, list: &str, state: InteractionState) -> (crate::Background, Color) {
         let style = theme.resolve(None, &names(list), &StyleRefinement::default(), state, None);
         (style.visual.background, style.text.color)
     }

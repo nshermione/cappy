@@ -5,6 +5,7 @@
 mod batch;
 mod composite;
 mod gpu_buffer;
+mod image;
 mod quad;
 mod renderer;
 mod surface;

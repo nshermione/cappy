@@ -69,9 +69,10 @@ pub use cappy_components as components;
 pub mod prelude {
     pub use cappy_core::{
         Align, Application, Color, ColorToken, Component, Context, Display, Dynamic, Element,
-        FlexDirection, FontSize, FontWeight, FrameInput, HasContext, IntoReactive, Justify, Radius,
-        Reactive, Signal, Slot, Space, StyleRefinement, Stylesheet, Theme, Ui, UpdateOutcome, div,
-        for_each, fragment, hex, if_else, percent, show, slot, text, text_dyn,
+        FlexDirection, FontSize, FontWeight, FrameInput, HasContext, ImagePixels, IntoReactive,
+        Justify, ObjectFit, Radius, Reactive, Signal, Slot, Space, StyleRefinement, Stylesheet,
+        Theme, Ui, UpdateOutcome, div, for_each, fragment, hex, if_else, image, linear, percent,
+        shadow, show, slot, text, text_dyn,
     };
     pub use cappy_dsl::{style, theme, ui};
     pub use cappy_macros::{ClassName, Props, component, store, stylesheet};

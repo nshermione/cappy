@@ -5,6 +5,8 @@ use std::sync::Arc;
 use cappy_layout::Rect;
 use cappy_style::{ClassName, InteractionState, Style, StyleRefinement, Stylesheet};
 
+use crate::bitmap::{ImagePixels, ObjectFit};
+
 use crate::element::{ClickHandler, HoverHandler};
 
 /// One direct child of a node: a mounted element, or a control-flow block.
@@ -46,6 +48,10 @@ impl NodeId {
 pub(crate) enum NodeContent {
     Container,
     Text(Arc<str>),
+    Image {
+        pixels: Arc<ImagePixels>,
+        fit: ObjectFit,
+    },
 }
 
 pub(crate) struct Node {
@@ -73,6 +79,8 @@ pub(crate) struct Node {
     pub(crate) bindings: Vec<crate::reactive::BindingId>,
     /// Absolute rectangle in logical pixels from the last layout.
     pub(crate) rect: Rect,
+    /// Ink painted last frame, including shadow that falls outside [`Self::rect`].
+    pub(crate) painted: Rect,
     pub(crate) style_dirty: bool,
     pub(crate) paint_dirty: bool,
 }
@@ -81,7 +89,7 @@ impl Node {
     pub(crate) fn text(&self) -> Option<&str> {
         match &self.content {
             NodeContent::Text(text) => Some(text),
-            NodeContent::Container => None,
+            NodeContent::Container | NodeContent::Image { .. } => None,
         }
     }
 

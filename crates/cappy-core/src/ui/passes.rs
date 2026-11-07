@@ -2,11 +2,14 @@
 
 use std::sync::Arc;
 
-use cappy_layout::{Point, TextLeaf};
-use cappy_style::{Display, Extent, LayoutStyle, TextStyle};
+use cappy_layout::{Point, Rect, TextLeaf};
+use cappy_style::{Display, Extent, LayoutStyle, TextStyle, VisualStyle};
 
 use super::{NodeId, Ui};
-use crate::paint::{Primitive, QuadPrimitive, TextPrimitive};
+use crate::paint::{
+    ImagePrimitive, Primitive, QuadPrimitive, ShadowPrimitive, TextPrimitive, paint_bounds,
+    shadow_shape,
+};
 
 const LAYOUT_OUT_OF_SYNC: &str = "layout tree is out of sync with the node tree";
 
@@ -127,9 +130,10 @@ impl Ui {
                 .translate(origin);
             let node = &mut self.nodes[id.index()];
             if node.rect != rect {
-                self.damage.add(node.rect);
-                self.damage.add(rect);
+                let shadow = node.style.visual.shadow;
+                self.damage.add(node.painted);
                 node.rect = rect;
+                self.damage.add(paint_bounds(rect, shadow));
                 self.display_list_stale = true;
             }
             let child_origin = Point::new(rect.x, rect.y);
@@ -147,7 +151,9 @@ impl Ui {
         }
         for node in &mut self.nodes {
             if std::mem::take(&mut node.paint_dirty) {
-                self.damage.add(node.rect);
+                self.damage.add(node.painted);
+                self.damage
+                    .add(paint_bounds(node.rect, node.style.visual.shadow));
                 self.display_list_stale = true;
             }
         }
@@ -158,6 +164,7 @@ impl Ui {
             return;
         }
         let mut primitives = Vec::new();
+        let mut painted = vec![Rect::ZERO; self.nodes.len()];
         let mut stack = vec![self.root];
         while let Some(id) = stack.pop() {
             let node = &self.nodes[id.index()];
@@ -165,37 +172,64 @@ impl Ui {
                 continue;
             }
             let visual = &node.style.visual;
-            let has_border = visual.border_width > 0.0 && !visual.border_color.is_transparent();
-            if !visual.background.is_transparent() || has_border {
-                primitives.push(Primitive::Quad(QuadPrimitive {
-                    rect: node.rect,
-                    background: visual.background,
-                    border_color: visual.border_color,
-                    border_width: visual.border_width,
-                    corner_radius: visual.corner_radius,
-                }));
-            }
-            if let super::NodeContent::Text(text) = &node.content {
-                let padding = node.style.layout.padding;
-                let content = cappy_layout::Rect::new(
-                    node.rect.x + padding.left,
-                    node.rect.y + padding.top,
-                    (node.rect.width - padding.horizontal()).max(0.0),
-                    (node.rect.height - padding.vertical()).max(0.0),
-                );
-                let text_style = &node.style.text;
-                primitives.push(Primitive::Text(TextPrimitive {
-                    rect: content,
-                    text: text.clone(),
-                    color: text_style.color,
-                    font_size: text_style.font_size,
-                    line_height: text_style.line_height_px(),
-                    weight: text_style.weight.0,
-                }));
+            painted[id.index()] = paint_bounds(node.rect, visual.shadow);
+            push_box(&mut primitives, node.rect, visual);
+            match &node.content {
+                super::NodeContent::Text(text) => {
+                    let padding = node.style.layout.padding;
+                    let content = Rect::new(
+                        node.rect.x + padding.left,
+                        node.rect.y + padding.top,
+                        (node.rect.width - padding.horizontal()).max(0.0),
+                        (node.rect.height - padding.vertical()).max(0.0),
+                    );
+                    let text_style = &node.style.text;
+                    primitives.push(Primitive::Text(TextPrimitive {
+                        rect: content,
+                        text: text.clone(),
+                        color: text_style.color,
+                        font_size: text_style.font_size,
+                        line_height: text_style.line_height_px(),
+                        weight: text_style.weight.0,
+                    }));
+                }
+                super::NodeContent::Image { pixels, fit } => {
+                    primitives.push(Primitive::Image(ImagePrimitive {
+                        rect: node.rect,
+                        pixels: pixels.clone(),
+                        fit: *fit,
+                        corner_radius: visual.corner_radius,
+                    }));
+                }
+                super::NodeContent::Container => {}
             }
             stack.extend(node.children.iter().rev());
         }
+        for (node, ink) in self.nodes.iter_mut().zip(painted) {
+            node.painted = ink;
+        }
         self.display_list = Arc::new(primitives);
+    }
+}
+
+fn push_box(primitives: &mut Vec<Primitive>, rect: Rect, visual: &VisualStyle) {
+    if let Some(shape) = shadow_shape(rect, visual.shadow) {
+        primitives.push(Primitive::Shadow(ShadowPrimitive {
+            rect: shape,
+            corner_radius: visual.corner_radius,
+            blur: visual.shadow.blur.max(0.0),
+            color: visual.shadow.color,
+        }));
+    }
+    let has_border = visual.border_width > 0.0 && !visual.border_color.is_transparent();
+    if !visual.background.is_transparent() || has_border {
+        primitives.push(Primitive::Quad(QuadPrimitive {
+            rect,
+            background: visual.background,
+            border_color: visual.border_color,
+            border_width: visual.border_width,
+            corner_radius: visual.corner_radius,
+        }));
     }
 }
 

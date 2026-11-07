@@ -10,6 +10,7 @@ use cappy_host::{PixelRect, physical_regions};
 use crate::FontContext;
 use crate::batch::{Batch, plan_batches};
 use crate::composite::{Compositor, OFFSCREEN_FORMAT, Offscreen};
+use crate::image::ImageLayer;
 use crate::quad::{QuadBatch, QuadBlend, QuadInstance, QuadPipelines, needs_manual_srgb};
 use crate::text::TextLayer;
 
@@ -71,6 +72,7 @@ impl From<glyphon::RenderError> for RenderError {
 
 pub struct Renderer {
     quad_pipelines: QuadPipelines,
+    images: ImageLayer,
     compositor: Compositor,
     scene_quads: QuadBatch,
     overlay_quads: QuadBatch,
@@ -89,6 +91,7 @@ impl Renderer {
         Self {
             scene_quads: QuadBatch::new(device, &quad_pipelines, "cappy scene quads"),
             overlay_quads: QuadBatch::new(device, &quad_pipelines, "cappy overlay quads"),
+            images: ImageLayer::new(device),
             quad_pipelines,
             compositor: Compositor::new(device),
             text: TextLayer::new(device, queue, fonts, OFFSCREEN_FORMAT),
@@ -152,6 +155,14 @@ impl Renderer {
         let (instances, quad_ranges) =
             quad_instances(&frame.primitives, &batches, &scissors, frame.scale_factor);
         self.scene_quads.upload(device, queue, size, &instances);
+        self.images.prepare(
+            device,
+            queue,
+            size,
+            frame.scale_factor,
+            &frame.primitives,
+            &batches,
+        );
         self.text.prepare(
             device,
             queue,
@@ -219,6 +230,8 @@ impl Renderer {
             self.scene_quads.draw(&mut pass, &eraser, index..index + 1);
             for (batch_index, range) in quad_ranges.iter().enumerate() {
                 self.scene_quads.draw(&mut pass, &painter, range.clone());
+                self.images
+                    .draw(device, &mut pass, OFFSCREEN_FORMAT, batch_index);
                 self.text.render(batch_index, &mut pass)?;
             }
         }

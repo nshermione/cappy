@@ -1,6 +1,6 @@
 //! Fully resolved styles: concrete values only, no tokens.
 
-use crate::{Color, Extent, Tokens};
+use crate::{Background, BoxShadow, Color, Extent, Tokens};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Display {
@@ -111,19 +111,21 @@ pub struct LayoutStyle {
 /// Properties that only affect painting.
 #[derive(Clone, Debug, PartialEq)]
 pub struct VisualStyle {
-    pub background: Color,
+    pub background: Background,
     pub border_color: Color,
     pub border_width: f32,
     pub corner_radius: f32,
+    pub shadow: BoxShadow,
 }
 
 impl Default for VisualStyle {
     fn default() -> Self {
         Self {
-            background: Color::TRANSPARENT,
+            background: Background::Solid(Color::TRANSPARENT),
             border_color: Color::TRANSPARENT,
             border_width: 0.0,
             corner_radius: 0.0,
+            shadow: BoxShadow::NONE,
         }
     }
 }
@@ -210,6 +212,7 @@ impl Style {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shadow;
 
     fn base() -> Style {
         Style::inheriting(TextStyle::from_tokens(&Tokens::light()))
@@ -223,7 +226,21 @@ mod tests {
     #[test]
     fn background_change_only_needs_paint() {
         let mut changed = base();
-        changed.visual.background = Color::BLACK;
+        changed.visual.background = Background::Solid(Color::BLACK);
+        assert_eq!(
+            changed.diff(&base()),
+            StyleChange {
+                layout: false,
+                paint: true,
+                inherited: false
+            }
+        );
+    }
+
+    #[test]
+    fn shadow_change_only_needs_paint() {
+        let mut changed = base();
+        changed.visual.shadow = shadow(0, 4, 8, 0, Color::BLACK).resolve(&Tokens::light());
         assert_eq!(
             changed.diff(&base()),
             StyleChange {

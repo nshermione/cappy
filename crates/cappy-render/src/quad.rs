@@ -4,13 +4,14 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use bytemuck::{Pod, Zeroable};
-use cappy_core::{Color, Primitive, Rect};
+use cappy_core::{Background, Color, Primitive, QuadPrimitive, Rect, ShadowPrimitive};
 use wgpu::util::DeviceExt;
 
 use crate::gpu_buffer::GrowableBuffer;
 
 const SHADER_SOURCE: &str = concat!(
     include_str!("shaders/color.wgsl"),
+    include_str!("shaders/sdf.wgsl"),
     include_str!("shaders/quad.wgsl")
 );
 const VERTICES_PER_QUAD: u32 = 6;
@@ -21,25 +22,65 @@ pub(crate) struct QuadInstance {
     rect: [f32; 4],
     background: [f32; 4],
     border_color: [f32; 4],
-    shape: [f32; 2],
+    color_to: [f32; 4],
+    /// x: border width, y: corner radius, z: blur, w: 0 fill or 1 shadow.
+    shape: [f32; 4],
+    /// start.xy, end.xy in the unit box. A zero-length segment is a solid color.
+    gradient: [f32; 4],
 }
 
 impl QuadInstance {
-    const ATTRIBUTES: [wgpu::VertexAttribute; 4] =
-        wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x2];
+    const ATTRIBUTES: [wgpu::VertexAttribute; 6] = wgpu::vertex_attr_array![
+        0 => Float32x4,
+        1 => Float32x4,
+        2 => Float32x4,
+        3 => Float32x4,
+        4 => Float32x4,
+        5 => Float32x4
+    ];
 
-    /// The instance for a display-list quad, scaled to physical pixels.
+    /// The instance for a display-list quad or shadow, scaled to physical pixels.
     pub fn from_primitive(primitive: &Primitive, scale_factor: f32) -> Option<Self> {
-        let Primitive::Quad(quad) = primitive else {
-            return None;
-        };
-        Some(Self::new(
-            quad.rect.scale(scale_factor),
-            quad.background,
-            quad.border_color,
-            quad.border_width * scale_factor,
-            quad.corner_radius * scale_factor,
-        ))
+        match primitive {
+            Primitive::Quad(quad) => Some(Self::from_quad(quad, scale_factor)),
+            Primitive::Shadow(shadow) => Some(Self::from_shadow(shadow, scale_factor)),
+            Primitive::Image(_) | Primitive::Text(_) => None,
+        }
+    }
+
+    fn from_quad(quad: &QuadPrimitive, scale_factor: f32) -> Self {
+        let rect = quad.rect.scale(scale_factor);
+        let (from, to, gradient) = gradient_stops(quad.background);
+        Self {
+            rect: [rect.x, rect.y, rect.width, rect.height],
+            background: from.to_linear_premultiplied(),
+            border_color: quad.border_color.to_linear_premultiplied(),
+            color_to: to.to_linear_premultiplied(),
+            shape: [
+                quad.border_width * scale_factor,
+                quad.corner_radius * scale_factor,
+                0.0,
+                0.0,
+            ],
+            gradient,
+        }
+    }
+
+    fn from_shadow(shadow: &ShadowPrimitive, scale_factor: f32) -> Self {
+        let rect = shadow.rect.scale(scale_factor);
+        Self {
+            rect: [rect.x, rect.y, rect.width, rect.height],
+            background: shadow.color.to_linear_premultiplied(),
+            border_color: [0.0; 4],
+            color_to: [0.0; 4],
+            shape: [
+                0.0,
+                shadow.corner_radius * scale_factor,
+                shadow.blur * scale_factor,
+                1.0,
+            ],
+            gradient: [0.0; 4],
+        }
     }
 
     /// A transparent quad that, drawn with [`QuadBlend::Replace`], erases `rect`.
@@ -54,11 +95,14 @@ impl QuadInstance {
         border_width: f32,
         radius: f32,
     ) -> Self {
+        let color = background.to_linear_premultiplied();
         Self {
             rect: [rect.x, rect.y, rect.width, rect.height],
-            background: background.to_linear_premultiplied(),
+            background: color,
             border_color: border.to_linear_premultiplied(),
-            shape: [border_width, radius],
+            color_to: color,
+            shape: [border_width, radius, 0.0, 0.0],
+            gradient: [0.0; 4],
         }
     }
 
@@ -68,6 +112,18 @@ impl QuadInstance {
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &Self::ATTRIBUTES,
         }
+    }
+}
+
+fn gradient_stops(background: Background) -> (Color, Color, [f32; 4]) {
+    match background {
+        Background::Solid(color) => (color, color, [0.0; 4]),
+        Background::Linear {
+            from,
+            to,
+            start,
+            end,
+        } => (from, to, [start.x, start.y, end.x, end.y]),
     }
 }
 

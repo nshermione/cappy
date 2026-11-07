@@ -5,8 +5,8 @@
 use std::sync::{Arc, OnceLock};
 
 use cappy_core::{
-    Application, Color, ColorToken, Context, Damage, Element, FrameInput, Radius, RenderFrame,
-    Reactive, Theme, Ui, div, text,
+    Application, Color, ColorToken, Context, Damage, Element, FrameInput, ImagePixels, ObjectFit,
+    Radius, Reactive, RenderFrame, Theme, Ui, div, image, linear, shadow, text,
 };
 use cappy_dsl::{style, ui};
 use cappy_testing::TestUi;
@@ -67,6 +67,40 @@ pub fn shapes() -> Element {
                 })
                 div(style = style! { size: 60, background: Color::hex("#22c55e") })
             }
+        }
+    }
+}
+
+pub fn effects() -> Element {
+    let pixels = Arc::new(
+        ImagePixels::from_rgba(
+            2,
+            2,
+            vec![
+                239, 68, 68, 255, 59, 130, 246, 255, 59, 130, 246, 255, 239, 68, 68, 255,
+            ],
+        )
+        .expect("2x2 rgba"),
+    );
+    ui! {
+        div(style = style! { padding: 24, gap: 16 }) {
+            div(key = "gradient", style = style! {
+                size: 64,
+                background: linear(Color::hex("#ef4444"), Color::hex("#3b82f6")).to_right(),
+                radius: 8,
+            })
+            div(key = "shadow", style = style! {
+                size: 64,
+                background: Color::hex("#f8fafc"),
+                radius: 12,
+                shadow: shadow(0, 8, 16, 0, Color::rgba(15, 23, 42, 90)),
+            })
+            image(
+                pixels,
+                key = "photo",
+                fit = ObjectFit::Contain,
+                style = style! { size: 64, radius: 16, background: Color::hex("#e4e4e7") },
+            )
         }
     }
 }

@@ -1,8 +1,8 @@
 //! Partial styles that layer on top of each other (theme classes, then inline styles).
 
 use crate::{
-    Align, ColorValue, Dimension, Display, Edges, FlexDirection, FontWeight, Justify, Length,
-    Style, Tokens,
+    Align, BackgroundValue, ColorValue, Dimension, Display, Edges, FlexDirection, FontWeight,
+    Justify, Length, ShadowValue, Style, Tokens,
 };
 
 /// A partial style. Every field is optional; `None` keeps whatever an earlier layer set.
@@ -33,10 +33,11 @@ pub struct StyleRefinement {
     pub flex_grow: Option<f32>,
     pub flex_shrink: Option<f32>,
     pub grid_columns: Option<u16>,
-    pub background: Option<ColorValue>,
+    pub background: Option<BackgroundValue>,
     pub border_color: Option<ColorValue>,
     pub border_width: Option<Length>,
     pub corner_radius: Option<Length>,
+    pub shadow: Option<ShadowValue>,
     pub text_color: Option<ColorValue>,
     pub font_size: Option<Length>,
     pub line_height: Option<f32>,
@@ -131,11 +132,12 @@ impl StyleRefinement {
         min_height => min_height: Dimension,
         max_width => max_width: Dimension,
         max_height => max_height: Dimension,
-        background => background: ColorValue,
+        background => background: BackgroundValue,
         border_color => border_color: ColorValue,
         border_width => border_width: Length,
         /// Corner radius.
         radius => corner_radius: Length,
+        shadow => shadow: ShadowValue,
         text_color => text_color: ColorValue,
         font_size => font_size: Length,
         font_weight => font_weight: FontWeight,
@@ -169,7 +171,7 @@ impl StyleRefinement {
             margin_top, margin_right, margin_bottom, margin_left,
             width, height, min_width, min_height, max_width, max_height,
             flex_grow, flex_shrink, grid_columns,
-            background, border_color, border_width, corner_radius,
+            background, border_color, border_width, corner_radius, shadow,
             text_color, font_size, line_height, font_weight,
         );
     }
@@ -240,6 +242,10 @@ impl StyleRefinement {
             &mut visual.corner_radius,
             self.corner_radius.map(|l| l.resolve(tokens)),
         );
+        assign(
+            &mut visual.shadow,
+            self.shadow.map(|shadow| shadow.resolve(tokens)),
+        );
     }
 
     fn apply_text(&self, style: &mut Style, tokens: &Tokens) {
@@ -286,7 +292,10 @@ mod tests {
             .background(Color::BLACK);
         base.merge(&StyleRefinement::default().background(Color::WHITE));
         assert_eq!(base.padding_left, Some(Length::Px(4.0)));
-        assert_eq!(base.background, Some(ColorValue::Literal(Color::WHITE)));
+        assert_eq!(
+            base.background,
+            Some(BackgroundValue::Solid(ColorValue::Literal(Color::WHITE)))
+        );
     }
 
     #[test]

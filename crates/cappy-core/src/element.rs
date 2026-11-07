@@ -11,6 +11,7 @@ use cappy_style::{ClassName, StyleRefinement, Stylesheet};
 
 use crate::ClickEvent;
 use crate::binding::{Dynamic, IntoClasses, IntoStyle, IntoText};
+use crate::bitmap::{ImagePixels, ObjectFit};
 
 pub(crate) type ClickHandler = Box<dyn FnMut(&ClickEvent)>;
 pub(crate) type HoverHandler = Box<dyn FnMut(bool)>;
@@ -22,6 +23,10 @@ pub(crate) enum ElementContent {
     Container,
     StaticText(Arc<str>),
     DynamicText(TextBinding),
+    Image {
+        pixels: Arc<ImagePixels>,
+        fit: ObjectFit,
+    },
     /// Transparent hole. Mount skips it until a parent replaces it with a child.
     Slot {
         index: u16,
@@ -100,6 +105,16 @@ pub fn text(content: impl IntoText) -> Element {
 /// A text leaf whose content is recomputed whenever a signal it reads changes.
 pub fn text_dyn(content: impl Fn() -> String + 'static) -> Element {
     text(Dynamic(content))
+}
+
+/// An image leaf. `pixels` are straight RGBA8. Give the element a width and height; the box does
+/// not yet size itself from the bitmap. [`Element::fit`] chooses how the bitmap fills that box.
+#[must_use]
+pub fn image(pixels: impl Into<Arc<ImagePixels>>) -> Element {
+    Element::new(ElementContent::Image {
+        pixels: pixels.into(),
+        fit: ObjectFit::Fill,
+    })
 }
 
 /// A hole where a `#[slot]` field is placed. `slot(self.body)` reads that field. The parent
@@ -198,6 +213,19 @@ impl Element {
         )
     }
 
+    /// How the bitmap fills the box. Only image elements use this.
+    ///
+    /// # Panics
+    /// Panics when the element is not an image.
+    #[must_use]
+    pub fn fit(mut self, fit: ObjectFit) -> Self {
+        let ElementContent::Image { fit: slot, .. } = &mut self.content else {
+            panic!("fit() is only for image elements");
+        };
+        *slot = fit;
+        self
+    }
+
     /// Adds classes from a space-separated list, e.g. `"btn btn-primary"`, or a single typed
     /// class from `#[derive(ClassName)]`. A [`Dynamic`] closure is recomputed whenever a signal it
     /// reads changes; dynamic classes apply after static ones.
@@ -262,6 +290,10 @@ impl Element {
     #[must_use]
     pub fn child(mut self, child: impl Into<Element>) -> Self {
         assert!(!self.is_text(), "text elements cannot have children");
+        assert!(
+            !matches!(self.content, ElementContent::Image { .. }),
+            "image elements cannot have children"
+        );
         self.children.push(child.into());
         self
     }
@@ -379,6 +411,7 @@ impl fmt::Debug for Element {
             ElementContent::Container => "div".to_owned(),
             ElementContent::StaticText(text) => format!("text({text:?})"),
             ElementContent::DynamicText(_) => "text(<dynamic>)".to_owned(),
+            ElementContent::Image { .. } => "image".to_owned(),
             ElementContent::Slot { index } => format!("slot({index})"),
             ElementContent::Fragment(children) => format!("fragment({})", children.len()),
             ElementContent::Flow(_) => "flow".to_owned(),

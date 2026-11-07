@@ -368,6 +368,128 @@ fn text_inherits_color_from_its_ancestors() {
 }
 
 #[test]
+fn a_linear_background_is_a_quad_fill() {
+    use cappy_style::{Background, linear};
+
+    let cx = context();
+    let ui = settled(
+        &cx,
+        div().style(
+            StyleRefinement::default()
+                .size(40)
+                .background(linear(Color::BLACK, Color::WHITE).to_right()),
+        ),
+    );
+    let Primitive::Quad(quad) = &ui.display_list()[0] else {
+        panic!("the root fill must be a quad");
+    };
+    let Background::Linear {
+        start,
+        end,
+        from,
+        to,
+    } = quad.background
+    else {
+        panic!("expected a linear fill");
+    };
+    assert_eq!((from, to), (Color::BLACK, Color::WHITE));
+    assert_eq!(start.x, 0.0);
+    assert_eq!(end.x, 1.0);
+}
+
+#[test]
+fn shadow_repaint_covers_the_old_box_and_the_new_ink() {
+    use cappy_style::shadow;
+
+    let cx = context();
+    let offset = cx.signal(0.0_f32);
+    let offset_for_style = offset.clone();
+    let root = div().child(div().key("card").style_dyn(move || {
+        StyleRefinement::default()
+            .margin(40)
+            .size(40)
+            .background(Color::WHITE)
+            .shadow(shadow(offset_for_style.get(), 0, 0, 0, Color::BLACK))
+    }));
+    let mut ui = settled(&cx, root);
+    let card = ui.node_rect(ui.find_by_key("card").unwrap()).unwrap();
+    assert!(
+        ui.display_list()
+            .iter()
+            .any(|primitive| matches!(primitive, Primitive::Shadow(_)))
+    );
+    offset.set(20.0);
+    let damaged = regions(ui.update(VIEWPORT));
+    let union = damaged
+        .iter()
+        .copied()
+        .reduce(|left, right| left.union(&right))
+        .expect("shadow movement damages something");
+    assert!(union.x <= card.x + 0.5);
+    assert!(union.right() >= card.right() + 20.0 - 0.5);
+}
+
+#[test]
+fn a_background_change_without_a_shadow_stays_inside_the_box() {
+    let cx = context();
+    let dark = cx.signal(false);
+    let dark_for_style = dark.clone();
+    let root = div().child(div().key("card").style_dyn(move || {
+        let color = if dark_for_style.get() {
+            Color::BLACK
+        } else {
+            Color::WHITE
+        };
+        StyleRefinement::default()
+            .margin(40)
+            .size(40)
+            .background(color)
+    }));
+    let mut ui = settled(&cx, root);
+    let card = ui.node_rect(ui.find_by_key("card").unwrap()).unwrap();
+    dark.set(true);
+    let damaged = regions(ui.update(VIEWPORT));
+    let union = damaged
+        .iter()
+        .copied()
+        .reduce(|left, right| left.union(&right))
+        .expect("the recolor damages the card");
+    assert!(union.x >= card.x - 0.5);
+    assert!(union.right() <= card.right() + 0.5);
+    assert!(union.y >= card.y - 0.5);
+    assert!(union.bottom() <= card.bottom() + 0.5);
+}
+
+#[test]
+fn an_image_leaf_paints_its_bitmap() {
+    use std::sync::Arc;
+
+    use crate::{ImagePixels, ObjectFit, image};
+
+    let cx = context();
+    let pixels = Arc::new(
+        ImagePixels::from_rgba(2, 1, vec![255, 0, 0, 255, 0, 0, 255, 255]).expect("2x1 rgba"),
+    );
+    let ui = settled(
+        &cx,
+        image(pixels)
+            .fit(ObjectFit::Contain)
+            .key("photo")
+            .style(StyleRefinement::default().size(40)),
+    );
+    let image = ui
+        .display_list()
+        .iter()
+        .find_map(|primitive| match primitive {
+            Primitive::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("image primitive");
+    assert_eq!(image.fit, ObjectFit::Contain);
+    assert!(image.placement().dest.height < image.rect.height);
+}
+
+#[test]
 fn display_list_paints_back_to_front() {
     let cx = context();
     let ui = settled(&cx, counter(cx.signal(0)));
@@ -380,7 +502,7 @@ fn display_list_paints_back_to_front() {
         .iter()
         .filter_map(|primitive| match primitive {
             Primitive::Text(text) => Some(&*text.text),
-            Primitive::Quad(_) => None,
+            Primitive::Quad(_) | Primitive::Shadow(_) | Primitive::Image(_) => None,
         })
         .collect();
     assert_eq!(texts, ["Count: 0", "+1"]);
