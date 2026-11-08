@@ -7,7 +7,7 @@ pub mod __private {
 }
 
 #[doc(hidden)]
-pub use cappy_macros::{context_in_scope, slot_self, ui_closure};
+pub use cappy_macros::{slot_self, ui_closure, ui_for_view, ui_view};
 
 /// Builds an element tree.
 ///
@@ -36,9 +36,9 @@ pub use cappy_macros::{context_in_scope, slot_self, ui_closure};
 /// - `name(content, field = value, ...) { children }` calls the function `name` in scope, so
 ///   `div`, `text` and your own element functions all resolve (and go to definition) the same
 ///   way. The leading `content` argument, the fields and the children are all optional.
-/// - `@Type(field = value, ...) { children }` builds `Type::open(cx)` and sets fields. `cx` is the
-///   [`Context`](cappy_core::Context) in scope. The type is a `#[component]`. `class`, `style` and
-///   `key` are applied to the element
+/// - `@Type(field = value, ...) { children }` builds `Type::open(&context)` and sets fields.
+///   `context` is the name passed to [`ui!`](ui): `ui!((context) { @Type })`. The type is a
+///   `#[component]`. `class`, `style` and `key` are applied to the element
 ///   `render` returns. Without `#[slot]` fields, children are appended to that root. With slots,
 ///   the first child that has no `slot = name` fills the first slot, `slot = name` fills that
 ///   slot, and further unnamed children are dropped.
@@ -50,6 +50,11 @@ pub use cappy_macros::{context_in_scope, slot_self, ui_closure};
 ///   nested `show`, `if` and `for`. `else` may be omitted or written `else if`.
 /// - `for (item in :list, key = item.field) { ... }` repeats the block, keeping a row when its
 ///   key stays. `item` in the block is the row signal.
+/// - `show`, `if` and `for` build their elements in a `'static` closure. Pass the context when
+///   those blocks or `@Type` use it: `ui!((context) { ... })`. Each block clones that binding, so
+///   several blocks can share it, and the same name is bound again inside the closure. A tree
+///   that never opens a component and never reads the context inside those blocks stays
+///   `ui! { ... }`.
 /// - `slot(field)` stays outside `show`, `if` and `for`. A parent fills slots before mount, and
 ///   those blocks build their contents at mount.
 ///
@@ -68,34 +73,48 @@ pub use cappy_macros::{context_in_scope, slot_self, ui_closure};
 /// an element with arguments, or it is read as that element's children.
 #[macro_export]
 macro_rules! ui {
-    ($($node:tt)+) => {
-        $crate::__ui_node!($($node)+)
+    (( $cx:ident ) { $($body:tt)* }) => {
+        $crate::__ui_node!(@cx [ $cx ] ; $($body)*)
+    };
+    ($($body:tt)+) => {
+        $crate::__ui_node!(@cx [ ] ; $($body)*)
     };
 }
 
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __ui_node {
-    (show ( : $cond:expr ) { $($body:tt)* } $(,)?) => {
-        $crate::__ui_show_expr!(: $cond ; $($body)*)
+    (@cx [ $($cx:ident)? ] ; show ( : $cond:expr ) { $($body:tt)* } $(,)?) => {
+        $crate::__ui_show_expr!(@cx [ $($cx)? ] ; : $cond ; $($body)*)
     };
-    (show ( $cond:expr ) { $($body:tt)* } $(,)?) => {
-        $crate::__ui_show_expr!(: $cond ; $($body)*)
+    (@cx [ $($cx:ident)? ] ; show ( $cond:expr ) { $($body:tt)* } $(,)?) => {
+        $crate::__ui_show_expr!(@cx [ $($cx)? ] ; : $cond ; $($body)*)
     };
-    (if ( : $cond:expr ) { $($then:tt)* } $($rest:tt)*) => {
-        $crate::__ui_if_root!($crate::ui_closure!(move || $cond) ; $crate::ui_closure!(move || $crate::__ui_fragment!($($then)*)) ; $($rest)*)
+    (@cx [ $($cx:ident)? ] ; if ( : $cond:expr ) { $($then:tt)* } $($rest:tt)*) => {
+        $crate::__ui_if_root!(
+            @cx [ $($cx)? ] ;
+            $crate::ui_closure!(move || $cond) ;
+            $crate::__ui_view!(@cx [ $($cx)? ] ; move || $crate::__ui_fragment!(@cx [ $($cx)? ] ; $($then)*)) ;
+            $($rest)*
+        )
     };
-    (if ( $cond:expr ) { $($then:tt)* } $($rest:tt)*) => {
-        $crate::__ui_if_root!($crate::ui_closure!(move || $cond) ; $crate::ui_closure!(move || $crate::__ui_fragment!($($then)*)) ; $($rest)*)
+    (@cx [ $($cx:ident)? ] ; if ( $cond:expr ) { $($then:tt)* } $($rest:tt)*) => {
+        $crate::__ui_if_root!(
+            @cx [ $($cx)? ] ;
+            $crate::ui_closure!(move || $cond) ;
+            $crate::__ui_view!(@cx [ $($cx)? ] ; move || $crate::__ui_fragment!(@cx [ $($cx)? ] ; $($then)*)) ;
+            $($rest)*
+        )
     };
-    (for ( $item:ident in : $source:expr , key = $key:ident . $($field:ident).+ ) { $($body:tt)* } $(,)?) => {
-        $crate::__ui_for_expr!($item ; $source ; $key ; path $($field).+ ; $($body)*)
+    (@cx [ $($cx:ident)? ] ; for ( $item:ident in : $source:expr , key = $key:ident . $($field:ident).+ ) { $($body:tt)* } $(,)?) => {
+        $crate::__ui_for_expr!(@cx [ $($cx)? ] ; $item ; $source ; $key ; path $($field).+ ; $($body)*)
     };
-    (for ( $item:ident in : $source:expr , key = $key:ident ) { $($body:tt)* } $(,)?) => {
-        $crate::__ui_for_expr!($item ; $source ; $key ; self ; $($body)*)
+    (@cx [ $($cx:ident)? ] ; for ( $item:ident in : $source:expr , key = $key:ident ) { $($body:tt)* } $(,)?) => {
+        $crate::__ui_for_expr!(@cx [ $($cx)? ] ; $item ; $source ; $key ; self ; $($body)*)
     };
-    (@ $type:ident $(:: $segment:ident)* $(( $($fields:tt)* ))? $({ $($children:tt)* })? $(,)?) => {
+    (@cx [ $($cx:ident)? ] ; @ $type:ident $(:: $segment:ident)* $(( $($fields:tt)* ))? $({ $($children:tt)* })? $(,)?) => {
         $crate::__ui_component!(
+            @cx [ $($cx)? ] ;
             $type $(:: $segment)* ;
             props [] ;
             host [] ;
@@ -103,15 +122,17 @@ macro_rules! __ui_node {
             $($($fields)*)?
         )
     };
-    ({ $element:expr } $(,)?) => {
+    (@cx [ $($cx:ident)? ] ; { $element:expr } $(,)?) => {
         $crate::__private::Element::from($element)
     };
-    ($ctor:ident ( $field:ident ) $(,)?) => {
+    (@cx [ $($cx:ident)? ] ; $ctor:ident ( $field:ident ) $(,)?) => {
         $crate::__ui_slot_expr!($ctor ; $field)
     };
-    ($name:ident $(( $($args:tt)* ))? $({ $($children:tt)* })? $(,)?) => {
+    (@cx [ $($cx:ident)? ] ; $name:ident $(( $($args:tt)* ))? $({ $($children:tt)* })? $(,)?) => {
         $crate::__ui_children!(
-            $crate::__ui_args!(@head $name ; $($($args)*)?) ; $($($children)*)?
+            @cx [ $($cx)? ] ;
+            $crate::__ui_args!(@head $name ; $($($args)*)?) ;
+            $($($children)*)?
         )
     };
 }
@@ -123,6 +144,7 @@ macro_rules! __ui_node {
 #[macro_export]
 macro_rules! __ui_component {
     (
+        @cx [ $($cx:ident)? ] ;
         $type:ident $(:: $segment:ident)* ;
         props [ $($props:tt)* ] ;
         host [ $($host:tt)* ] ;
@@ -130,6 +152,7 @@ macro_rules! __ui_component {
         class = [ $($class:expr),* $(,)? ] $(, $($rest:tt)*)?
     ) => {
         $crate::__ui_component!(
+            @cx [ $($cx)? ] ;
             $type $(:: $segment)* ;
             props [ $($props)* ] ;
             host [ $($host)* class = [ $($class),* ], ] ;
@@ -138,6 +161,7 @@ macro_rules! __ui_component {
         )
     };
     (
+        @cx [ $($cx:ident)? ] ;
         $type:ident $(:: $segment:ident)* ;
         props [ $($props:tt)* ] ;
         host [ $($host:tt)* ] ;
@@ -145,6 +169,7 @@ macro_rules! __ui_component {
         : class = [ $($class:expr),* $(,)? ] $(, $($rest:tt)*)?
     ) => {
         $crate::__ui_component!(
+            @cx [ $($cx)? ] ;
             $type $(:: $segment)* ;
             props [ $($props)* ] ;
             host [ $($host)* : class = [ $($class),* ], ] ;
@@ -153,6 +178,7 @@ macro_rules! __ui_component {
         )
     };
     (
+        @cx [ $($cx:ident)? ] ;
         $type:ident $(:: $segment:ident)* ;
         props [ $($props:tt)* ] ;
         host [ $($host:tt)* ] ;
@@ -160,6 +186,7 @@ macro_rules! __ui_component {
         class = $value:expr $(, $($rest:tt)*)?
     ) => {
         $crate::__ui_component!(
+            @cx [ $($cx)? ] ;
             $type $(:: $segment)* ;
             props [ $($props)* ] ;
             host [ $($host)* class = $value, ] ;
@@ -168,6 +195,7 @@ macro_rules! __ui_component {
         )
     };
     (
+        @cx [ $($cx:ident)? ] ;
         $type:ident $(:: $segment:ident)* ;
         props [ $($props:tt)* ] ;
         host [ $($host:tt)* ] ;
@@ -175,6 +203,7 @@ macro_rules! __ui_component {
         : class = $value:expr $(, $($rest:tt)*)?
     ) => {
         $crate::__ui_component!(
+            @cx [ $($cx)? ] ;
             $type $(:: $segment)* ;
             props [ $($props)* ] ;
             host [ $($host)* : class = $value, ] ;
@@ -183,6 +212,7 @@ macro_rules! __ui_component {
         )
     };
     (
+        @cx [ $($cx:ident)? ] ;
         $type:ident $(:: $segment:ident)* ;
         props [ $($props:tt)* ] ;
         host [ $($host:tt)* ] ;
@@ -190,6 +220,7 @@ macro_rules! __ui_component {
         style = $value:expr $(, $($rest:tt)*)?
     ) => {
         $crate::__ui_component!(
+            @cx [ $($cx)? ] ;
             $type $(:: $segment)* ;
             props [ $($props)* ] ;
             host [ $($host)* style = $value, ] ;
@@ -198,6 +229,7 @@ macro_rules! __ui_component {
         )
     };
     (
+        @cx [ $($cx:ident)? ] ;
         $type:ident $(:: $segment:ident)* ;
         props [ $($props:tt)* ] ;
         host [ $($host:tt)* ] ;
@@ -205,6 +237,7 @@ macro_rules! __ui_component {
         : style = $value:expr $(, $($rest:tt)*)?
     ) => {
         $crate::__ui_component!(
+            @cx [ $($cx)? ] ;
             $type $(:: $segment)* ;
             props [ $($props)* ] ;
             host [ $($host)* : style = $value, ] ;
@@ -213,6 +246,7 @@ macro_rules! __ui_component {
         )
     };
     (
+        @cx [ $($cx:ident)? ] ;
         $type:ident $(:: $segment:ident)* ;
         props [ $($props:tt)* ] ;
         host [ $($host:tt)* ] ;
@@ -220,6 +254,7 @@ macro_rules! __ui_component {
         key = $value:expr $(, $($rest:tt)*)?
     ) => {
         $crate::__ui_component!(
+            @cx [ $($cx)? ] ;
             $type $(:: $segment)* ;
             props [ $($props)* ] ;
             host [ $($host)* key = $value, ] ;
@@ -228,6 +263,7 @@ macro_rules! __ui_component {
         )
     };
     (
+        @cx [ $($cx:ident)? ] ;
         $type:ident $(:: $segment:ident)* ;
         props [ $($props:tt)* ] ;
         host [ $($host:tt)* ] ;
@@ -235,6 +271,7 @@ macro_rules! __ui_component {
         : key = $value:expr $(, $($rest:tt)*)?
     ) => {
         $crate::__ui_component!(
+            @cx [ $($cx)? ] ;
             $type $(:: $segment)* ;
             props [ $($props)* ] ;
             host [ $($host)* : key = $value, ] ;
@@ -243,6 +280,7 @@ macro_rules! __ui_component {
         )
     };
     (
+        @cx [ $($cx:ident)? ] ;
         $type:ident $(:: $segment:ident)* ;
         props [ $($props:tt)* ] ;
         host [ $($host:tt)* ] ;
@@ -250,6 +288,7 @@ macro_rules! __ui_component {
         : $field:ident = $value:expr $(, $($rest:tt)*)?
     ) => {
         $crate::__ui_component!(
+            @cx [ $($cx)? ] ;
             $type $(:: $segment)* ;
             props [ $($props)* : $field = $value, ] ;
             host [ $($host)* ] ;
@@ -258,6 +297,7 @@ macro_rules! __ui_component {
         )
     };
     (
+        @cx [ $($cx:ident)? ] ;
         $type:ident $(:: $segment:ident)* ;
         props [ $($props:tt)* ] ;
         host [ $($host:tt)* ] ;
@@ -265,6 +305,7 @@ macro_rules! __ui_component {
         $field:ident = $value:expr $(, $($rest:tt)*)?
     ) => {
         $crate::__ui_component!(
+            @cx [ $($cx)? ] ;
             $type $(:: $segment)* ;
             props [ $($props)* $field = $value, ] ;
             host [ $($host)* ] ;
@@ -273,6 +314,7 @@ macro_rules! __ui_component {
         )
     };
     (
+        @cx [ $cx:ident ] ;
         $type:ident $(:: $segment:ident)* ;
         props [ $($props:tt)* ] ;
         host [ $($host:tt)* ] ;
@@ -282,14 +324,26 @@ macro_rules! __ui_component {
             @fields
             [
                 $crate::__ui_slot_children!(
+                    @cx [ $cx ] ;
                     $crate::__private::Element::from(
-                        $crate::__ui_args!(@fields [<$type $(:: $segment)*>::open(&$crate::context_in_scope!($type))] $($props)*)
+                        $crate::__ui_args!(@fields [<$type $(:: $segment)*>::open(&$cx)] $($props)*)
                     ).prepare_slots() ;
                     $type $(:: $segment)* ;
                     $($children)*
                 )
             ]
             $($host)*
+        )
+    };
+    (
+        @cx [ ] ;
+        $type:ident $(:: $segment:ident)* ;
+        props [ $($props:tt)* ] ;
+        host [ $($host:tt)* ] ;
+        children [ $($children:tt)* ] ;
+    ) => {
+        ::core::compile_error!(
+            "pass the context to ui! before using @Type: ui!((cx) { @Type(...) })"
         )
     };
 }
@@ -375,9 +429,9 @@ macro_rules! __ui_bind {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __ui_children {
-    ($parent:expr ; $($body:tt)*) => {{
+    (@cx [ $($cx:ident)? ] ; $parent:expr ; $($body:tt)*) => {{
         let mut __cappy_nodes: ::std::vec::Vec<$crate::__private::Element> = ::std::vec::Vec::new();
-        $crate::__ui_collect!(__cappy_nodes ; $($body)*);
+        $crate::__ui_collect!(@cx [ $($cx)? ] ; __cappy_nodes ; $($body)*);
         __cappy_nodes
             .into_iter()
             .fold($parent, |parent, child| parent.child(child))
@@ -388,124 +442,142 @@ macro_rules! __ui_children {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __ui_collect {
-    ($nodes:ident ;) => {};
-    ($nodes:ident ; , $($rest:tt)*) => {
-        $crate::__ui_collect!($nodes ; $($rest)*)
+    (@cx [ $($cx:ident)? ] ; $nodes:ident ;) => {};
+    (@cx [ $($cx:ident)? ] ; $nodes:ident ; , $($rest:tt)*) => {
+        $crate::__ui_collect!(@cx [ $($cx)? ] ; $nodes ; $($rest)*)
     };
-    ($nodes:ident ; { .. $children:expr } $($rest:tt)*) => {
+    (@cx [ $($cx:ident)? ] ; $nodes:ident ; { .. $children:expr } $($rest:tt)*) => {
         $nodes.extend($children.into_iter().map($crate::__private::Element::from));
-        $crate::__ui_collect!($nodes ; $($rest)*)
+        $crate::__ui_collect!(@cx [ $($cx)? ] ; $nodes ; $($rest)*)
     };
-    ($nodes:ident ; { $child:expr } $($rest:tt)*) => {
+    (@cx [ $($cx:ident)? ] ; $nodes:ident ; { $child:expr } $($rest:tt)*) => {
         $nodes.push($crate::__private::Element::from($child));
-        $crate::__ui_collect!($nodes ; $($rest)*)
+        $crate::__ui_collect!(@cx [ $($cx)? ] ; $nodes ; $($rest)*)
     };
-    ($nodes:ident ; show ( : $cond:expr ) { $($body:tt)* } $($rest:tt)*) => {
-        $nodes.push($crate::__ui_show_expr!(: $cond ; $($body)*));
-        $crate::__ui_collect!($nodes ; $($rest)*)
+    (@cx [ $($cx:ident)? ] ; $nodes:ident ; show ( : $cond:expr ) { $($body:tt)* } $($rest:tt)*) => {
+        $nodes.push($crate::__ui_show_expr!(@cx [ $($cx)? ] ; : $cond ; $($body)*));
+        $crate::__ui_collect!(@cx [ $($cx)? ] ; $nodes ; $($rest)*)
     };
-    ($nodes:ident ; show ( $cond:expr ) { $($body:tt)* } $($rest:tt)*) => {
-        $nodes.push($crate::__ui_show_expr!(: $cond ; $($body)*));
-        $crate::__ui_collect!($nodes ; $($rest)*)
+    (@cx [ $($cx:ident)? ] ; $nodes:ident ; show ( $cond:expr ) { $($body:tt)* } $($rest:tt)*) => {
+        $nodes.push($crate::__ui_show_expr!(@cx [ $($cx)? ] ; : $cond ; $($body)*));
+        $crate::__ui_collect!(@cx [ $($cx)? ] ; $nodes ; $($rest)*)
     };
-    ($nodes:ident ; if ( : $cond:expr ) { $($then:tt)* } $($rest:tt)*) => {
+    (@cx [ $($cx:ident)? ] ; $nodes:ident ; if ( : $cond:expr ) { $($then:tt)* } $($rest:tt)*) => {
         $crate::__ui_if_chain!(
             @start $nodes ;
+            @cx [ $($cx)? ] ;
             $crate::ui_closure!(move || $cond) ;
-            $crate::ui_closure!(move || $crate::__ui_fragment!($($then)*)) ;
+            $crate::__ui_view!(@cx [ $($cx)? ] ; move || $crate::__ui_fragment!(@cx [ $($cx)? ] ; $($then)*)) ;
             $($rest)*
         )
     };
-    ($nodes:ident ; if ( $cond:expr ) { $($then:tt)* } $($rest:tt)*) => {
+    (@cx [ $($cx:ident)? ] ; $nodes:ident ; if ( $cond:expr ) { $($then:tt)* } $($rest:tt)*) => {
         $crate::__ui_if_chain!(
             @start $nodes ;
+            @cx [ $($cx)? ] ;
             $crate::ui_closure!(move || $cond) ;
-            $crate::ui_closure!(move || $crate::__ui_fragment!($($then)*)) ;
+            $crate::__ui_view!(@cx [ $($cx)? ] ; move || $crate::__ui_fragment!(@cx [ $($cx)? ] ; $($then)*)) ;
             $($rest)*
         )
     };
-    ($nodes:ident ; for ( $item:ident in : $source:expr , key = $key:ident . $($field:ident).+ ) { $($body:tt)* } $($rest:tt)*) => {
-        $nodes.push($crate::__ui_for_expr!($item ; $source ; $key ; path $($field).+ ; $($body)*));
-        $crate::__ui_collect!($nodes ; $($rest)*)
+    (@cx [ $($cx:ident)? ] ; $nodes:ident ; for ( $item:ident in : $source:expr , key = $key:ident . $($field:ident).+ ) { $($body:tt)* } $($rest:tt)*) => {
+        $nodes.push($crate::__ui_for_expr!(@cx [ $($cx)? ] ; $item ; $source ; $key ; path $($field).+ ; $($body)*));
+        $crate::__ui_collect!(@cx [ $($cx)? ] ; $nodes ; $($rest)*)
     };
-    ($nodes:ident ; for ( $item:ident in : $source:expr , key = $key:ident ) { $($body:tt)* } $($rest:tt)*) => {
-        $nodes.push($crate::__ui_for_expr!($item ; $source ; $key ; self ; $($body)*));
-        $crate::__ui_collect!($nodes ; $($rest)*)
+    (@cx [ $($cx:ident)? ] ; $nodes:ident ; for ( $item:ident in : $source:expr , key = $key:ident ) { $($body:tt)* } $($rest:tt)*) => {
+        $nodes.push($crate::__ui_for_expr!(@cx [ $($cx)? ] ; $item ; $source ; $key ; self ; $($body)*));
+        $crate::__ui_collect!(@cx [ $($cx)? ] ; $nodes ; $($rest)*)
     };
-    ($nodes:ident ; $ctor:ident ( $field:ident ) { $($children:tt)* } $($rest:tt)*) => {
-        $nodes.push($crate::__ui_node!($ctor ( $field ) { $($children)* }));
-        $crate::__ui_collect!($nodes ; $($rest)*)
+    (@cx [ $($cx:ident)? ] ; $nodes:ident ; $ctor:ident ( $field:ident ) { $($children:tt)* } $($rest:tt)*) => {
+        $nodes.push($crate::__ui_node!(@cx [ $($cx)? ] ; $ctor ( $field ) { $($children)* }));
+        $crate::__ui_collect!(@cx [ $($cx)? ] ; $nodes ; $($rest)*)
     };
-    ($nodes:ident ; $ctor:ident ( $field:ident ) $($rest:tt)*) => {
-        $crate::__ui_collect_slot!($nodes ; $ctor ; $field ; $($rest)*)
+    (@cx [ $($cx:ident)? ] ; $nodes:ident ; $ctor:ident ( $field:ident ) $($rest:tt)*) => {
+        $crate::__ui_collect_slot!(@cx [ $($cx)? ] ; $nodes ; $ctor ; $field ; $($rest)*)
     };
-    ($nodes:ident ; @ $type:ident $(:: $segment:ident)* ( $($props:tt)* ) { $($children:tt)* } $($rest:tt)*) => {
-        $nodes.push($crate::__ui_node!(@ $type $(:: $segment)* ( $($props)* ) { $($children)* }));
-        $crate::__ui_collect!($nodes ; $($rest)*)
+    (@cx [ $($cx:ident)? ] ; $nodes:ident ; @ $type:ident $(:: $segment:ident)* ( $($props:tt)* ) { $($children:tt)* } $($rest:tt)*) => {
+        $nodes.push($crate::__ui_node!(@cx [ $($cx)? ] ; @ $type $(:: $segment)* ( $($props)* ) { $($children)* }));
+        $crate::__ui_collect!(@cx [ $($cx)? ] ; $nodes ; $($rest)*)
     };
-    ($nodes:ident ; @ $type:ident $(:: $segment:ident)* ( $($props:tt)* ) $($rest:tt)*) => {
-        $nodes.push($crate::__ui_node!(@ $type $(:: $segment)* ( $($props)* )));
-        $crate::__ui_collect!($nodes ; $($rest)*)
+    (@cx [ $($cx:ident)? ] ; $nodes:ident ; @ $type:ident $(:: $segment:ident)* ( $($props:tt)* ) $($rest:tt)*) => {
+        $nodes.push($crate::__ui_node!(@cx [ $($cx)? ] ; @ $type $(:: $segment)* ( $($props)* )));
+        $crate::__ui_collect!(@cx [ $($cx)? ] ; $nodes ; $($rest)*)
     };
-    ($nodes:ident ; @ $type:ident $(:: $segment:ident)* { $($children:tt)* } $($rest:tt)*) => {
-        $nodes.push($crate::__ui_node!(@ $type $(:: $segment)* { $($children)* }));
-        $crate::__ui_collect!($nodes ; $($rest)*)
+    (@cx [ $($cx:ident)? ] ; $nodes:ident ; @ $type:ident $(:: $segment:ident)* { $($children:tt)* } $($rest:tt)*) => {
+        $nodes.push($crate::__ui_node!(@cx [ $($cx)? ] ; @ $type $(:: $segment)* { $($children)* }));
+        $crate::__ui_collect!(@cx [ $($cx)? ] ; $nodes ; $($rest)*)
     };
-    ($nodes:ident ; @ $type:ident $(:: $segment:ident)* $($rest:tt)*) => {
-        $nodes.push($crate::__ui_node!(@ $type $(:: $segment)*));
-        $crate::__ui_collect!($nodes ; $($rest)*)
+    (@cx [ $($cx:ident)? ] ; $nodes:ident ; @ $type:ident $(:: $segment:ident)* $($rest:tt)*) => {
+        $nodes.push($crate::__ui_node!(@cx [ $($cx)? ] ; @ $type $(:: $segment)*));
+        $crate::__ui_collect!(@cx [ $($cx)? ] ; $nodes ; $($rest)*)
     };
-    ($nodes:ident ; $name:ident ( $($args:tt)* ) { $($children:tt)* } $($rest:tt)*) => {
-        $nodes.push($crate::__ui_node!($name ( $($args)* ) { $($children)* }));
-        $crate::__ui_collect!($nodes ; $($rest)*)
+    (@cx [ $($cx:ident)? ] ; $nodes:ident ; $name:ident ( $($args:tt)* ) { $($children:tt)* } $($rest:tt)*) => {
+        $nodes.push($crate::__ui_node!(@cx [ $($cx)? ] ; $name ( $($args)* ) { $($children)* }));
+        $crate::__ui_collect!(@cx [ $($cx)? ] ; $nodes ; $($rest)*)
     };
-    ($nodes:ident ; $name:ident ( $($args:tt)* ) $($rest:tt)*) => {
-        $nodes.push($crate::__ui_node!($name ( $($args)* )));
-        $crate::__ui_collect!($nodes ; $($rest)*)
+    (@cx [ $($cx:ident)? ] ; $nodes:ident ; $name:ident ( $($args:tt)* ) $($rest:tt)*) => {
+        $nodes.push($crate::__ui_node!(@cx [ $($cx)? ] ; $name ( $($args)* )));
+        $crate::__ui_collect!(@cx [ $($cx)? ] ; $nodes ; $($rest)*)
     };
-    ($nodes:ident ; $name:ident { $($children:tt)* } $($rest:tt)*) => {
-        $nodes.push($crate::__ui_node!($name { $($children)* }));
-        $crate::__ui_collect!($nodes ; $($rest)*)
+    (@cx [ $($cx:ident)? ] ; $nodes:ident ; $name:ident { $($children:tt)* } $($rest:tt)*) => {
+        $nodes.push($crate::__ui_node!(@cx [ $($cx)? ] ; $name { $($children)* }));
+        $crate::__ui_collect!(@cx [ $($cx)? ] ; $nodes ; $($rest)*)
     };
-    ($nodes:ident ; $name:ident $($rest:tt)*) => {
-        $nodes.push($crate::__ui_node!($name));
-        $crate::__ui_collect!($nodes ; $($rest)*)
+    (@cx [ $($cx:ident)? ] ; $nodes:ident ; $name:ident $($rest:tt)*) => {
+        $nodes.push($crate::__ui_node!(@cx [ $($cx)? ] ; $name));
+        $crate::__ui_collect!(@cx [ $($cx)? ] ; $nodes ; $($rest)*)
     };
 }
 
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __ui_collect_slot {
-    ($nodes:ident ; $ctor:ident ; $field:ident ; $($rest:tt)*) => {
-        $crate::__ui_collect_slot!(@is $nodes ; $ctor ; $field ; $ctor ; $($rest)*)
+    (@cx [ $($cx:ident)? ] ; $nodes:ident ; $ctor:ident ; $field:ident ; $($rest:tt)*) => {
+        $crate::__ui_collect_slot!(@is @cx [ $($cx)? ] ; $nodes ; $ctor ; $field ; $ctor ; $($rest)*)
     };
-    (@is $nodes:ident ; slot ; $field:ident ; $ctor:ident ; $($rest:tt)*) => {
+    (@is @cx [ $($cx:ident)? ] ; $nodes:ident ; slot ; $field:ident ; $ctor:ident ; $($rest:tt)*) => {
         $nodes.push($ctor($crate::slot_self!($field)));
-        $crate::__ui_collect!($nodes ; $($rest)*)
+        $crate::__ui_collect!(@cx [ $($cx)? ] ; $nodes ; $($rest)*)
     };
-    (@is $nodes:ident ; $other:ident ; $field:ident ; $ctor:ident ; $($rest:tt)*) => {
-        $nodes.push($crate::__ui_node!($ctor ( $field )));
-        $crate::__ui_collect!($nodes ; $($rest)*)
+    (@is @cx [ $($cx:ident)? ] ; $nodes:ident ; $other:ident ; $field:ident ; $ctor:ident ; $($rest:tt)*) => {
+        $nodes.push($crate::__ui_node!(@cx [ $($cx)? ] ; $ctor ( $field )));
+        $crate::__ui_collect!(@cx [ $($cx)? ] ; $nodes ; $($rest)*)
     };
 }
 
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __ui_fragment {
-    ($($body:tt)*) => {{
+    (@cx [ $($cx:ident)? ] ; $($body:tt)*) => {{
         let mut __cappy_nodes: ::std::vec::Vec<$crate::__private::Element> = ::std::vec::Vec::new();
-        $crate::__ui_collect!(__cappy_nodes ; $($body)*);
+        $crate::__ui_collect!(@cx [ $($cx)? ] ; __cappy_nodes ; $($body)*);
         $crate::__private::fragment(__cappy_nodes)
     }};
+}
+
+/// Element closure for `show` and `if`. With a context name, clones that binding into the closure.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ui_view {
+    (@cx [ $cx:ident ] ; $($closure:tt)*) => {
+        $crate::ui_view!(
+            $crate::__private::with_context ;
+            $cx ;
+            $($closure)*
+        )
+    };
+    (@cx [ ] ; $($closure:tt)*) => {
+        $crate::ui_closure!($($closure)*)
+    };
 }
 
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __ui_show_expr {
-    (: $cond:expr ; $($body:tt)*) => {
+    (@cx [ $($cx:ident)? ] ; : $cond:expr ; $($body:tt)*) => {
         $crate::__private::show(
             $crate::ui_closure!(move || $cond),
-            $crate::ui_closure!(move || $crate::__ui_fragment!($($body)*)),
+            $crate::__ui_view!(@cx [ $($cx)? ] ; move || $crate::__ui_fragment!(@cx [ $($cx)? ] ; $($body)*)),
         )
     };
 }
@@ -513,7 +585,23 @@ macro_rules! __ui_show_expr {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __ui_for_expr {
-    ($item:ident ; $source:expr ; $key:ident ; self ; $($body:tt)*) => {
+    (@cx [ $cx:ident ] ; $item:ident ; $source:expr ; $key:ident ; self ; $($body:tt)*) => {
+        $crate::ui_for_view!(
+            $crate::__private::for_each ;
+            $crate::__private::Context ;
+            $cx ;
+            $crate::ui_closure!(move |visit| {
+                $source.with(|list| {
+                    for item in list.iter() {
+                        visit(item);
+                    }
+                });
+            }) ;
+            |$key| $key ;
+            move |$item| $crate::__ui_fragment!(@cx [ $cx ] ; $($body)*)
+        )
+    };
+    (@cx [ ] ; $item:ident ; $source:expr ; $key:ident ; self ; $($body:tt)*) => {
         $crate::__private::for_each(
             $crate::ui_closure!(move |visit| {
                 $source.with(|list| {
@@ -523,10 +611,26 @@ macro_rules! __ui_for_expr {
                 });
             }),
             |$key| $key,
-            $crate::ui_closure!(move |$item| $crate::__ui_fragment!($($body)*)),
+            $crate::ui_closure!(move |$item| $crate::__ui_fragment!(@cx [ ] ; $($body)*)),
         )
     };
-    ($item:ident ; $source:expr ; $key:ident ; path $($field:ident).+ ; $($body:tt)*) => {
+    (@cx [ $cx:ident ] ; $item:ident ; $source:expr ; $key:ident ; path $($field:ident).+ ; $($body:tt)*) => {
+        $crate::ui_for_view!(
+            $crate::__private::for_each ;
+            $crate::__private::Context ;
+            $cx ;
+            $crate::ui_closure!(move |visit| {
+                $source.with(|list| {
+                    for item in list.iter() {
+                        visit(item);
+                    }
+                });
+            }) ;
+            |$key| &$key$(.$field)+ ;
+            move |$item| $crate::__ui_fragment!(@cx [ $cx ] ; $($body)*)
+        )
+    };
+    (@cx [ ] ; $item:ident ; $source:expr ; $key:ident ; path $($field:ident).+ ; $($body:tt)*) => {
         $crate::__private::for_each(
             $crate::ui_closure!(move |visit| {
                 $source.with(|list| {
@@ -536,7 +640,7 @@ macro_rules! __ui_for_expr {
                 });
             }),
             |$key| &$key$(.$field)+,
-            $crate::ui_closure!(move |$item| $crate::__ui_fragment!($($body)*)),
+            $crate::ui_closure!(move |$item| $crate::__ui_fragment!(@cx [ ] ; $($body)*)),
         )
     };
 }
@@ -544,9 +648,15 @@ macro_rules! __ui_for_expr {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __ui_if_root {
-    ($cond:expr ; $then:expr ; $($rest:tt)*) => {{
+    (@cx [ $($cx:ident)? ] ; $cond:expr ; $then:expr ; $($rest:tt)*) => {{
         let mut __cappy_nodes: ::std::vec::Vec<$crate::__private::Element> = ::std::vec::Vec::new();
-        $crate::__ui_if_chain!(@start __cappy_nodes ; $cond ; $then ; $($rest)*);
+        $crate::__ui_if_chain!(
+            @start __cappy_nodes ;
+            @cx [ $($cx)? ] ;
+            $cond ;
+            $then ;
+            $($rest)*
+        );
         $crate::__private::fragment(__cappy_nodes)
     }};
 }
@@ -555,34 +665,49 @@ macro_rules! __ui_if_root {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __ui_if_chain {
-    (@start $nodes:ident ; $cond:expr ; $then:expr ; $($rest:tt)*) => {
-        $crate::__ui_if_chain!(@more $nodes ; [{$cond ; $then}] ; $($rest)*)
-    };
-    (@more $nodes:ident ; [$($frames:tt)*] ; else if ( : $cond:expr ) { $($body:tt)* } $($rest:tt)*) => {
+    (@start $nodes:ident ; @cx [ $($cx:ident)? ] ; $cond:expr ; $then:expr ; $($rest:tt)*) => {
         $crate::__ui_if_chain!(
             @more $nodes ;
-            [$($frames)* {$crate::ui_closure!(move || $cond) ; $crate::ui_closure!(move || $crate::__ui_fragment!($($body)*))}] ;
+            @cx [ $($cx)? ] ;
+            [{$cond ; $then}] ;
             $($rest)*
         )
     };
-    (@more $nodes:ident ; [$($frames:tt)*] ; else if ( $cond:expr ) { $($body:tt)* } $($rest:tt)*) => {
+    (@more $nodes:ident ; @cx [ $($cx:ident)? ] ; [$($frames:tt)*] ; else if ( : $cond:expr ) { $($body:tt)* } $($rest:tt)*) => {
         $crate::__ui_if_chain!(
             @more $nodes ;
-            [$($frames)* {$crate::ui_closure!(move || $cond) ; $crate::ui_closure!(move || $crate::__ui_fragment!($($body)*))}] ;
+            @cx [ $($cx)? ] ;
+            [$($frames)* {
+                $crate::ui_closure!(move || $cond) ;
+                $crate::__ui_view!(@cx [ $($cx)? ] ; move || $crate::__ui_fragment!(@cx [ $($cx)? ] ; $($body)*))
+            }] ;
             $($rest)*
         )
     };
-    (@more $nodes:ident ; [$($frames:tt)*] ; else { $($body:tt)* } $($rest:tt)*) => {
+    (@more $nodes:ident ; @cx [ $($cx:ident)? ] ; [$($frames:tt)*] ; else if ( $cond:expr ) { $($body:tt)* } $($rest:tt)*) => {
+        $crate::__ui_if_chain!(
+            @more $nodes ;
+            @cx [ $($cx)? ] ;
+            [$($frames)* {
+                $crate::ui_closure!(move || $cond) ;
+                $crate::__ui_view!(@cx [ $($cx)? ] ; move || $crate::__ui_fragment!(@cx [ $($cx)? ] ; $($body)*))
+            }] ;
+            $($rest)*
+        )
+    };
+    (@more $nodes:ident ; @cx [ $($cx:ident)? ] ; [$($frames:tt)*] ; else { $($body:tt)* } $($rest:tt)*) => {
         $crate::__ui_if_fold!(
             $nodes ;
+            @cx [ $($cx)? ] ;
             [$($frames)*] ;
-            $crate::ui_closure!(move || $crate::__ui_fragment!($($body)*)) ;
+            $crate::__ui_view!(@cx [ $($cx)? ] ; move || $crate::__ui_fragment!(@cx [ $($cx)? ] ; $($body)*)) ;
             $($rest)*
         )
     };
-    (@more $nodes:ident ; [$($frames:tt)*] ; $($rest:tt)*) => {
+    (@more $nodes:ident ; @cx [ $($cx:ident)? ] ; [$($frames:tt)*] ; $($rest:tt)*) => {
         $crate::__ui_if_fold!(
             $nodes ;
+            @cx [ $($cx)? ] ;
             [$($frames)*] ;
             || $crate::__private::fragment(::std::vec::Vec::<$crate::__private::Element>::new()) ;
             $($rest)*
@@ -593,36 +718,51 @@ macro_rules! __ui_if_chain {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __ui_if_fold {
-    ($nodes:ident ; [$($frames:tt)*] ; $else_branch:expr ; $($rest:tt)*) => {
-        $crate::__ui_if_fold!(@rev $nodes ; [] [$($frames)*] ; $else_branch ; $($rest)*)
-    };
-    (@rev $nodes:ident ; [$($rev:tt)*] [] ; $else_branch:expr ; $($rest:tt)*) => {
-        $crate::__ui_if_fold!(@nest $nodes ; $else_branch ; [$($rev)*] ; $($rest)*)
-    };
-    (@rev $nodes:ident ; [$($rev:tt)*] [{$cond:expr ; $then:expr} $($more:tt)*] ; $else_branch:expr ; $($rest:tt)*) => {
+    ($nodes:ident ; @cx [ $($cx:ident)? ] ; [$($frames:tt)*] ; $else_branch:expr ; $($rest:tt)*) => {
         $crate::__ui_if_fold!(
             @rev $nodes ;
+            @cx [ $($cx)? ] ;
+            [] [$($frames)*] ;
+            $else_branch ;
+            $($rest)*
+        )
+    };
+    (@rev $nodes:ident ; @cx [ $($cx:ident)? ] ; [$($rev:tt)*] [] ; $else_branch:expr ; $($rest:tt)*) => {
+        $crate::__ui_if_fold!(
+            @nest $nodes ;
+            @cx [ $($cx)? ] ;
+            $else_branch ;
+            [$($rev)*] ;
+            $($rest)*
+        )
+    };
+    (@rev $nodes:ident ; @cx [ $($cx:ident)? ] ; [$($rev:tt)*] [{$cond:expr ; $then:expr} $($more:tt)*] ; $else_branch:expr ; $($rest:tt)*) => {
+        $crate::__ui_if_fold!(
+            @rev $nodes ;
+            @cx [ $($cx)? ] ;
             [{$cond ; $then} $($rev)*] [$($more)*] ;
             $else_branch ;
             $($rest)*
         )
     };
-    (@nest $nodes:ident ; $else_branch:expr ; [{$cond:expr ; $then:expr}] ; $($rest:tt)*) => {
+    (@nest $nodes:ident ; @cx [ $($cx:ident)? ] ; $else_branch:expr ; [{$cond:expr ; $then:expr}] ; $($rest:tt)*) => {
         $nodes.push($crate::__private::if_else($cond, $then, $else_branch));
-        $crate::__ui_collect!($nodes ; $($rest)*)
+        $crate::__ui_collect!(@cx [ $($cx)? ] ; $nodes ; $($rest)*)
     };
-    (@nest $nodes:ident ; $else_branch:expr ; [{$cond:expr ; $then:expr} $($more:tt)+] ; $($rest:tt)*) => {
+    (@nest $nodes:ident ; @cx [ $($cx:ident)? ] ; $else_branch:expr ; [{$cond:expr ; $then:expr} $($more:tt)+] ; $($rest:tt)*) => {
         $crate::__ui_if_fold!(
             @wrap $nodes ;
+            @cx [ $($cx)? ] ;
             $crate::__private::if_else($cond, $then, $else_branch) ;
             [$($more)+] ;
             $($rest)*
         )
     };
-    (@wrap $nodes:ident ; $inner:expr ; [{$cond:expr ; $then:expr} $($more:tt)*] ; $($rest:tt)*) => {
+    (@wrap $nodes:ident ; @cx [ $($cx:ident)? ] ; $inner:expr ; [{$cond:expr ; $then:expr} $($more:tt)*] ; $($rest:tt)*) => {
         $crate::__ui_if_fold!(
             @nest $nodes ;
-            $crate::ui_closure!(move || $inner) ;
+            @cx [ $($cx)? ] ;
+            $crate::__ui_view!(@cx [ $($cx)? ] ; move || $inner) ;
             [{$cond ; $then} $($more)*] ;
             $($rest)*
         )
@@ -633,15 +773,15 @@ macro_rules! __ui_if_fold {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __ui_slot_child {
-    ($parent:expr ; $ctor:ident ; $field:ident ; $($rest:tt)*) => {
-        $crate::__ui_slot_child!(@is $parent ; $ctor ; $field ; $ctor ; $($rest)*)
+    (@cx [ $($cx:ident)? ] ; $parent:expr ; $ctor:ident ; $field:ident ; $($rest:tt)*) => {
+        $crate::__ui_slot_child!(@is @cx [ $($cx)? ] ; $parent ; $ctor ; $field ; $ctor ; $($rest)*)
     };
-    (@is $parent:expr ; slot ; $field:ident ; $ctor:ident ; $($rest:tt)*) => {
-        $crate::__ui_children!($parent.child($ctor($crate::slot_self!($field))) ; $($rest)*)
+    (@is @cx [ $($cx:ident)? ] ; $parent:expr ; slot ; $field:ident ; $ctor:ident ; $($rest:tt)*) => {
+        $crate::__ui_children!(@cx [ $($cx)? ] ; $parent.child($ctor($crate::slot_self!($field))) ; $($rest)*)
     };
-    (@is $parent:expr ; $other:ident ; $field:ident ; $ctor:ident ; $($rest:tt)*) => {
-        $crate::__ui_children!(
-            $parent.child($crate::__ui_node!($ctor ( $field ))) ; $($rest)*
+    (@is @cx [ $($cx:ident)? ] ; $parent:expr ; $other:ident ; $field:ident ; $ctor:ident ; $($rest:tt)*) => {
+        $crate::__ui_children!(@cx [ $($cx)? ] ;
+            $parent.child($crate::__ui_node!(@cx [ $($cx)? ] ; $ctor ( $field ))) ; $($rest)*
         )
     };
 }
@@ -650,25 +790,26 @@ macro_rules! __ui_slot_child {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __ui_slot_children {
-    ($parent:expr ; $type:ident $(:: $segment:ident)* ;) => {
+    (@cx [ $($cx:ident)? ] ; $parent:expr ; $type:ident $(:: $segment:ident)* ;) => {
         $parent
     };
-    ($parent:expr ; $type:ident $(:: $segment:ident)* ; , $($rest:tt)*) => {
-        $crate::__ui_slot_children!($parent ; $type $(:: $segment)* ; $($rest)*)
+    (@cx [ $($cx:ident)? ] ; $parent:expr ; $type:ident $(:: $segment:ident)* ; , $($rest:tt)*) => {
+        $crate::__ui_slot_children!(@cx [ $($cx)? ] ; $parent ; $type $(:: $segment)* ; $($rest)*)
     };
-    ($parent:expr ; $type:ident $(:: $segment:ident)* ; { .. $children:expr } $($rest:tt)*) => {
-        $crate::__ui_slot_children!(
+    (@cx [ $($cx:ident)? ] ; $parent:expr ; $type:ident $(:: $segment:ident)* ; { .. $children:expr } $($rest:tt)*) => {
+        $crate::__ui_slot_children!(@cx [ $($cx)? ] ;
             $parent.place_children($children) ; $type $(:: $segment)* ; $($rest)*
         )
     };
-    ($parent:expr ; $type:ident $(:: $segment:ident)* ; { $child:expr } $($rest:tt)*) => {
-        $crate::__ui_slot_children!(
+    (@cx [ $($cx:ident)? ] ; $parent:expr ; $type:ident $(:: $segment:ident)* ; { $child:expr } $($rest:tt)*) => {
+        $crate::__ui_slot_children!(@cx [ $($cx)? ] ;
             $parent.place_child($child) ; $type $(:: $segment)* ; $($rest)*
         )
     };
-    ($parent:expr ; $type:ident $(:: $segment:ident)* ; @ $child:ident $(:: $child_segment:ident)* ( $($props:tt)* ) { $($inner:tt)* } $($rest:tt)*) => {
+    (@cx [ $($cx:ident)? ] ; $parent:expr ; $type:ident $(:: $segment:ident)* ; @ $child:ident $(:: $child_segment:ident)* ( $($props:tt)* ) { $($inner:tt)* } $($rest:tt)*) => {
         $crate::__ui_partition_slot!(
             @start
+            cx [ $($cx)? ] ;
             parent $parent ;
             ty $type $(:: $segment)* ;
             rest [ $($rest)* ] ;
@@ -677,9 +818,10 @@ macro_rules! __ui_slot_children {
             $($props)*
         )
     };
-    ($parent:expr ; $type:ident $(:: $segment:ident)* ; @ $child:ident $(:: $child_segment:ident)* ( $($props:tt)* ) $($rest:tt)*) => {
+    (@cx [ $($cx:ident)? ] ; $parent:expr ; $type:ident $(:: $segment:ident)* ; @ $child:ident $(:: $child_segment:ident)* ( $($props:tt)* ) $($rest:tt)*) => {
         $crate::__ui_partition_slot!(
             @start
+            cx [ $($cx)? ] ;
             parent $parent ;
             ty $type $(:: $segment)* ;
             rest [ $($rest)* ] ;
@@ -688,23 +830,24 @@ macro_rules! __ui_slot_children {
             $($props)*
         )
     };
-    ($parent:expr ; $type:ident $(:: $segment:ident)* ; @ $child:ident $(:: $child_segment:ident)* { $($inner:tt)* } $($rest:tt)*) => {
-        $crate::__ui_slot_children!(
-            $parent.place_child($crate::__ui_node!(@ $child $(:: $child_segment)* { $($inner)* })) ;
+    (@cx [ $($cx:ident)? ] ; $parent:expr ; $type:ident $(:: $segment:ident)* ; @ $child:ident $(:: $child_segment:ident)* { $($inner:tt)* } $($rest:tt)*) => {
+        $crate::__ui_slot_children!(@cx [ $($cx)? ] ;
+            $parent.place_child($crate::__ui_node!(@cx [ $($cx)? ] ; @ $child $(:: $child_segment)* { $($inner)* })) ;
             $type $(:: $segment)* ;
             $($rest)*
         )
     };
-    ($parent:expr ; $type:ident $(:: $segment:ident)* ; @ $child:ident $(:: $child_segment:ident)* $($rest:tt)*) => {
-        $crate::__ui_slot_children!(
-            $parent.place_child($crate::__ui_node!(@ $child $(:: $child_segment)*)) ;
+    (@cx [ $($cx:ident)? ] ; $parent:expr ; $type:ident $(:: $segment:ident)* ; @ $child:ident $(:: $child_segment:ident)* $($rest:tt)*) => {
+        $crate::__ui_slot_children!(@cx [ $($cx)? ] ;
+            $parent.place_child($crate::__ui_node!(@cx [ $($cx)? ] ; @ $child $(:: $child_segment)*)) ;
             $type $(:: $segment)* ;
             $($rest)*
         )
     };
-    ($parent:expr ; $type:ident $(:: $segment:ident)* ; $name:ident ( $($args:tt)* ) { $($inner:tt)* } $($rest:tt)*) => {
+    (@cx [ $($cx:ident)? ] ; $parent:expr ; $type:ident $(:: $segment:ident)* ; $name:ident ( $($args:tt)* ) { $($inner:tt)* } $($rest:tt)*) => {
         $crate::__ui_partition_slot!(
             @start
+            cx [ $($cx)? ] ;
             parent $parent ;
             ty $type $(:: $segment)* ;
             rest [ $($rest)* ] ;
@@ -713,9 +856,10 @@ macro_rules! __ui_slot_children {
             $($args)*
         )
     };
-    ($parent:expr ; $type:ident $(:: $segment:ident)* ; $name:ident ( $($args:tt)* ) $($rest:tt)*) => {
+    (@cx [ $($cx:ident)? ] ; $parent:expr ; $type:ident $(:: $segment:ident)* ; $name:ident ( $($args:tt)* ) $($rest:tt)*) => {
         $crate::__ui_partition_slot!(
             @start
+            cx [ $($cx)? ] ;
             parent $parent ;
             ty $type $(:: $segment)* ;
             rest [ $($rest)* ] ;
@@ -724,16 +868,16 @@ macro_rules! __ui_slot_children {
             $($args)*
         )
     };
-    ($parent:expr ; $type:ident $(:: $segment:ident)* ; $name:ident { $($inner:tt)* } $($rest:tt)*) => {
-        $crate::__ui_slot_children!(
-            $parent.place_child($crate::__ui_node!($name { $($inner)* })) ;
+    (@cx [ $($cx:ident)? ] ; $parent:expr ; $type:ident $(:: $segment:ident)* ; $name:ident { $($inner:tt)* } $($rest:tt)*) => {
+        $crate::__ui_slot_children!(@cx [ $($cx)? ] ;
+            $parent.place_child($crate::__ui_node!(@cx [ $($cx)? ] ; $name { $($inner)* })) ;
             $type $(:: $segment)* ;
             $($rest)*
         )
     };
-    ($parent:expr ; $type:ident $(:: $segment:ident)* ; $name:ident $($rest:tt)*) => {
-        $crate::__ui_slot_children!(
-            $parent.place_child($crate::__ui_node!($name)) ;
+    (@cx [ $($cx:ident)? ] ; $parent:expr ; $type:ident $(:: $segment:ident)* ; $name:ident $($rest:tt)*) => {
+        $crate::__ui_slot_children!(@cx [ $($cx)? ] ;
+            $parent.place_child($crate::__ui_node!(@cx [ $($cx)? ] ; $name)) ;
             $type $(:: $segment)* ;
             $($rest)*
         )
@@ -746,6 +890,7 @@ macro_rules! __ui_slot_children {
 macro_rules! __ui_partition_slot {
     (
         @start
+        cx [ $($cx:ident)? ] ;
         parent $parent:expr ;
         ty $($ty:ident)::+ ;
         rest [ $($rest:tt)* ] ;
@@ -755,6 +900,7 @@ macro_rules! __ui_partition_slot {
     ) => {
         $crate::__ui_partition_slot!(
             @go
+            cx [ $($cx)? ] ;
             parent $parent ;
             ty $($ty)::+ ;
             rest [ $($rest)* ] ;
@@ -767,6 +913,7 @@ macro_rules! __ui_partition_slot {
     };
     (
         @go
+        cx [ $($cx:ident)? ] ;
         parent $parent:expr ;
         ty $($ty:ident)::+ ;
         rest [ $($rest:tt)* ] ;
@@ -778,6 +925,7 @@ macro_rules! __ui_partition_slot {
     ) => {
         $crate::__ui_partition_slot!(
             @go
+            cx [ $($cx)? ] ;
             parent $parent ;
             ty $($ty)::+ ;
             rest [ $($rest)* ] ;
@@ -790,6 +938,7 @@ macro_rules! __ui_partition_slot {
     };
     (
         @go
+        cx [ $($cx:ident)? ] ;
         parent $parent:expr ;
         ty $($ty:ident)::+ ;
         rest [ $($rest:tt)* ] ;
@@ -801,6 +950,7 @@ macro_rules! __ui_partition_slot {
     ) => {
         $crate::__ui_partition_slot!(
             @go
+            cx [ $($cx)? ] ;
             parent $parent ;
             ty $($ty)::+ ;
             rest [ $($rest)* ] ;
@@ -813,6 +963,7 @@ macro_rules! __ui_partition_slot {
     };
     (
         @go
+        cx [ $($cx:ident)? ] ;
         parent $parent:expr ;
         ty $($ty:ident)::+ ;
         rest [ $($rest:tt)* ] ;
@@ -824,6 +975,7 @@ macro_rules! __ui_partition_slot {
     ) => {
         $crate::__ui_partition_slot!(
             @go
+            cx [ $($cx)? ] ;
             parent $parent ;
             ty $($ty)::+ ;
             rest [ $($rest)* ] ;
@@ -835,6 +987,7 @@ macro_rules! __ui_partition_slot {
     };
     (
         @go
+        cx [ $($cx:ident)? ] ;
         parent $parent:expr ;
         ty $($ty:ident)::+ ;
         rest [ $($rest:tt)* ] ;
@@ -846,6 +999,7 @@ macro_rules! __ui_partition_slot {
     ) => {
         $crate::__ui_partition_slot!(
             @go
+            cx [ $($cx)? ] ;
             parent $parent ;
             ty $($ty)::+ ;
             rest [ $($rest)* ] ;
@@ -857,6 +1011,7 @@ macro_rules! __ui_partition_slot {
     };
     (
         @go
+        cx [ $($cx:ident)? ] ;
         parent $parent:expr ;
         ty $($ty:ident)::+ ;
         rest [ $($rest:tt)* ] ;
@@ -868,6 +1023,7 @@ macro_rules! __ui_partition_slot {
     ) => {
         $crate::__ui_partition_slot!(
             @go
+            cx [ $($cx)? ] ;
             parent $parent ;
             ty $($ty)::+ ;
             rest [ $($rest)* ] ;
@@ -880,6 +1036,7 @@ macro_rules! __ui_partition_slot {
     };
     (
         @go
+        cx [ $($cx:ident)? ] ;
         parent $parent:expr ;
         ty $($ty:ident)::+ ;
         rest [ $($rest:tt)* ] ;
@@ -891,6 +1048,7 @@ macro_rules! __ui_partition_slot {
     ) => {
         $crate::__ui_partition_slot!(
             @go
+            cx [ $($cx)? ] ;
             parent $parent ;
             ty $($ty)::+ ;
             rest [ $($rest)* ] ;
@@ -902,6 +1060,7 @@ macro_rules! __ui_partition_slot {
     };
     (
         @go
+        cx [ $($cx:ident)? ] ;
         parent $parent:expr ;
         ty $($ty:ident)::+ ;
         rest [ $($rest:tt)* ] ;
@@ -913,6 +1072,7 @@ macro_rules! __ui_partition_slot {
     ) => {
         $crate::__ui_partition_slot!(
             @go
+            cx [ $($cx)? ] ;
             parent $parent ;
             ty $($ty)::+ ;
             rest [ $($rest)* ] ;
@@ -925,6 +1085,7 @@ macro_rules! __ui_partition_slot {
     };
     (
         @go
+        cx [ $($cx:ident)? ] ;
         parent $parent:expr ;
         ty $($ty:ident)::+ ;
         rest [ $($rest:tt)* ] ;
@@ -936,6 +1097,7 @@ macro_rules! __ui_partition_slot {
     ) => {
         $crate::__ui_partition_slot!(
             @go
+            cx [ $($cx)? ] ;
             parent $parent ;
             ty $($ty)::+ ;
             rest [ $($rest)* ] ;
@@ -947,6 +1109,7 @@ macro_rules! __ui_partition_slot {
     };
     (
         @go
+        cx [ $($cx:ident)? ] ;
         parent $parent:expr ;
         ty $($ty:ident)::+ ;
         rest [ $($rest:tt)* ] ;
@@ -958,6 +1121,7 @@ macro_rules! __ui_partition_slot {
     ) => {
         $crate::__ui_partition_slot!(
             @go
+            cx [ $($cx)? ] ;
             parent $parent ;
             ty $($ty)::+ ;
             rest [ $($rest)* ] ;
@@ -970,6 +1134,7 @@ macro_rules! __ui_partition_slot {
     };
     (
         @go
+        cx [ $($cx:ident)? ] ;
         parent $parent:expr ;
         ty $($ty:ident)::+ ;
         rest [ $($rest:tt)* ] ;
@@ -981,6 +1146,7 @@ macro_rules! __ui_partition_slot {
     ) => {
         $crate::__ui_partition_slot!(
             @go
+            cx [ $($cx)? ] ;
             parent $parent ;
             ty $($ty)::+ ;
             rest [ $($rest)* ] ;
@@ -992,6 +1158,7 @@ macro_rules! __ui_partition_slot {
     };
     (
         @go
+        cx [ $($cx:ident)? ] ;
         parent $parent:expr ;
         ty $($ty:ident)::+ ;
         rest [ $($rest:tt)* ] ;
@@ -1003,6 +1170,7 @@ macro_rules! __ui_partition_slot {
     ) => {
         $crate::__ui_partition_slot!(
             @go
+            cx [ $($cx)? ] ;
             parent $parent ;
             ty $($ty)::+ ;
             rest [ $($rest)* ] ;
@@ -1015,6 +1183,7 @@ macro_rules! __ui_partition_slot {
     };
     (
         @go
+        cx [ $($cx:ident)? ] ;
         parent $parent:expr ;
         ty $($ty:ident)::+ ;
         rest [ $($rest:tt)* ] ;
@@ -1026,6 +1195,7 @@ macro_rules! __ui_partition_slot {
     ) => {
         $crate::__ui_partition_slot!(
             @go
+            cx [ $($cx)? ] ;
             parent $parent ;
             ty $($ty)::+ ;
             rest [ $($rest)* ] ;
@@ -1037,6 +1207,7 @@ macro_rules! __ui_partition_slot {
     };
     (
         @go
+        cx [ $($cx:ident)? ] ;
         parent $parent:expr ;
         ty $($ty:ident)::+ ;
         rest [ $($rest:tt)* ] ;
@@ -1045,10 +1216,10 @@ macro_rules! __ui_partition_slot {
         kept [ $($kept:tt)* ] ;
         slot [ $slot:ident ] ;
     ) => {
-        $crate::__ui_slot_children!(
+        $crate::__ui_slot_children!(@cx [ $($cx)? ] ;
             $parent.fill_slot(
                 <$($ty)::*>::$slot,
-                $crate::__ui_node!($($build)+ ( $($kept)* ) { $($inner)* })
+                $crate::__ui_node!(@cx [ $($cx)? ] ; $($build)+ ( $($kept)* ) { $($inner)* })
             ) ;
             $($ty)::+ ;
             $($rest)*
@@ -1056,6 +1227,7 @@ macro_rules! __ui_partition_slot {
     };
     (
         @go
+        cx [ $($cx:ident)? ] ;
         parent $parent:expr ;
         ty $($ty:ident)::+ ;
         rest [ $($rest:tt)* ] ;
@@ -1064,8 +1236,8 @@ macro_rules! __ui_partition_slot {
         kept [ $($kept:tt)* ] ;
         slot [ ] ;
     ) => {
-        $crate::__ui_slot_children!(
-            $parent.place_child($crate::__ui_node!($($build)+ ( $($kept)* ) { $($inner)* })) ;
+        $crate::__ui_slot_children!(@cx [ $($cx)? ] ;
+            $parent.place_child($crate::__ui_node!(@cx [ $($cx)? ] ; $($build)+ ( $($kept)* ) { $($inner)* })) ;
             $($ty)::+ ;
             $($rest)*
         )

@@ -244,7 +244,7 @@ fn embedded_expressions_iterators_functions_and_components() {
     let cx = context();
     let ui = mounted(
         &cx,
-        ui! {
+        ui!((cx) {
             div(key = "root") {
                 { text("embedded") }
                 div(key = "list") {
@@ -253,7 +253,7 @@ fn embedded_expressions_iterators_functions_and_components() {
                 card(key = "card")
                 @Badge(label = "new")
             }
-        },
+        }),
     );
     let root = ui.find_by_key("root").unwrap();
     assert_eq!(ui.node_children(root).len(), 4);
@@ -268,17 +268,17 @@ fn embedded_expressions_iterators_functions_and_components() {
 fn component_root_keeps_host_attributes_and_appended_children() {
     let cx = context();
     assert_classes(
-        &ui! { @Badge(label = "new", class = ["wrap", "wide"]) },
+        &ui!((cx) { @Badge(label = "new", class = ["wrap", "wide"]) }),
         r#"["badge", "wrap", "wide"]"#,
     );
     let cx = context();
     let ui = mounted(
         &cx,
-        ui! {
+        ui!((cx) {
             @Badge(label = "new", class = "wrap", key = "hosted") {
                 text("extra", key = "extra")
             }
-        },
+        }),
     );
     assert!(ui.find_by_key("badge").is_none());
     let hosted = ui.find_by_key("hosted").unwrap();
@@ -424,6 +424,85 @@ fn control_flow_macros_mount_show_if_and_for() {
     }]);
     ui.update(VIEWPORT);
     assert_eq!(text_of(&ui, "row").as_deref(), Some("next"));
+}
+
+#[derive(Clone)]
+struct Mark {
+    context: Context,
+}
+
+impl Mark {
+    fn open(context: &Context) -> Self {
+        Self {
+            context: context.clone(),
+        }
+    }
+}
+
+impl HasContext for Mark {
+    fn context(&self) -> &Context {
+        &self.context
+    }
+}
+
+impl Component for Mark {
+    fn render(&self, _context: &Context) -> Element {
+        text("mark")
+    }
+}
+
+fn marked(cx: &Context) -> Element {
+    let value = cx.reactive(String::from("helper"));
+    ui! {
+        text(:value.get(), key = "helper")
+    }
+}
+
+/// `show` / `if` / `for` build elements later. `cx` is only borrowed for the call, and each block
+/// still receives it.
+#[test]
+fn deferred_blocks_receive_the_callers_context() {
+    fn tree(context: &Context) -> Element {
+        let shown = context.reactive(true);
+        let first = context.reactive(false);
+        let second = context.reactive(true);
+        let rows = context.reactive(vec!["row".to_owned()]);
+        ui!((context) {
+            div(key = "root") {
+                show (:shown.get()) {
+                    @Mark(key = "mark-show")
+                }
+                show (:shown.get()) {
+                    @Mark(key = "mark-show-again")
+                }
+                if (:first.get()) {
+                    @Mark(key = "mark-then")
+                } else if (:second.get()) {
+                    @Mark(key = "mark-else-if")
+                } else {
+                    @Mark(key = "mark-else")
+                }
+                show (:shown.get()) {
+                    { marked(context) }
+                }
+                for (item in :rows, key = item) {
+                    @Mark(key = "mark-row")
+                    text(:item.get(), key = "row-text")
+                }
+            }
+        })
+    }
+
+    let cx = context();
+    let ui = mounted(&cx, tree(&cx));
+    assert_eq!(text_of(&ui, "mark-show").as_deref(), Some("mark"));
+    assert_eq!(text_of(&ui, "mark-show-again").as_deref(), Some("mark"));
+    assert!(ui.find_by_key("mark-then").is_none());
+    assert_eq!(text_of(&ui, "mark-else-if").as_deref(), Some("mark"));
+    assert!(ui.find_by_key("mark-else").is_none());
+    assert_eq!(text_of(&ui, "helper").as_deref(), Some("helper"));
+    assert_eq!(text_of(&ui, "mark-row").as_deref(), Some("mark"));
+    assert_eq!(text_of(&ui, "row-text").as_deref(), Some("row"));
 }
 
 #[test]

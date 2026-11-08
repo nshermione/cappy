@@ -160,16 +160,6 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
         .into()
 }
 
-/// Expands to the caller's `cx`. The anchor's span is the call site, so `cx` resolves there
-/// instead of inside `ui!`.
-#[doc(hidden)]
-#[proc_macro]
-pub fn context_in_scope(input: TokenStream) -> TokenStream {
-    let anchor = parse_macro_input!(input as Ident);
-    let cx = Ident::new("cx", anchor.span());
-    quote!(#cx).into()
-}
-
 /// Expands to `self.field` in the caller's method, so `slot(field)` inside `ui!` reads that field.
 #[doc(hidden)]
 #[proc_macro]
@@ -187,6 +177,26 @@ pub fn slot_self(input: TokenStream) -> TokenStream {
 #[proc_macro]
 pub fn ui_closure(input: TokenStream) -> TokenStream {
     ui_closure::expand(input.into()).into()
+}
+
+/// Builds a `'static` element closure that still sees the context passed to `ui!`.
+///
+/// Input is `with_context ; context_ident ; move || body`. `for` goes through
+/// [`ui_for_view`](ui_for_view).
+#[doc(hidden)]
+#[proc_macro]
+pub fn ui_view(input: TokenStream) -> TokenStream {
+    ui_closure::expand_view(input.into()).into()
+}
+
+/// Builds a `for_each` whose row closure sees the caller's `cx`.
+///
+/// The row closure is an argument of `for_each`. A block in that argument position hides the row
+/// type from inference.
+#[doc(hidden)]
+#[proc_macro]
+pub fn ui_for_view(input: TokenStream) -> TokenStream {
+    ui_closure::expand_for_view(input.into()).into()
 }
 
 /// Defines class names and their style rules together.

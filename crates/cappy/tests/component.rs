@@ -121,7 +121,7 @@ fn parent_passes_props_events_host_attributes_and_children() {
     let record = Rc::clone(&seen);
     let mut ui = settled(
         &cx,
-        ui! {
+        ui!((cx) {
             @Badge(
                 label = label.clone(),
                 on_click = move |value: &String| record.set(value.clone()),
@@ -131,7 +131,7 @@ fn parent_passes_props_events_host_attributes_and_children() {
                 text("extra", key = "extra"),
                 text("more", key = "more"),
             }
-        },
+        }),
     );
 
     assert!(ui.find_by_key("badge-root").is_none());
@@ -236,12 +236,12 @@ struct Outer {
 
 impl Component for Outer {
     fn render(&self, cx: &Context) -> Element {
-        ui! {
+        ui!((cx) {
             div(key = "outer") {
                 slot(body)
                 @Inner { text("inner-text", key = "inner-text") }
             }
-        }
+        })
     }
 }
 
@@ -253,14 +253,14 @@ fn slots_land_in_declaration_order_and_drop_the_rest() {
     let _again = panel.clone();
     let ui = settled(
         &cx,
-        ui! {
+        ui!((cx) {
             @Panel(class = ThemeClass::Muted, key = "hosted") {
                 text("default", key = "default"),
                 text("named", key = "named", slot = body),
                 div(slot = icon, key = "icon") { text("+", key = "plus") }
                 text("extra", key = "extra"),
             }
-        },
+        }),
     );
 
     assert!(ui.find_by_key("panel").is_none());
@@ -282,12 +282,12 @@ fn an_unnamed_child_is_placed_where_the_slot_is() {
     let cx = context();
     let ui = settled(
         &cx,
-        ui! {
+        ui!((cx) {
             @Frame {
                 text("middle", key = "middle"),
                 text("dropped", key = "dropped"),
             }
-        },
+        }),
     );
     let frame = ui.find_by_key("frame").unwrap();
     let children = ui.node_children(frame);
@@ -303,11 +303,11 @@ fn nested_components_keep_their_own_slots() {
     let cx = context();
     let ui = settled(
         &cx,
-        ui! {
+        ui!((cx) {
             @Outer {
                 text("outer-text", key = "outer-text")
             }
-        },
+        }),
     );
     let outer = ui.find_by_key("outer").unwrap();
     let outer_children = ui.node_children(outer);
@@ -376,13 +376,13 @@ fn section_markers_cover_following_fields_until_the_next_marker() {
 
     let ui = settled(
         &cx,
-        ui! {
+        ui!((cx) {
             @Shelf(title = "A", subtitle = "B", key = "hosted") {
                 text("top", key = "top", slot = header),
                 text("main", key = "main", slot = body),
                 text("extra", key = "extra"),
             }
-        },
+        }),
     );
     assert!(ui.find_by_key("shelf").is_none());
     assert!(ui.find_by_key("extra").is_none());

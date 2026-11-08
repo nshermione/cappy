@@ -16,29 +16,25 @@ use super::tiles::TilesTab;
 
 pub fn root(cx: &Context, theme: Reactive<Arc<Theme>>, themes: Rc<[Arc<Theme>]>) -> Element {
     let app = cx.use_store(App);
-    let counter_cx = cx.clone();
-    let tiles_cx = cx.clone();
-    let checklist_cx = cx.clone();
-    let paint_cx = cx.clone();
-    ui! {
+    ui!((cx) {
         div(class = ThemeClass::App) {
             { header(theme, themes) }
             { tab_bar(app) }
             show (:app.tab.get() == Tab::Counter) {
-                { CounterTab::open(&counter_cx) }
+                @CounterTab()
             }
             show (:app.tab.get() == Tab::Tiles) {
-                { TilesTab::open(&tiles_cx) }
+                @TilesTab()
             }
             show (:app.tab.get() == Tab::Checklist) {
-                { ChecklistTab::open(&checklist_cx) }
+                @ChecklistTab()
             }
             show (:app.tab.get() == Tab::Paint) {
-                { PaintTab::open(&paint_cx) }
+                @PaintTab()
             }
             text("F12 toggles the repaint overlay. Idle frames repaint nothing.", class = ThemeClass::Muted)
         }
-    }
+    })
 }
 
 fn tab_bar(app: App) -> Element {

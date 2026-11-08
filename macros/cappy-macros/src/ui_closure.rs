@@ -2,6 +2,9 @@
 //!
 //! State and prop fields are [`Copy`] handles. The copy sits outside the closure, so
 //! `text(:format!("{}", self.label))` stays `'static`.
+//!
+//! [`expand_view`](expand_view) gives a `'static` element closure the caller's `cx` without
+//! borrowing it.
 
 use proc_macro2::{Group, Ident, Span, TokenStream, TokenTree};
 use quote::quote;
@@ -104,8 +107,163 @@ fn capture(captures: &mut Vec<Capture>, self_span: Span, field: Ident) -> Ident 
     local
 }
 
+/// `with_context ; context_ident ; move || body`
+///
+/// `context_ident` is the name passed to `ui!((context) { ... })`. `show` and `if` use this.
+/// `for` uses [`expand_for_view`](expand_for_view): its row closure has to be an argument of
+/// `for_each`, or Rust will not infer the row type.
+pub fn expand_view(input: TokenStream) -> TokenStream {
+    let (with_context, context, closure) = match split_named(input) {
+        Ok(parts) => parts,
+        Err(message) => return quote!(::core::compile_error!(#message);),
+    };
+    let (args, body) = match split_closure(closure) {
+        Ok(parts) => parts,
+        Err(message) => return quote!(::core::compile_error!(#message);),
+    };
+    if !args.is_empty() {
+        return quote!(::core::compile_error!("ui view closure cannot take arguments"););
+    }
+    finish_view(with_context, context, body)
+}
+
+/// `for_each ; Context ; context_ident ; read ; key ; move |item| body`
+pub fn expand_for_view(input: TokenStream) -> TokenStream {
+    let (for_each, context_path, context, read, key, closure) = match split_for_view(input) {
+        Ok(parts) => parts,
+        Err(message) => return quote!(::core::compile_error!(#message);),
+    };
+    let (args, body) = match split_closure(closure) {
+        Ok(parts) => parts,
+        Err(message) => return quote!(::core::compile_error!(#message);),
+    };
+    let mut captures = Vec::new();
+    let rewritten = rewrite(body, &mut captures);
+    let captured = Ident::new("__cappy_cx", Span::mixed_site());
+    let lets = field_lets(&captures);
+    quote! {
+        {
+            #lets
+            let #captured = <#context_path as ::core::clone::Clone>::clone(&#context);
+            #for_each(
+                #read,
+                #key,
+                move |#args| {
+                    #[allow(unused_variables)]
+                    let #context = &#captured;
+                    #rewritten
+                },
+            )
+        }
+    }
+}
+
+fn finish_view(with_context: TokenStream, context: Ident, body: TokenStream) -> TokenStream {
+    let mut captures = Vec::new();
+    let rewritten = rewrite(body, &mut captures);
+    let lets = field_lets(&captures);
+    let call = quote! {
+        #with_context(
+            &#context,
+            #[allow(unused_variables)]
+            move |#context| #rewritten,
+        )
+    };
+    if captures.is_empty() {
+        return call;
+    }
+    quote! {
+        {
+            #lets
+            #call
+        }
+    }
+}
+
+fn field_lets(captures: &[Capture]) -> TokenStream {
+    let lets = captures.iter().map(|capture| {
+        let receiver = Ident::new("self", capture.self_span);
+        let field = &capture.field;
+        let local = &capture.local;
+        quote!(let #local = #receiver.#field;)
+    });
+    quote!(#(#lets)*)
+}
+
+/// `path ; context_ident ; closure`
+fn split_named(input: TokenStream) -> Result<(TokenStream, Ident, TokenStream), String> {
+    let tokens: Vec<TokenTree> = input.into_iter().collect();
+    let semis = top_semis(&tokens);
+    if semis.is_empty() {
+        return Err("ui view is missing a path".into());
+    }
+    let path: TokenStream = tokens[..semis[0]].iter().cloned().collect();
+    if path.is_empty() {
+        return Err("ui view is missing a path".into());
+    }
+    let Some(TokenTree::Ident(context)) = tokens.get(semis[0] + 1).cloned() else {
+        return Err("ui view is missing the context name".into());
+    };
+    if semis.get(1) != Some(&(semis[0] + 2)) {
+        return Err("ui view is missing the closure".into());
+    }
+    let closure: TokenStream = tokens[semis[1] + 1..].iter().cloned().collect();
+    Ok((path, context, closure))
+}
+
+fn split_for_view(
+    input: TokenStream,
+) -> Result<
+    (
+        TokenStream,
+        TokenStream,
+        Ident,
+        TokenStream,
+        TokenStream,
+        TokenStream,
+    ),
+    String,
+> {
+    let tokens: Vec<TokenTree> = input.into_iter().collect();
+    let semis = top_semis(&tokens);
+    if semis.len() < 5 {
+        return Err("ui for view is missing a path".into());
+    }
+    let for_each: TokenStream = tokens[..semis[0]].iter().cloned().collect();
+    let context_path: TokenStream = tokens[semis[0] + 1..semis[1]].iter().cloned().collect();
+    if for_each.is_empty() || context_path.is_empty() {
+        return Err("ui for view is missing a path".into());
+    }
+    let Some(TokenTree::Ident(context)) = tokens.get(semis[1] + 1).cloned() else {
+        return Err("ui for view is missing the context name".into());
+    };
+    if semis.get(2) != Some(&(semis[1] + 2)) {
+        return Err("ui for view is missing the read closure".into());
+    }
+    let read: TokenStream = tokens[semis[2] + 1..semis[3]].iter().cloned().collect();
+    let key: TokenStream = tokens[semis[3] + 1..semis[4]].iter().cloned().collect();
+    let closure: TokenStream = tokens[semis[4] + 1..].iter().cloned().collect();
+    if read.is_empty() || key.is_empty() || closure.is_empty() {
+        return Err("ui for view is missing the read, key, or row closure".into());
+    }
+    Ok((for_each, context_path, context, read, key, closure))
+}
+
+fn top_semis(tokens: &[TokenTree]) -> Vec<usize> {
+    tokens
+        .iter()
+        .enumerate()
+        .filter(|(_, token)| is_semi(token))
+        .map(|(index, _)| index)
+        .collect()
+}
+
 fn is_pipe(token: &TokenTree) -> bool {
     matches!(token, TokenTree::Punct(punct) if punct.as_char() == '|')
+}
+
+fn is_semi(token: &TokenTree) -> bool {
+    matches!(token, TokenTree::Punct(punct) if punct.as_char() == ';')
 }
 
 fn is_dot(token: &TokenTree) -> bool {

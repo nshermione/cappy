@@ -144,6 +144,18 @@ pub fn show(when: impl Fn() -> bool + 'static, view: impl Fn() -> Element + 'sta
     Element::new(ElementContent::Flow(crate::ui::flow::show_spec(when, view)))
 }
 
+/// Gives `view` the caller's [`Context`](crate::Context) without the `'static` closure borrowing it.
+///
+/// `ui!` uses this for `show` and `if`. The closure receives `&Context` when it runs.
+#[doc(hidden)]
+pub fn with_context(
+    context: &crate::Context,
+    view: impl Fn(&crate::Context) -> Element + 'static,
+) -> impl Fn() -> Element + 'static {
+    let context = context.clone();
+    move || view(&context)
+}
+
 /// Keeps the branch `when` selects and disposes the other one, including every nested `show`,
 /// `for_each` and `if_else`. Coming back mounts that branch again.
 ///

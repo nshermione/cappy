@@ -28,8 +28,7 @@ impl Component for ChecklistTab {
                 .collect::<Vec<_>>(),
         );
         let next_id = cx.reactive(TASKS.len() as u64);
-        let rows = cx.clone();
-        ui! {
+        ui!((cx) {
             div(class = ThemeClass::Card) {
                 div(class = ThemeClass::Row) {
                     text("Phase 1 checklist", class = ThemeClass::Subtitle)
@@ -51,28 +50,27 @@ impl Component for ChecklistTab {
                 { branch_row(cx) }
                 div(class = ThemeClass::Column, key = "tasks") {
                     for (task in :tasks, key = task.id) {
-                        { task_row(&rows, tasks, rows.reactive(task)) }
+                        { task_row(cx, tasks, cx.reactive(task)) }
                     }
                 }
             }
-        }
+        })
     }
 }
 
 /// Hides the counter. The `+1` made before hiding is still there when it comes back.
 fn show_row(cx: &Context) -> Element {
     let open = cx.reactive(true);
-    let kept = cx.clone();
-    ui! {
+    ui!((cx) {
         div(class = ThemeClass::Row) {
             div(class = ThemeClass::Btn, key = "show-toggle", on_click = move |_| open.update(|value| *value = !*value)) {
                 text(:if open.get() { "Hide kept" } else { "Show kept" }.to_owned())
             }
             show (:open.get()) {
-                { kept_count(&kept) }
+                { kept_count(cx) }
             }
         }
-    }
+    })
 }
 
 fn kept_count(cx: &Context) -> Element {
@@ -90,20 +88,18 @@ fn kept_count(cx: &Context) -> Element {
 /// Switching branches throws the counter away. Coming back starts at zero.
 fn branch_row(cx: &Context) -> Element {
     let sent = cx.reactive(false);
-    let sent_cx = cx.clone();
-    let draft_cx = cx.clone();
-    ui! {
+    ui!((cx) {
         div(class = ThemeClass::Row) {
             div(class = ThemeClass::Btn, key = "branch-toggle", on_click = move |_| sent.update(|value| *value = !*value)) {
                 text(:if sent.get() { "To draft" } else { "To sent" }.to_owned())
             }
             if (:sent.get()) {
-                { branch_count(&sent_cx, "Sent") }
+                { branch_count(cx, "Sent") }
             } else {
-                { branch_count(&draft_cx, "Draft") }
+                { branch_count(cx, "Draft") }
             }
         }
-    }
+    })
 }
 
 fn branch_count(cx: &Context, name: &'static str) -> Element {

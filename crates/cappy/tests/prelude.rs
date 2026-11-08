@@ -30,11 +30,11 @@ fn prelude_covers_a_small_app() {
         colors { primary: "#ff8800" },
     };
     let cx = Application::new().context().clone();
-    let app = ui! {
+    let app = ui!((cx) {
         div(class = "app", style = style! { gap: Space::Lg, background: ColorToken::Background }) {
             @Greeting(name = "cappy")
         }
-    };
+    });
     let mut ui = Ui::new(&cx, app, custom);
     assert!(ui.update(FrameInput::new(400, 300, 1.0)).needs_redraw());
     assert_eq!(ui.theme().tokens().colors.primary, accent);

@@ -21,7 +21,7 @@ pub use bitmap::{ImagePixels, ImagePixelsError, ObjectFit};
 pub use damage::{Damage, DamageTracker};
 pub use element::{
     Component, Element, HasContext, Slot, div, for_each, fragment, if_else, image, show, slot,
-    text, text_dyn,
+    text, text_dyn, with_context,
 };
 pub use event::{ButtonState, ClickEvent, CursorIcon, InputEvent, PointerButton};
 pub use listener::Listener;
