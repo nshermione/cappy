@@ -23,9 +23,6 @@ mod style;
 mod theme;
 mod tiles;
 
-use std::rc::Rc;
-use std::sync::Arc;
-
 use cappy::prelude::*;
 
 /// Header with a theme switcher, and one tab per demo: counter, tiles, checklist, paint.
@@ -33,14 +30,7 @@ pub fn showcase(cx: &Context) -> Ui {
     // A context reused for another scene still holds the previous singletons.
     cx.use_store(store::Counter).reset();
     cx.use_store(store::App).select(store::Tab::Counter);
-    let themes: Rc<[Arc<Theme>]> = theme::themes()
-        .into_iter()
-        .map(|tokens| Arc::new(style::stylesheet(tokens)))
-        .collect();
-    let active_theme = cx.reactive(Arc::clone(&themes[0]));
-    Ui::with_theme_signal(
-        cx,
-        layout::root(cx, active_theme.clone(), themes),
-        active_theme,
-    )
+    cx.set_themes(theme::themes().into_iter().map(style::stylesheet));
+    // The catalog is already set, so this theme value is not installed.
+    Ui::new(cx, layout::root(cx), Theme::light())
 }

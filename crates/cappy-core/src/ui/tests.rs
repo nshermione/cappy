@@ -1,6 +1,5 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::Arc;
 
 use super::*;
 use crate::reactive::{live_signal_count, signal_is_alive, signal_subscriber_count};
@@ -263,21 +262,23 @@ fn switching_theme_repaints_without_moving_anything() {
 #[test]
 fn theme_signal_shared_with_the_scene_switches_theme() {
     let cx = context();
-    let theme = cx.reactive(Arc::new(Theme::light()));
-    let theme_click = theme.clone();
+    cx.set_themes([Theme::light(), Theme::dark()]);
+    let theme = cx.current_theme();
+    let cx_click = cx.clone();
     let toggle = div()
         .key("toggle")
         .style(StyleRefinement::default().size(40))
         .on_click(move |_| {
-            theme_click.update(|current| {
-                *current = Arc::new(if current.name() == "light" {
-                    Theme::dark()
+            let next = theme.with(|current| {
+                if current.name() == "light" {
+                    "dark"
                 } else {
-                    Theme::light()
-                });
+                    "light"
+                }
             });
+            cx_click.apply_theme(next);
         });
-    let mut ui = Ui::with_theme_signal(&cx, div().class("app").child(toggle), theme);
+    let mut ui = Ui::new(&cx, div().class("app").child(toggle), Theme::light());
     ui.update(VIEWPORT);
     click(&mut ui, "toggle");
     ui.update(VIEWPORT);

@@ -84,7 +84,7 @@ impl Ui {
     /// Resolves one node's style. Returns whether its inherited text style changed.
     fn restyle(&mut self, id: NodeId, parent_text: Option<&TextStyle>) -> bool {
         let node = &self.nodes[id.index()];
-        let resolved = self.theme.resolve(
+        let resolved = self.theme.get().resolve(
             parent_text,
             &node.all_classes(),
             &node.effective_inline_style(),

@@ -1,9 +1,6 @@
 //! The shell: header, tab bar, and one component per tab. Nodes name classes; the stylesheet
 //! decides how those classes look.
 
-use std::rc::Rc;
-use std::sync::Arc;
-
 use cappy::Class as ThemeClass;
 use cappy::prelude::*;
 
@@ -14,11 +11,11 @@ use super::store::{App, Tab};
 use super::style::{Class, class_when};
 use super::tiles::TilesTab;
 
-pub fn root(cx: &Context, theme: Reactive<Arc<Theme>>, themes: Rc<[Arc<Theme>]>) -> Element {
+pub fn root(cx: &Context) -> Element {
     let app = cx.use_store(App);
     element!((cx) {
         div(class = ThemeClass::App) {
-            { header(theme, themes) }
+            { header(cx) }
             { tab_bar(app) }
             show (:app.tab.get() == Tab::Counter) {
                 @CounterTab()
@@ -61,8 +58,9 @@ fn tab(app: App, tab: Tab, title: &'static str, key: &'static str) -> Element {
     }
 }
 
-fn header(theme: Reactive<Arc<Theme>>, themes: Rc<[Arc<Theme>]>) -> Element {
-    element! {
+fn header(cx: &Context) -> Element {
+    let themes = cx.themes();
+    element!((cx) {
         div(class = Class::Header) {
             div(class = ThemeClass::Column) {
                 text("cappy playground", class = ThemeClass::Title)
@@ -71,18 +69,10 @@ fn header(theme: Reactive<Arc<Theme>>, themes: Rc<[Arc<Theme>]>) -> Element {
             div(
                 class = ThemeClass::Btn,
                 key = "theme-toggle",
-                on_click = move |_| {
-                    theme.update(|current| {
-                        let index = themes
-                            .iter()
-                            .position(|candidate| Arc::ptr_eq(candidate, current))
-                            .unwrap_or(0);
-                        *current = Arc::clone(&themes[(index + 1) % themes.len()]);
-                    });
-                },
+                on_click = move |_| themes.set(themes.cycle()),
             ) {
-                text(:format!("Theme: {}", theme.with(|current| current.name().to_owned())))
+                text(:format!("Theme: {}", themes.with(|current| current.name().to_owned())))
             }
         }
-    }
+    })
 }

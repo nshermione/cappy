@@ -16,6 +16,10 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::rc::{Rc, Weak};
 
+use cappy_style::Theme;
+
+use crate::theme_handle::{ThemeCatalog, ThemeHandle, Themes};
+
 /// Identifies one reactive binding inside a [`BindingQueue`].
 ///
 /// `generation` changes when the slot is recycled, so a notification queued for a disposed
@@ -240,6 +244,12 @@ pub(crate) struct Runtime {
     next_owner_generation: Cell<u32>,
     singletons: RefCell<HashMap<TypeId, Box<dyn Any>>>,
     pub(crate) components: RefCell<Vec<Rc<dyn Any>>>,
+    themes: RefCell<Option<ThemeSlot>>,
+}
+
+struct ThemeSlot {
+    catalog: Signal<ThemeCatalog>,
+    active: Signal<ThemeHandle>,
 }
 
 const DEAD_SIGNAL: &str =
@@ -487,6 +497,71 @@ impl Runtime {
         }
         singletons.insert(id, Box::new(created.clone()));
         created
+    }
+
+    pub(crate) fn has_themes(&self) -> bool {
+        self.themes.borrow().is_some()
+    }
+
+    pub(crate) fn set_themes(runtime: &Rc<Runtime>, themes: Vec<Theme>) {
+        let catalog = ThemeCatalog::from_themes(themes);
+        let current_name = runtime
+            .themes
+            .borrow()
+            .as_ref()
+            .map(|slot| slot.active.with_untracked(|theme| theme.name().to_owned()));
+        let selected = match current_name.as_deref() {
+            Some(name) => catalog.by_name(name).unwrap_or_else(|| catalog.first()),
+            None => catalog.first(),
+        };
+        if current_name.is_some() {
+            let (catalog_signal, active) = {
+                let slot = runtime.themes.borrow();
+                let slot = slot.as_ref().expect("theme slot");
+                (slot.catalog, slot.active)
+            };
+            catalog_signal.set(catalog);
+            active.set(selected);
+        } else {
+            let active = Signal::create(runtime, selected, false);
+            let catalog = Signal::create(runtime, catalog, false);
+            *runtime.themes.borrow_mut() = Some(ThemeSlot { catalog, active });
+        }
+    }
+
+    pub(crate) fn apply_theme(&self, name: &str) {
+        let (catalog, active) = {
+            let slot = self.themes.borrow();
+            let slot = slot
+                .as_ref()
+                .expect("cx.apply_theme called before cx.set_themes");
+            (slot.catalog, slot.active)
+        };
+        let handle = catalog.with_untracked(|catalog| {
+            catalog
+                .by_name(name)
+                .unwrap_or_else(|| panic!("no theme named \"{name}\""))
+        });
+        active.set(handle);
+    }
+
+    pub(crate) fn themes(&self) -> Themes {
+        let slot = self.themes.borrow();
+        let slot = slot
+            .as_ref()
+            .expect("cx.themes called before cx.set_themes");
+        Themes {
+            active: slot.active,
+            catalog: slot.catalog,
+        }
+    }
+
+    pub(crate) fn theme_signal(&self) -> Signal<ThemeHandle> {
+        self.themes
+            .borrow()
+            .as_ref()
+            .expect("cx.use_theme called before cx.set_themes")
+            .active
     }
 }
 
@@ -784,6 +859,10 @@ impl<T: 'static> Reactive<T> {
         self.inner
     }
 
+    pub(crate) fn from_signal(inner: Signal<T>) -> Self {
+        Self { inner }
+    }
+
     /// A component prop default. The setter disposes this signal when another handle replaces it.
     /// [`ByValue`](crate::ByValue) keeps the signal and clears that mark.
     #[must_use]
@@ -885,6 +964,49 @@ impl crate::Context {
     /// Pass the marker `#[store]` emits under the struct's name: `cx.use_store(Counter)`.
     pub fn use_store<T: crate::Singleton>(&self, _of: crate::SingletonOf<T>) -> T {
         self.runtime.singleton(|| T::create(self))
+    }
+
+    /// Replaces the themes this context can [`apply_theme`](Self::apply_theme).
+    ///
+    /// The first call selects the first theme. A later call keeps the active theme when its
+    /// name is still in the list, and otherwise selects the first theme.
+    ///
+    /// # Panics
+    /// Panics when `themes` is empty or two themes share a name.
+    pub fn set_themes(&self, themes: impl IntoIterator<Item = Theme>) {
+        Runtime::set_themes(&self.runtime, themes.into_iter().collect());
+    }
+
+    /// Makes the theme named `name` active. Every [`Ui`](crate::Ui) on this context restyles.
+    ///
+    /// `name` is [`Theme::name`]. An enum that implements [`AsRef<str>`] with that same string
+    /// works too.
+    ///
+    /// # Panics
+    /// Panics when no themes have been set, or when `name` is not in the catalog.
+    pub fn apply_theme(&self, name: impl AsRef<str>) {
+        self.runtime.apply_theme(name.as_ref());
+    }
+
+    /// The themes registered with [`set_themes`](Self::set_themes).
+    ///
+    /// [`Themes::set`] selects one. [`Themes::with`] reads the active theme inside `element!`.
+    /// [`Themes::catalog`] is the list.
+    ///
+    /// # Panics
+    /// Panics when no themes have been set.
+    pub fn themes(&self) -> Themes {
+        self.runtime.themes()
+    }
+
+    /// The active theme. Every call returns a handle to the same signal.
+    ///
+    /// # Panics
+    /// Panics when no themes have been set.
+    pub fn current_theme(&self) -> Reactive<ThemeHandle> {
+        Reactive {
+            inner: self.runtime.theme_signal(),
+        }
     }
 }
 
@@ -1389,7 +1511,7 @@ mod tests {
     }
 
     #[test]
-    fn ui_new_disposes_its_theme_signal() {
+    fn ui_drop_keeps_the_context_theme_signal() {
         use crate::{Theme, Ui, div};
 
         let context = context();
@@ -1398,26 +1520,41 @@ mod tests {
             let ui = Ui::new(&context, div(), Theme::light());
             let theme = ui.theme_signal();
             assert!(signal_is_alive(&theme));
-            assert_eq!(live_signal_count(&context.runtime), before + 1);
+            assert_eq!(live_signal_count(&context.runtime), before + 2);
             theme
         };
-        assert!(!signal_is_alive(&theme));
-        assert_eq!(live_signal_count(&context.runtime), before);
+        assert!(signal_is_alive(&theme));
+        assert_eq!(live_signal_count(&context.runtime), before + 2);
+        assert_eq!(context.current_theme().as_signal(), theme);
     }
 
     #[test]
-    fn with_theme_signal_keeps_the_caller_signal() {
-        use std::sync::Arc;
-
+    fn dropping_ui_keeps_use_theme_alive() {
         use crate::{Theme, Ui, div};
 
         let context = context();
-        let theme = context.reactive(Arc::new(Theme::light()));
+        context.set_themes([Theme::light(), Theme::dark()]);
+        let theme = context.current_theme();
         let before = live_signal_count(&context.runtime);
-        let signal = theme.as_signal();
-        drop(Ui::with_theme_signal(&context, div(), theme));
-        assert!(signal_is_alive(&signal));
+        drop(Ui::new(&context, div(), Theme::light()));
+        assert!(signal_is_alive(&theme.as_signal()));
         assert_eq!(live_signal_count(&context.runtime), before);
+        context.apply_theme("dark");
+        assert_eq!(theme.with(|current| current.name().to_owned()), "dark");
+    }
+
+    #[test]
+    fn apply_theme_selects_a_catalog_entry_by_name() {
+        use crate::Theme;
+
+        let context = context();
+        context.set_themes([Theme::light(), Theme::dark()]);
+        context.apply_theme("dark");
+        let themes = context.themes();
+        assert_eq!(themes.get().name(), "dark");
+        themes.set(themes.cycle());
+        assert_eq!(themes.get().name(), "light");
+        assert_eq!(themes.catalog().with(|catalog| catalog.len()), 2);
     }
 
     #[test]

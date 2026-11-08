@@ -13,11 +13,10 @@ use std::sync::Arc;
 use cappy_layout::{ApproximateTextMeasurer, LayoutTree, Point, Rect, Size, TextMeasurer};
 use cappy_style::{Style, Theme};
 
-use crate::Context;
 use crate::element::Element;
 use crate::paint::{Primitive, RenderFrame};
-use crate::reactive::{BindingQueue, Reactive, Signal};
-use crate::{CursorIcon, Damage, DamageTracker};
+use crate::reactive::{BindingQueue, Signal};
+use crate::{Context, CursorIcon, Damage, DamageTracker, ThemeHandle};
 use bindings::{Binding, BindingKind};
 pub use node::NodeId;
 use node::{Node, NodeContent};
@@ -107,10 +106,8 @@ pub struct Ui {
     free_bindings: Vec<u32>,
     flows: Vec<flow::FlowState>,
     queue: Rc<BindingQueue>,
-    theme_signal: Signal<Arc<Theme>>,
-    /// [`Ui::new`] allocated `theme_signal` and disposes it on drop.
-    owns_theme: bool,
-    theme: Arc<Theme>,
+    theme_signal: Signal<ThemeHandle>,
+    theme: ThemeHandle,
     layout: LayoutTree<NodeId>,
     measurer: Box<dyn TextMeasurer>,
     viewport: Option<FrameInput>,
@@ -126,31 +123,19 @@ pub struct Ui {
 }
 
 impl Ui {
-    /// Mounts `root` with a fixed theme. Use [`Ui::set_theme`] or [`Ui::theme_signal`] to switch.
+    /// Mounts `root` on the context theme.
     ///
-    /// The theme signal created here is disposed when this `Ui` drops.
+    /// When the context has no themes yet, installs `theme` as the only one. When themes are
+    /// already set, `theme` is ignored and the active theme stays. Switch with
+    /// [`Context::apply_theme`](crate::Context::apply_theme) or [`Ui::set_theme`].
+    ///
+    /// The theme signal belongs to the context. Dropping this `Ui` does not dispose it.
     pub fn new(context: &Context, root: impl Into<Element>, theme: Theme) -> Self {
-        Self::with_owned_theme(context, root, context.signal(Arc::new(theme)), true)
-    }
-
-    /// Mounts `root` and follows `theme`: setting the handle restyles the whole UI.
-    ///
-    /// `theme` stays alive after this `Ui` drops. The caller owns that handle.
-    pub fn with_theme_signal(
-        context: &Context,
-        root: impl Into<Element>,
-        theme: Reactive<Arc<Theme>>,
-    ) -> Self {
-        Self::with_owned_theme(context, root, theme.as_signal(), false)
-    }
-
-    fn with_owned_theme(
-        context: &Context,
-        root: impl Into<Element>,
-        theme: Signal<Arc<Theme>>,
-        owns_theme: bool,
-    ) -> Self {
-        let initial_theme = theme.get_untracked();
+        if !context.runtime.has_themes() {
+            context.set_themes([theme]);
+        }
+        let theme_signal = context.current_theme().as_signal();
+        let initial_theme = theme_signal.get_untracked();
         let mut ui = Self {
             nodes: Vec::new(),
             free_nodes: Vec::new(),
@@ -159,8 +144,7 @@ impl Ui {
             free_bindings: Vec::new(),
             flows: Vec::new(),
             queue: Rc::new(BindingQueue::new(Rc::clone(&context.runtime))),
-            theme_signal: theme,
-            owns_theme,
+            theme_signal,
             theme: initial_theme,
             layout: LayoutTree::new(),
             measurer: Box::new(ApproximateTextMeasurer::default()),
@@ -197,17 +181,13 @@ impl Ui {
         self.queue.set_waker(Some(Rc::new(waker)));
     }
 
-    pub fn theme(&self) -> &Arc<Theme> {
+    pub fn theme(&self) -> &ThemeHandle {
         &self.theme
     }
 
-    /// The theme this UI follows.
-    ///
-    /// When the UI was built with [`Ui::new`], the signal is disposed as the `Ui` drops, and any
-    /// copy kept outside panics on the next read. A handle passed to [`Ui::with_theme_signal`]
-    /// is not disposed.
-    pub fn theme_signal(&self) -> Signal<Arc<Theme>> {
-        self.theme_signal.clone()
+    /// The context theme this UI follows. The signal stays alive after this `Ui` drops.
+    pub fn theme_signal(&self) -> Signal<ThemeHandle> {
+        self.theme_signal
     }
 
     /// True when `context` is the runtime this UI mounts signals into.
@@ -216,7 +196,7 @@ impl Ui {
     }
 
     pub fn set_theme(&mut self, theme: Theme) {
-        self.theme_signal.set(Arc::new(theme));
+        self.theme_signal.set(ThemeHandle::from(theme));
     }
 
     /// True when [`Ui::update`] has work to do.
@@ -417,9 +397,6 @@ impl Ui {
 impl Drop for Ui {
     fn drop(&mut self) {
         self.dispose_tree();
-        if self.owns_theme {
-            self.theme_signal.clone().dispose();
-        }
     }
 }
 

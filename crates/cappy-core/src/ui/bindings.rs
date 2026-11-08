@@ -1,12 +1,9 @@
 //! Reactive bindings: closures whose result is written into a node whenever a signal they read
 //! changes.
 
-use std::sync::Arc;
-
-use cappy_style::Theme;
-
 use super::flow::FlowId;
 use super::{NodeId, Ui};
+use crate::ThemeHandle;
 use crate::element::{ClassBinding, StyleBinding, TextBinding};
 use crate::reactive::{BindingId, Observer, detach_binding, track};
 
@@ -99,7 +96,7 @@ impl Ui {
             Text(String),
             Classes(Vec<cappy_style::ClassName>),
             Style(Box<cappy_style::StyleRefinement>),
-            Theme(Arc<Theme>),
+            Theme(ThemeHandle),
             Flow(FlowId),
         }
         let step = match &self.bindings[id.slot()].kind {
@@ -134,8 +131,8 @@ impl Ui {
         }
     }
 
-    fn apply_theme(&mut self, theme: Arc<Theme>) {
-        if Arc::ptr_eq(&theme, &self.theme) {
+    fn apply_theme(&mut self, theme: ThemeHandle) {
+        if theme.ptr_eq(&self.theme) {
             return;
         }
         self.theme = theme;

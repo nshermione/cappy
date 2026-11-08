@@ -12,6 +12,7 @@ mod listener;
 mod paint;
 mod prop;
 mod reactive;
+mod theme_handle;
 mod ui;
 
 pub use context::{Application, Context, FieldInit, Singleton, SingletonOf};
@@ -31,6 +32,7 @@ pub use paint::{
 };
 pub use prop::{ByHandle, ByValue, PropInput};
 pub use reactive::{IntoReactive, Reactive, RetirePlaceholder, Signal};
+pub use theme_handle::{ThemeCatalog, ThemeHandle, Themes};
 pub use ui::{FrameInput, NodeId, ResourceCensus, Ui, UpdateOutcome};
 
 pub use cappy_layout::{

@@ -32,7 +32,7 @@
 #[cfg(feature = "basic")]
 pub use cappy_core::*;
 #[cfg(feature = "basic")]
-pub use cappy_dsl::{style, theme, element};
+pub use cappy_dsl::{element, style, theme};
 #[cfg(feature = "basic")]
 pub use cappy_macros::{ClassName, Props, Reactive, component, store, stylesheet};
 
@@ -71,9 +71,9 @@ pub mod prelude {
         Align, Application, Color, ColorToken, Component, Context, Display, Dynamic, Element,
         FlexDirection, FontSize, FontWeight, FrameInput, HasContext, ImagePixels, IntoReactive,
         Justify, ObjectFit, Radius, Reactive, Signal, Slot, Space, StyleRefinement, Stylesheet,
-        Theme, Ui, UpdateOutcome, div, for_each, fragment, hex, if_else, image, linear, percent,
-        shadow, show, slot, text, text_dyn,
+        Theme, ThemeCatalog, ThemeHandle, Themes, Ui, UpdateOutcome, div, for_each, fragment, hex,
+        if_else, image, linear, percent, shadow, show, slot, text, text_dyn,
     };
-    pub use cappy_dsl::{style, theme, element};
+    pub use cappy_dsl::{element, style, theme};
     pub use cappy_macros::{ClassName, Props, Reactive, component, store, stylesheet};
 }
