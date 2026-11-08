@@ -28,7 +28,7 @@ impl Component for ChecklistTab {
                 .collect::<Vec<_>>(),
         );
         let next_id = cx.reactive(TASKS.len() as u64);
-        ui!((cx) {
+        element!((cx) {
             div(class = ThemeClass::Card) {
                 div(class = ThemeClass::Row) {
                     text("Phase 1 checklist", class = ThemeClass::Subtitle)
@@ -61,7 +61,7 @@ impl Component for ChecklistTab {
 /// Hides the counter. The `+1` made before hiding is still there when it comes back.
 fn show_row(cx: &Context) -> Element {
     let open = cx.reactive(true);
-    ui!((cx) {
+    element!((cx) {
         div(class = ThemeClass::Row) {
             div(class = ThemeClass::Btn, key = "show-toggle", on_click = move |_| open.update(|value| *value = !*value)) {
                 text(:if open.get() { "Hide kept" } else { "Show kept" }.to_owned())
@@ -75,7 +75,7 @@ fn show_row(cx: &Context) -> Element {
 
 fn kept_count(cx: &Context) -> Element {
     let count = cx.reactive(0i64);
-    ui! {
+    element! {
         div(class = ThemeClass::Row, key = "kept-count") {
             text(:format!("Kept: {}", count), key = "show-count")
             div(class = ThemeClass::Btn, key = "show-increment", on_click = move |_| count.update(|value| *value += 1)) {
@@ -88,7 +88,7 @@ fn kept_count(cx: &Context) -> Element {
 /// Switching branches throws the counter away. Coming back starts at zero.
 fn branch_row(cx: &Context) -> Element {
     let sent = cx.reactive(false);
-    ui!((cx) {
+    element!((cx) {
         div(class = ThemeClass::Row) {
             div(class = ThemeClass::Btn, key = "branch-toggle", on_click = move |_| sent.update(|value| *value = !*value)) {
                 text(:if sent.get() { "To draft" } else { "To sent" }.to_owned())
@@ -104,7 +104,7 @@ fn branch_row(cx: &Context) -> Element {
 
 fn branch_count(cx: &Context, name: &'static str) -> Element {
     let count = cx.reactive(0i64);
-    ui! {
+    element! {
         div(class = ThemeClass::Row, key = "branch") {
             text(:format!("{name}: {}", count), key = "branch-count")
             div(class = ThemeClass::Btn, key = "branch-increment", on_click = move |_| count.update(|value| *value += 1)) {
@@ -117,7 +117,7 @@ fn branch_count(cx: &Context, name: &'static str) -> Element {
 fn task_row(cx: &Context, tasks: Reactive<Vec<Task>>, task: Reactive<Task>) -> Element {
     let done = cx.reactive(false);
     let id = task.with(|row| row.id);
-    ui! {
+    element! {
         div(class = ThemeClass::Row, key = format!("task-{id}"), on_click = move |_| done.update(|value| *value = !*value)) {
             div(class = ThemeClass::Badge, :class = class_when(done.get(), Class::BadgeDone)) {
                 text(:if done.get() { "done" } else { "todo" }.to_owned())

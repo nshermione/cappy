@@ -1,5 +1,5 @@
 //! Values an element setter accepts either fixed or recomputed from signals. [`Dynamic`] marks the
-//! recomputed kind; `ui!` wraps every `:field = value` and `name(:value)` in it, so a setter keeps
+//! recomputed kind; `element!` wraps every `:field = value` and `name(:value)` in it, so a setter keeps
 //! one name for both.
 
 use std::sync::Arc;

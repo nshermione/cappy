@@ -398,7 +398,7 @@ fn is_unit(ty: &Type) -> bool {
     matches!(ty, Type::Tuple(tuple) if tuple.elems.is_empty())
 }
 
-/// `open` is what `ui!` `@Type` calls. State and props start from [`Default`].
+/// `open` is what `element!` `@Type` calls. State and props start from [`Default`].
 fn open_method(
     generics: &Generics,
     _name: &syn::Ident,

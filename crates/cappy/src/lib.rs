@@ -4,7 +4,7 @@
 //!
 //! Features:
 //! - `basic` (default): reactive core, styles and themes, layout, text, the renderer-independent
-//!   window host, `ui!`/`style!`/`theme!` macros and derives. Enough to build any component
+//!   window host, `element!`/`style!`/`theme!` macros and derives. Enough to build any component
 //!   yourself.
 //! - `gpu` (default): the wgpu renderer, as [`render`].
 //! - `cpu`: the tiny-skia + softbuffer renderer, as [`render_cpu`]. It loads no GPU driver, so it
@@ -17,7 +17,7 @@
 //! let application = Application::new();
 //! let cx = application.context();
 //! let count = cx.reactive(0_i32);
-//! let root = ui! {
+//! let root = element! {
 //!     div(class = "app") {
 //!         text(:format!("Clicked {} times", count.get()))
 //!         div(class = "btn btn-primary", on_click = move |_| count.update(|n| *n += 1)) {
@@ -32,7 +32,7 @@
 #[cfg(feature = "basic")]
 pub use cappy_core::*;
 #[cfg(feature = "basic")]
-pub use cappy_dsl::{style, theme, ui};
+pub use cappy_dsl::{style, theme, element};
 #[cfg(feature = "basic")]
 pub use cappy_macros::{ClassName, Props, Reactive, component, store, stylesheet};
 
@@ -74,6 +74,6 @@ pub mod prelude {
         Theme, Ui, UpdateOutcome, div, for_each, fragment, hex, if_else, image, linear, percent,
         shadow, show, slot, text, text_dyn,
     };
-    pub use cappy_dsl::{style, theme, ui};
+    pub use cappy_dsl::{style, theme, element};
     pub use cappy_macros::{ClassName, Props, Reactive, component, store, stylesheet};
 }

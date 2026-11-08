@@ -14,7 +14,7 @@ struct Greeting {
 
 impl Component for Greeting {
     fn render(&self, _cx: &Context) -> Element {
-        ui! {
+        element! {
             div(class = Class::Card.as_str(), key = "greeting") {
                 text(format!("Hello, {}!", self.name), class = Class::Title.as_str())
             }
@@ -30,7 +30,7 @@ fn prelude_covers_a_small_app() {
         colors { primary: "#ff8800" },
     };
     let cx = Application::new().context().clone();
-    let app = ui!((cx) {
+    let app = element!((cx) {
         div(class = "app", style = style! { gap: Space::Lg, background: ColorToken::Background }) {
             @Greeting(name = "cappy")
         }

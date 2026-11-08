@@ -2,7 +2,7 @@ use cappy_core::{
     Application, Color, ColorToken, Component, Context, Element, FrameInput, HasContext, Radius,
     Space, StyleRefinement, Theme, Ui, div, text, text_dyn,
 };
-use cappy_dsl::{style, theme, ui};
+use cappy_dsl::{style, theme, element};
 
 const VIEWPORT: FrameInput = FrameInput {
     physical_width: 640,
@@ -68,7 +68,7 @@ fn ui_builds_nested_nodes_with_attributes() {
     let cx = context();
     let ui = mounted(
         &cx,
-        ui! {
+        element! {
             div(class = "app", key = "root") {
                 text("Title", class = "title", key = "title")
                 div(class = "row", key = "row") {
@@ -91,7 +91,7 @@ fn one_reactive_is_read_from_two_bindings_and_a_click() {
     let count = cx.reactive(0_i32);
     let mut ui = mounted(
         &cx,
-        ui! {
+        element! {
             div {
                 text(:format!("{}", count.get()), key = "a")
                 text(:format!("{}", count.get()), key = "b")
@@ -116,7 +116,7 @@ fn closure_text_is_reactive() {
     let label = count.clone();
     let mut ui = mounted(
         &cx,
-        ui! {
+        element! {
             div {
                 text(:format!("Count: {}", label.get()), key = "label")
             }
@@ -135,7 +135,7 @@ fn colon_fields_rebind_classes_and_styles() {
     let active_style = active.clone();
     let mut ui = mounted(
         &cx,
-        ui! {
+        element! {
             div {
                 div(
                     key = "chip",
@@ -167,21 +167,21 @@ fn assert_classes(element: &Element, expected: &str) {
 
 #[test]
 fn class_takes_one_value_without_brackets() {
-    assert_classes(&ui! { div(class = "btn") }, r#"["btn"]"#);
-    assert_classes(&ui! { text("Title", class = "title") }, r#"["title"]"#);
+    assert_classes(&element! { div(class = "btn") }, r#"["btn"]"#);
+    assert_classes(&element! { text("Title", class = "title") }, r#"["title"]"#);
 }
 
 #[test]
 fn class_list_adds_every_item() {
     assert_classes(
-        &ui! { div(class = ["btn", "btn-primary large"]) },
+        &element! { div(class = ["btn", "btn-primary large"]) },
         r#"["btn", "btn-primary", "large"]"#,
     );
     assert_classes(
-        &ui! { div(class = ["card", String::from("raised")], class = "wide") },
+        &element! { div(class = ["card", String::from("raised")], class = "wide") },
         r#"["card", "raised", "wide"]"#,
     );
-    assert_classes(&ui! { div(class = []) }, "[]");
+    assert_classes(&element! { div(class = []) }, "[]");
 }
 
 #[test]
@@ -189,7 +189,7 @@ fn fields_after_a_class_list_still_apply() {
     let cx = context();
     let ui = mounted(
         &cx,
-        ui! {
+        element! {
             div {
                 div(class = ["card"], key = "box")
                 text("Title", class = ["title", "muted",], key = "title")
@@ -207,7 +207,7 @@ fn colon_class_list_rebinds_every_item() {
     let active_class = active.clone();
     let mut ui = mounted(
         &cx,
-        ui! {
+        element! {
             div {
                 div(
                     key = "chip",
@@ -231,7 +231,7 @@ fn colon_class_list_rebinds_every_item() {
 fn handlers_pass_through_as_attributes() {
     let cx = context();
     let clicked = cx.reactive(false);
-    let tree = ui! {
+    let tree = element! {
         div(key = "button", on_click = move |_| clicked.set(true), style = style! { size: 40 })
     };
     let ui = mounted(&cx, div().child(tree));
@@ -244,7 +244,7 @@ fn embedded_expressions_iterators_functions_and_components() {
     let cx = context();
     let ui = mounted(
         &cx,
-        ui!((cx) {
+        element!((cx) {
             div(key = "root") {
                 { text("embedded") }
                 div(key = "list") {
@@ -268,13 +268,13 @@ fn embedded_expressions_iterators_functions_and_components() {
 fn component_root_keeps_host_attributes_and_appended_children() {
     let cx = context();
     assert_classes(
-        &ui!((cx) { @Badge(label = "new", class = ["wrap", "wide"]) }),
+        &element!((cx) { @Badge(label = "new", class = ["wrap", "wide"]) }),
         r#"["badge", "wrap", "wide"]"#,
     );
     let cx = context();
     let ui = mounted(
         &cx,
-        ui!((cx) {
+        element!((cx) {
             @Badge(label = "new", class = "wrap", key = "hosted") {
                 text("extra", key = "extra")
             }
@@ -296,7 +296,7 @@ fn any_element_function_takes_content_fields_and_comma_separated_children() {
     let cx = context();
     let ui = mounted(
         &cx,
-        ui! {
+        element! {
             div(key = "root") {
                 label("hello", key = "label"),
                 div,
@@ -372,7 +372,7 @@ fn control_flow_macros_mount_show_if_and_for() {
     let items_source = items.clone();
     let mut ui = mounted(
         &cx,
-        ui! {
+        element! {
             div(key = "root") {
                 show (:open_visible.get()) {
                     {{
@@ -453,7 +453,7 @@ impl Component for Mark {
 
 fn marked(cx: &Context) -> Element {
     let value = cx.reactive(String::from("helper"));
-    ui! {
+    element! {
         text(:value.get(), key = "helper")
     }
 }
@@ -467,7 +467,7 @@ fn deferred_blocks_receive_the_callers_context() {
         let first = context.reactive(false);
         let second = context.reactive(true);
         let rows = context.reactive(vec!["row".to_owned()]);
-        ui!((context) {
+        element!((context) {
             div(key = "root") {
                 show (:shown.get()) {
                     @Mark(key = "mark-show")

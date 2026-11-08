@@ -43,7 +43,7 @@ impl Component for Badge {
 
     fn render(&self, cx: &Context) -> Element {
         let counter = cx.use_store(Counter);
-        ui! {
+        element! {
             div(class = Class::Root, on_click = cx.on(Self::press)) {
                 slot(icon)
                 text(:format!("{} ({}) c:{}", self.label, self.hits, counter.count), key = "badge-label")

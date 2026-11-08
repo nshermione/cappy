@@ -16,7 +16,7 @@ use super::tiles::TilesTab;
 
 pub fn root(cx: &Context, theme: Reactive<Arc<Theme>>, themes: Rc<[Arc<Theme>]>) -> Element {
     let app = cx.use_store(App);
-    ui!((cx) {
+    element!((cx) {
         div(class = ThemeClass::App) {
             { header(theme, themes) }
             { tab_bar(app) }
@@ -38,7 +38,7 @@ pub fn root(cx: &Context, theme: Reactive<Arc<Theme>>, themes: Rc<[Arc<Theme>]>)
 }
 
 fn tab_bar(app: App) -> Element {
-    ui! {
+    element! {
         div(class = Class::TabBar) {
             { tab(app, Tab::Counter, "Counter", "tab-counter") }
             { tab(app, Tab::Tiles, "Tiles", "tab-tiles") }
@@ -49,7 +49,7 @@ fn tab_bar(app: App) -> Element {
 }
 
 fn tab(app: App, tab: Tab, title: &'static str, key: &'static str) -> Element {
-    ui! {
+    element! {
         div(
             class = ThemeClass::Btn,
             :class = class_when(app.tab.get() == tab, Class::TabActive),
@@ -62,7 +62,7 @@ fn tab(app: App, tab: Tab, title: &'static str, key: &'static str) -> Element {
 }
 
 fn header(theme: Reactive<Arc<Theme>>, themes: Rc<[Arc<Theme>]>) -> Element {
-    ui! {
+    element! {
         div(class = Class::Header) {
             div(class = ThemeClass::Column) {
                 text("cappy playground", class = ThemeClass::Title)

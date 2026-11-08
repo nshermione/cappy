@@ -160,7 +160,7 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
         .into()
 }
 
-/// Expands to `self.field` in the caller's method, so `slot(field)` inside `ui!` reads that field.
+/// Expands to `self.field` in the caller's method, so `slot(field)` inside `element!` reads that field.
 #[doc(hidden)]
 #[proc_macro]
 pub fn slot_self(input: TokenStream) -> TokenStream {
@@ -169,7 +169,7 @@ pub fn slot_self(input: TokenStream) -> TokenStream {
     quote!(#receiver.#field).into()
 }
 
-/// Copies each `self.field` used in a `ui!` closure, then builds that closure.
+/// Copies each `self.field` used in a `element!` closure, then builds that closure.
 ///
 /// The copies sit outside the closure, so `text(:format!("{}", self.label))` does not capture
 /// `&self`.
@@ -179,7 +179,7 @@ pub fn ui_closure(input: TokenStream) -> TokenStream {
     ui_closure::expand(input.into()).into()
 }
 
-/// Builds a `'static` element closure that still sees the context passed to `ui!`.
+/// Builds a `'static` element closure that still sees the context passed to `element!`.
 ///
 /// Input is `with_context ; context_ident ; move || body`. `for` goes through
 /// [`ui_for_view`](ui_for_view).

@@ -1,4 +1,4 @@
-//! Declarative macros for cappy: [`ui!`] builds element trees, [`style!`] builds style
+//! Declarative macros for cappy: [`element!`] builds element trees, [`style!`] builds style
 //! refinements and [`theme!`] derives themes, all expanding to plain builder calls.
 
 #[doc(hidden)]
@@ -12,13 +12,13 @@ pub use cappy_macros::{slot_self, ui_closure, ui_for_view, ui_view};
 /// Builds an element tree.
 ///
 /// ```
-/// use cappy_dsl::{style, ui};
+/// use cappy_dsl::{style, element};
 /// use cappy_core::{Application, Space, div, text};
 ///
 /// let application = Application::new();
 /// let cx = application.context();
 /// let count = cx.reactive(0_i32);
-/// let tree = ui! {
+/// let tree = element! {
 ///     div(class = "app") {
 ///         text("Counter", class = "title"),
 ///         div(class = "row", style = style! { gap: Space::Sm }) {
@@ -37,7 +37,7 @@ pub use cappy_macros::{slot_self, ui_closure, ui_for_view, ui_view};
 ///   `div`, `text` and your own element functions all resolve (and go to definition) the same
 ///   way. The leading `content` argument, the fields and the children are all optional.
 /// - `@Type(field = value, ...) { children }` builds `Type::open(&context)` and sets fields.
-///   `context` is the name passed to [`ui!`](ui): `ui!((context) { @Type })`. The type is a
+///   `context` is the name passed to [`element!`](element): `element!((context) { @Type })`. The type is a
 ///   `#[component]`. `class`, `style` and `key` are applied to the element
 ///   `render` returns. Without `#[slot]` fields, children are appended to that root. With slots,
 ///   the first child that has no `slot = name` fills the first slot, `slot = name` fills that
@@ -51,10 +51,10 @@ pub use cappy_macros::{slot_self, ui_closure, ui_for_view, ui_view};
 /// - `for (item in :list, key = item.field) { ... }` repeats the block, keeping a row when its
 ///   key stays. `item` in the block is the row signal.
 /// - `show`, `if` and `for` build their elements in a `'static` closure. Pass the context when
-///   those blocks or `@Type` use it: `ui!((context) { ... })`. Each block clones that binding, so
+///   those blocks or `@Type` use it: `element!((context) { ... })`. Each block clones that binding, so
 ///   several blocks can share it, and the same name is bound again inside the closure. A tree
 ///   that never opens a component and never reads the context inside those blocks stays
-///   `ui! { ... }`.
+///   `element! { ... }`.
 /// - `slot(field)` stays outside `show`, `if` and `for`. A parent fills slots before mount, and
 ///   those blocks build their contents at mount.
 ///
@@ -72,7 +72,7 @@ pub use cappy_macros::{slot_self, ui_closure, ui_for_view, ui_view};
 /// Children may be separated by commas. Put a comma before a `{ expression }` child that follows
 /// an element with arguments, or it is read as that element's children.
 #[macro_export]
-macro_rules! ui {
+macro_rules! element {
     (( $cx:ident ) { $($body:tt)* }) => {
         $crate::__ui_node!(@cx [ $cx ] ; $($body)*)
     };
@@ -343,7 +343,7 @@ macro_rules! __ui_component {
         children [ $($children:tt)* ] ;
     ) => {
         ::core::compile_error!(
-            "pass the context to ui! before using @Type: ui!((cx) { @Type(...) })"
+            "pass the context to element! before using @Type: element!((cx) { @Type(...) })"
         )
     };
 }
@@ -404,7 +404,7 @@ macro_rules! __ui_args {
     };
 }
 
-/// Expands the dynamic parts of `ui!`, the ones written with a leading `:`: the value becomes a
+/// Expands the dynamic parts of `element!`, the ones written with a leading `:`: the value becomes a
 /// [`Dynamic`](cappy_core::Dynamic) closure passed to the same function or setter a static value
 /// would go to, so go to definition lands on that function.
 ///

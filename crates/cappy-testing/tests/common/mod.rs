@@ -8,7 +8,7 @@ use cappy_core::{
     Application, Color, ColorToken, Context, Damage, Element, FrameInput, ImagePixels, ObjectFit,
     Radius, Reactive, RenderFrame, Theme, Ui, div, image, linear, shadow, text,
 };
-use cappy_dsl::{style, ui};
+use cappy_dsl::{style, element};
 use cappy_testing::TestUi;
 use cappy_text::{CosmicTextMeasurer, FontContext};
 
@@ -41,7 +41,7 @@ pub fn background() -> Color {
 
 pub fn counter(count: Reactive<i32>) -> Element {
     let label = count.clone();
-    ui! {
+    element! {
         div(class = "app") {
             div(class = "row", key = "row") {
                 text(:format!("Count: {}", label.get()), key = "label")
@@ -54,7 +54,7 @@ pub fn counter(count: Reactive<i32>) -> Element {
 }
 
 pub fn shapes() -> Element {
-    ui! {
+    element! {
         div(class = "app", key = "root") {
             div(class = "row") {
                 div(style = style! { size: 60, background: ColorToken::Primary, radius: Radius::Lg })
@@ -82,7 +82,7 @@ pub fn effects() -> Element {
         )
         .expect("2x2 rgba"),
     );
-    ui! {
+    element! {
         div(style = style! { padding: 24, gap: 16 }) {
             div(key = "gradient", style = style! {
                 size: 64,

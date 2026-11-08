@@ -16,7 +16,7 @@ impl Component for CounterTab {
         let shared = cx.use_store(Counter);
         let mirror = cx.use_store(Counter);
         let local = Counter::new(cx, 0);
-        ui!((cx) {
+        element!((cx) {
             div(class = [ThemeClass::Card, Class::Grow]) {
                 text("Counter", class = ThemeClass::Subtitle)
                 text(:format!("Count: {}", shared.count), key = "count", class = Class::Count)

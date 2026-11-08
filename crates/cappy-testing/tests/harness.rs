@@ -1,5 +1,5 @@
 use cappy_core::{Application, Damage, Element, Reactive, Theme, UpdateOutcome, div, text};
-use cappy_dsl::ui;
+use cappy_dsl::element;
 use cappy_testing::TestUi;
 
 fn context() -> cappy_core::Context {
@@ -8,7 +8,7 @@ fn context() -> cappy_core::Context {
 
 fn counter(count: Reactive<i32>) -> Element {
     let label = count.clone();
-    ui! {
+    element! {
         div(class = "app") {
             div(class = "row", key = "row") {
                 text(:format!("Count: {}", label.get()), key = "label")

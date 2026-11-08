@@ -39,7 +39,7 @@ impl Component for Badge {
     }
 
     fn render(&self, cx: &Context) -> Element {
-        ui! {
+        element! {
             div(class = BadgeClass::Root, key = "badge-root", on_click = cx.on(Self::press)) {
                 text(:format!("{}:{}", self.text, self.label), class = BadgeClass::Label, key = "badge-label")
             }
@@ -121,7 +121,7 @@ fn parent_passes_props_events_host_attributes_and_children() {
     let record = Rc::clone(&seen);
     let mut ui = settled(
         &cx,
-        ui!((cx) {
+        element!((cx) {
             @Badge(
                 label = label.clone(),
                 on_click = move |value: &String| record.set(value.clone()),
@@ -187,7 +187,7 @@ struct Panel {
 
 impl Component for Panel {
     fn render(&self, _cx: &Context) -> Element {
-        ui! {
+        element! {
             div(key = "panel") {
                 slot(icon)
                 slot(body)
@@ -204,7 +204,7 @@ struct Frame {
 
 impl Component for Frame {
     fn render(&self, _cx: &Context) -> Element {
-        ui! {
+        element! {
             div(key = "frame") {
                 text("before", key = "before")
                 slot(body)
@@ -222,7 +222,7 @@ struct Inner {
 
 impl Component for Inner {
     fn render(&self, _cx: &Context) -> Element {
-        ui! {
+        element! {
             div(key = "inner") { slot(body) }
         }
     }
@@ -236,7 +236,7 @@ struct Outer {
 
 impl Component for Outer {
     fn render(&self, cx: &Context) -> Element {
-        ui!((cx) {
+        element!((cx) {
             div(key = "outer") {
                 slot(body)
                 @Inner { text("inner-text", key = "inner-text") }
@@ -253,7 +253,7 @@ fn slots_land_in_declaration_order_and_drop_the_rest() {
     let _again = panel.clone();
     let ui = settled(
         &cx,
-        ui!((cx) {
+        element!((cx) {
             @Panel(class = ThemeClass::Muted, key = "hosted") {
                 text("default", key = "default"),
                 text("named", key = "named", slot = body),
@@ -282,7 +282,7 @@ fn an_unnamed_child_is_placed_where_the_slot_is() {
     let cx = context();
     let ui = settled(
         &cx,
-        ui!((cx) {
+        element!((cx) {
             @Frame {
                 text("middle", key = "middle"),
                 text("dropped", key = "dropped"),
@@ -303,7 +303,7 @@ fn nested_components_keep_their_own_slots() {
     let cx = context();
     let ui = settled(
         &cx,
-        ui!((cx) {
+        element!((cx) {
             @Outer {
                 text("outer-text", key = "outer-text")
             }
@@ -336,7 +336,7 @@ struct Shelf {
 
 impl Component for Shelf {
     fn render(&self, _cx: &Context) -> Element {
-        ui! {
+        element! {
             div(key = "shelf") {
                 slot(header)
                 slot(body)
@@ -376,7 +376,7 @@ fn section_markers_cover_following_fields_until_the_next_marker() {
 
     let ui = settled(
         &cx,
-        ui!((cx) {
+        element!((cx) {
             @Shelf(title = "A", subtitle = "B", key = "hosted") {
                 text("top", key = "top", slot = header),
                 text("main", key = "main", slot = body),

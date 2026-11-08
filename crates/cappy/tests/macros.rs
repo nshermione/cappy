@@ -146,7 +146,7 @@ struct Badge {
 
 impl Component for Badge {
     fn render(&self, _context: &Context) -> Element {
-        ui! {
+        element! {
             div(class = "badge", key = "badge") {
                 text(:format!("{}", self.label))
             }

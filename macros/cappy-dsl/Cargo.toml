@@ -1,6 +1,6 @@
 [package]
 name = "cappy-dsl"
-description = "macro_rules! DSL (ui!, style!, theme!) for the cappy GUI framework"
+description = "macro_rules! DSL (element!, style!, theme!) for the cappy GUI framework"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

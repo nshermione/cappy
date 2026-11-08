@@ -17,7 +17,7 @@ impl Component for PaintTab {
     fn render(&self, _cx: &Context) -> Element {
         let pixels = landscape();
         let lifted = self.lifted;
-        ui! {
+        element! {
             div(class = [ThemeClass::Card, Class::Grow]) {
                 text("Paint", class = ThemeClass::Subtitle)
                 text("Two-stop gradients, one drop shadow, and a fitted image.", class = ThemeClass::Muted)
@@ -43,7 +43,7 @@ impl Component for PaintTab {
 }
 
 fn specimen(class: Class, caption: &'static str, key: &'static str) -> Element {
-    ui! {
+    element! {
         div(class = Class::Specimen) {
             div(class = class, key = key)
             text(caption, class = ThemeClass::Muted)
@@ -52,7 +52,7 @@ fn specimen(class: Class, caption: &'static str, key: &'static str) -> Element {
 }
 
 fn liftable(lifted: Reactive<bool>) -> Element {
-    ui! {
+    element! {
         div(class = Class::Specimen) {
             div(
                 class = Class::ShadowCard,
@@ -86,7 +86,7 @@ fn picture(
     pixels: Arc<ImagePixels>,
     key: &'static str,
 ) -> Element {
-    ui! {
+    element! {
         div(class = Class::Specimen) {
             image(pixels, fit = fit, class = Class::Picture, key = key)
             text(caption, class = ThemeClass::Muted)

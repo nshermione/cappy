@@ -1,4 +1,4 @@
-//! Copies `self.field` out of a `ui!` closure so the closure does not capture `&self`.
+//! Copies `self.field` out of a `element!` closure so the closure does not capture `&self`.
 //!
 //! State and prop fields are [`Copy`] handles. The copy sits outside the closure, so
 //! `text(:format!("{}", self.label))` stays `'static`.
@@ -109,7 +109,7 @@ fn capture(captures: &mut Vec<Capture>, self_span: Span, field: Ident) -> Ident 
 
 /// `with_context ; context_ident ; move || body`
 ///
-/// `context_ident` is the name passed to `ui!((context) { ... })`. `show` and `if` use this.
+/// `context_ident` is the name passed to `element!((context) { ... })`. `show` and `if` use this.
 /// `for` uses [`expand_for_view`](expand_for_view): its row closure has to be an argument of
 /// `for_each`, or Rust will not infer the row type.
 pub fn expand_view(input: TokenStream) -> TokenStream {

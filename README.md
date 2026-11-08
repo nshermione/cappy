@@ -27,7 +27,7 @@ taffy-based layout and themeable styles. Frames are drawn either on the GPU with
 | `crates/cappy-render-cpu` | CPU renderer (tiny-skia + softbuffer) for low memory use |
 | `crates/cappy-components` | Built-in components (planned) |
 | `crates/cappy-testing` | Headless UI driver and GPU / CPU snapshot helpers |
-| `macros/cappy-dsl` | `macro_rules!` DSL (`ui!`, `style!`, `theme!`) |
+| `macros/cappy-dsl` | `macro_rules!` DSL (`element!`, `style!`, `theme!`) |
 | `macros/cappy-macros` | Procedural macros (`derive(Props)`, `derive(ClassName)`) |
 | `integrations/cappy-winit` | [winit](https://github.com/rust-windowing/winit) integration |
 | `playground/*` | Shared demo scenes and the winit demo host |

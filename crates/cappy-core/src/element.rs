@@ -146,7 +146,7 @@ pub fn show(when: impl Fn() -> bool + 'static, view: impl Fn() -> Element + 'sta
 
 /// Gives `view` the caller's [`Context`](crate::Context) without the `'static` closure borrowing it.
 ///
-/// `ui!` uses this for `show` and `if`. The closure receives `&Context` when it runs.
+/// `element!` uses this for `show` and `if`. The closure receives `&Context` when it runs.
 #[doc(hidden)]
 pub fn with_context(
     context: &crate::Context,

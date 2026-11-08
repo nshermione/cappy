@@ -16,7 +16,7 @@ impl Component for TilesTab {
     fn render(&self, _cx: &Context) -> Element {
         let selected = self.selected;
         let tiles = (0..TILE_COUNT).map(|index| tile(index, selected));
-        ui! {
+        element! {
             div(class = [ThemeClass::Card, Class::Grow]) {
                 text("Tiles", class = ThemeClass::Subtitle)
                 div(class = Class::TileGrid) {
@@ -32,7 +32,7 @@ impl Component for TilesTab {
 }
 
 fn tile(index: usize, selected: Reactive<Option<usize>>) -> Element {
-    ui! {
+    element! {
         div(
             class = ThemeClass::Tile,
             :class = class_when(selected.get() == Some(index), Class::TileSelected),
