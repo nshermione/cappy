@@ -4,8 +4,8 @@ use std::rc::Rc;
 use super::*;
 use crate::reactive::{live_signal_count, signal_is_alive, signal_subscriber_count};
 use crate::{
-    Application, ButtonState, Context, Element, InputEvent, PointerButton, Signal, Slot, div,
-    for_each, fragment, if_else, show, slot, text, text_dyn,
+    Application, ButtonState, Context, Element, InputEvent, IntoElement, PointerButton, Signal,
+    Slot, div, for_each, fragment, if_else, show, slot, text, text_dyn,
 };
 use cappy_style::{Color, StyleRefinement};
 
@@ -593,7 +593,7 @@ fn component_stylesheet_covers_the_rendered_tree() {
         Panel {
             context: cx.clone(),
         }
-        .into(),
+        .into_element(),
     );
     assert!(!ui.theme().has_class("panel-skin"));
     let panel = ui.node_style(ui.find_by_key("panel").unwrap()).unwrap();

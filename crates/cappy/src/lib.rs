@@ -17,14 +17,14 @@
 //! let application = Application::new();
 //! let cx = application.context();
 //! let count = cx.reactive(0_i32);
-//! let root = element! {
+//! let root = element!((cx) {
 //!     div(class = "app") {
 //!         text(:format!("Clicked {} times", count.get()))
 //!         div(class = "btn btn-primary", on_click = move |_| count.update(|n| *n += 1)) {
 //!             text("Click")
 //!         }
 //!     }
-//! };
+//! });
 //! let mut ui = Ui::new(cx, root, Theme::light());
 //! assert!(ui.update(FrameInput::new(800, 600, 1.0)).needs_redraw());
 //! ```
@@ -68,11 +68,12 @@ pub use cappy_components as components;
 #[cfg(feature = "basic")]
 pub mod prelude {
     pub use cappy_core::{
-        Align, Application, Color, ColorToken, Component, Context, Display, Dynamic, Element,
-        FlexDirection, FontSize, FontWeight, FrameInput, HasContext, ImagePixels, IntoReactive,
-        Justify, ObjectFit, Radius, Reactive, Signal, Slot, Space, StyleRefinement, Stylesheet,
-        Theme, ThemeCatalog, ThemeHandle, Themes, Ui, UpdateOutcome, div, for_each, fragment, hex,
-        if_else, image, linear, percent, shadow, show, slot, text, text_dyn,
+        Align, Application, Color, ColorToken, Component, Container, Context, Display, Dynamic,
+        Element, FlexDirection, FontSize, FontWeight, FrameInput, HasContext, Image, ImagePixels,
+        IntoElement, IntoReactive, Justify, ObjectFit, Radius, Reactive, Signal, Slot, Space,
+        StyleRefinement, Stylesheet, Text, Theme, ThemeCatalog, ThemeHandle, Themes, Ui,
+        UpdateOutcome, div, for_each, fragment, hex, if_else, image, linear, percent, shadow, show,
+        slot, text, text_dyn,
     };
     pub use cappy_dsl::{element, style, theme};
     pub use cappy_macros::{ClassName, Props, Reactive, component, store, stylesheet};

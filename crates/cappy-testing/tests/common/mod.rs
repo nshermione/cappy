@@ -6,9 +6,9 @@ use std::sync::{Arc, OnceLock};
 
 use cappy_core::{
     Application, Color, ColorToken, Context, Damage, Element, FrameInput, ImagePixels, ObjectFit,
-    Radius, Reactive, RenderFrame, Theme, Ui, div, image, linear, shadow, text,
+    Radius, Reactive, RenderFrame, Theme, Ui, linear, shadow,
 };
-use cappy_dsl::{style, element};
+use cappy_dsl::{element, style};
 use cappy_testing::TestUi;
 use cappy_text::{CosmicTextMeasurer, FontContext};
 
@@ -39,9 +39,9 @@ pub fn background() -> Color {
     Theme::light().tokens().colors.background
 }
 
-pub fn counter(count: Reactive<i32>) -> Element {
+pub fn counter(cx: &Context, count: Reactive<i32>) -> Element {
     let label = count.clone();
-    element! {
+    element!((cx) {
         div(class = "app") {
             div(class = "row", key = "row") {
                 text(:format!("Count: {}", label.get()), key = "label")
@@ -50,11 +50,11 @@ pub fn counter(count: Reactive<i32>) -> Element {
                 }
             }
         }
-    }
+    })
 }
 
-pub fn shapes() -> Element {
-    element! {
+pub fn shapes(cx: &Context) -> Element {
+    element!((cx) {
         div(class = "app", key = "root") {
             div(class = "row") {
                 div(style = style! { size: 60, background: ColorToken::Primary, radius: Radius::Lg })
@@ -68,10 +68,10 @@ pub fn shapes() -> Element {
                 div(style = style! { size: 60, background: Color::hex("#22c55e") })
             }
         }
-    }
+    })
 }
 
-pub fn effects() -> Element {
+pub fn effects(cx: &Context) -> Element {
     let pixels = Arc::new(
         ImagePixels::from_rgba(
             2,
@@ -82,7 +82,7 @@ pub fn effects() -> Element {
         )
         .expect("2x2 rgba"),
     );
-    element! {
+    element!((cx) {
         div(style = style! { padding: 24, gap: 16 }) {
             div(key = "gradient", style = style! {
                 size: 64,
@@ -102,7 +102,7 @@ pub fn effects() -> Element {
                 style = style! { size: 64, radius: 16, background: Color::hex("#e4e4e7") },
             )
         }
-    }
+    })
 }
 
 pub fn full_repaint(frame: &RenderFrame) -> RenderFrame {

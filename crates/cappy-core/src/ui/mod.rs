@@ -13,7 +13,7 @@ use std::sync::Arc;
 use cappy_layout::{ApproximateTextMeasurer, LayoutTree, Point, Rect, Size, TextMeasurer};
 use cappy_style::{Style, Theme};
 
-use crate::element::Element;
+use crate::element::IntoElement;
 use crate::paint::{Primitive, RenderFrame};
 use crate::reactive::{BindingQueue, Signal};
 use crate::{Context, CursorIcon, Damage, DamageTracker, ThemeHandle};
@@ -130,7 +130,7 @@ impl Ui {
     /// [`Context::apply_theme`](crate::Context::apply_theme) or [`Ui::set_theme`].
     ///
     /// The theme signal belongs to the context. Dropping this `Ui` does not dispose it.
-    pub fn new(context: &Context, root: impl Into<Element>, theme: Theme) -> Self {
+    pub fn new(context: &Context, root: impl IntoElement, theme: Theme) -> Self {
         if !context.runtime.has_themes() {
             context.set_themes([theme]);
         }
@@ -159,7 +159,7 @@ impl Ui {
             hovered: Vec::new(),
             pressed: None,
         };
-        ui.root = ui.mount(root.into(), None);
+        ui.root = ui.mount(root.into_element(), None);
         ui.add_binding(ui.root, BindingKind::Theme);
         ui
     }

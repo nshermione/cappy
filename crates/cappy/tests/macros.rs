@@ -145,12 +145,12 @@ struct Badge {
 }
 
 impl Component for Badge {
-    fn render(&self, _context: &Context) -> Element {
-        element! {
+    fn render(&self, cx: &Context) -> Element {
+        element!((cx) {
             div(class = "badge", key = "badge") {
                 text(:format!("{}", self.label))
             }
-        }
+        })
     }
 }
 

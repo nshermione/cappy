@@ -41,13 +41,14 @@ fn assert_close(name: &str, gpu: &Image, cpu: &Image) {
 
 #[test]
 fn shapes_look_the_same_on_both_renderers() {
-    let (gpu, cpu) = render_both(&context(), shapes());
+    let cx = context();
+    let (gpu, cpu) = render_both(&cx, shapes(&cx));
     assert_close("shapes", &gpu, &cpu);
 }
 
 #[test]
 fn text_and_buttons_look_the_same_on_both_renderers() {
     let cx = context();
-    let (gpu, cpu) = render_both(&cx, counter(cx.reactive(0)));
+    let (gpu, cpu) = render_both(&cx, counter(&cx, cx.reactive(0)));
     assert_close("counter", &gpu, &cpu);
 }

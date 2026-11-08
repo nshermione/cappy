@@ -300,13 +300,13 @@ impl Element {
     /// # Panics
     /// Text elements are leaves; adding a child to one panics.
     #[must_use]
-    pub fn child(mut self, child: impl Into<Element>) -> Self {
+    pub fn child(mut self, child: impl IntoElement) -> Self {
         assert!(!self.is_text(), "text elements cannot have children");
         assert!(
             !matches!(self.content, ElementContent::Image { .. }),
             "image elements cannot have children"
         );
-        self.children.push(child.into());
+        self.children.push(child.into_element());
         self
     }
 
@@ -314,7 +314,7 @@ impl Element {
     pub fn children<I>(self, children: I) -> Self
     where
         I: IntoIterator,
-        I::Item: Into<Element>,
+        I::Item: IntoElement,
     {
         children
             .into_iter()
@@ -335,16 +335,16 @@ impl Element {
     /// Replaces the hole for `slot` with `child`. A later fill of the same slot is dropped.
     /// The walk does not enter a nested component.
     #[must_use]
-    pub fn fill_slot<C, T>(self, slot: Slot<C, T>, child: impl Into<Element>) -> Self {
-        self.fill_index(slot.index, child.into())
+    pub fn fill_slot<C, T>(self, slot: Slot<C, T>, child: impl IntoElement) -> Self {
+        self.fill_index(slot.index, child.into_element())
     }
 
     /// Appends `child`, or fills the first slot when [`prepare_slots`](Self::prepare_slots) found
     /// holes. Further unnamed children are dropped once a component accepts slots.
     #[doc(hidden)]
     #[must_use]
-    pub fn place_child(self, child: impl Into<Element>) -> Self {
-        let child = child.into();
+    pub fn place_child(self, child: impl IntoElement) -> Self {
+        let child = child.into_element();
         if self.accepts_slots {
             self.fill_index(0, child)
         } else {
@@ -358,7 +358,7 @@ impl Element {
     pub fn place_children<I>(self, children: I) -> Self
     where
         I: IntoIterator,
-        I::Item: Into<Element>,
+        I::Item: IntoElement,
     {
         children
             .into_iter()
@@ -454,17 +454,143 @@ pub trait Component: HasContext + Clone {
     }
 }
 
-impl<C: Component + 'static> From<C> for Element {
-    fn from(component: C) -> Self {
-        let context = component.context().clone();
-        context.with(&component, || {
-            let mut element = component.render(&context);
+/// Converts a builder or component into the [`Element`] stored in the tree.
+///
+/// [`Element`] returns itself. A [`Component`] renders, then marks that root so a slot walk stops
+/// there. [`Container`], [`Text`] and [`Image`] do not: they call [`div`], [`text`] and [`image`].
+pub trait IntoElement {
+    fn into_element(self) -> Element;
+}
+
+impl IntoElement for Element {
+    fn into_element(self) -> Element {
+        self
+    }
+}
+
+impl<C: Component + 'static> IntoElement for C {
+    fn into_element(self) -> Element {
+        let context = self.context().clone();
+        context.with(&self, || {
+            let mut element = self.render(&context);
             element.slot_owner = COMPONENT_SLOT_OWNER;
             if let Some(sheet) = C::stylesheet() {
                 stamp_stylesheet(&mut element, &sheet);
             }
             element
         })
+    }
+}
+
+/// `element!` `div` builder. [`IntoElement`] calls [`div`] and leaves `slot_owner` at 0, so a
+/// parent component can still see slot holes nested inside.
+pub struct Container {
+    on_click: Option<ClickHandler>,
+    on_hover: Option<HoverHandler>,
+    stylesheet: Option<Arc<Stylesheet>>,
+}
+
+impl Container {
+    #[must_use]
+    pub fn open(_cx: &crate::Context) -> Self {
+        Self {
+            on_click: None,
+            on_hover: None,
+            stylesheet: None,
+        }
+    }
+
+    #[must_use]
+    pub fn on_click(mut self, handler: impl FnMut(&ClickEvent) + 'static) -> Self {
+        self.on_click = Some(Box::new(handler));
+        self
+    }
+
+    #[must_use]
+    pub fn on_hover(mut self, handler: impl FnMut(bool) + 'static) -> Self {
+        self.on_hover = Some(Box::new(handler));
+        self
+    }
+
+    #[must_use]
+    pub fn stylesheet(mut self, stylesheet: Arc<Stylesheet>) -> Self {
+        self.stylesheet = Some(stylesheet);
+        self
+    }
+}
+
+impl IntoElement for Container {
+    fn into_element(self) -> Element {
+        let mut element = div();
+        element.on_click = self.on_click;
+        element.on_hover = self.on_hover;
+        element.stylesheet = self.stylesheet;
+        element
+    }
+}
+
+/// `element!` `text` builder. [`open`](Text::open) has no content yet, so only [`Text::content`]
+/// implements [`IntoElement`].
+pub struct Text<T> {
+    content: T,
+}
+
+impl Text<()> {
+    #[must_use]
+    pub fn open(_cx: &crate::Context) -> Self {
+        Self { content: () }
+    }
+}
+
+impl<T> Text<T> {
+    #[must_use]
+    pub fn content<U>(self, content: U) -> Text<U> {
+        Text { content }
+    }
+}
+
+impl<T: IntoText> IntoElement for Text<T> {
+    fn into_element(self) -> Element {
+        text(self.content)
+    }
+}
+
+/// `element!` `image` builder. [`open`](Image::open) has no pixels yet, so only [`Image::content`]
+/// implements [`IntoElement`].
+pub struct Image<T> {
+    content: T,
+    fit: ObjectFit,
+}
+
+impl Image<()> {
+    #[must_use]
+    pub fn open(_cx: &crate::Context) -> Self {
+        Self {
+            content: (),
+            fit: ObjectFit::Fill,
+        }
+    }
+}
+
+impl<T> Image<T> {
+    #[must_use]
+    pub fn content<U>(self, content: U) -> Image<U> {
+        Image {
+            content,
+            fit: self.fit,
+        }
+    }
+
+    #[must_use]
+    pub fn fit(mut self, fit: ObjectFit) -> Self {
+        self.fit = fit;
+        self
+    }
+}
+
+impl<T: Into<Arc<ImagePixels>>> IntoElement for Image<T> {
+    fn into_element(self) -> Element {
+        image(self.content).fit(self.fit)
     }
 }
 
@@ -530,6 +656,20 @@ mod tests {
 
     fn hole(index: u16) -> Element {
         slot(Slot::<(), Element>::new(index))
+    }
+
+    #[test]
+    fn container_into_element_is_not_a_slot_boundary() {
+        let element = Container::open(&crate::Application::new().context()).into_element();
+        assert_eq!(element.slot_owner, 0);
+    }
+
+    #[test]
+    fn a_slot_nested_in_divs_is_still_filled() {
+        let element = owned(div().child(div().child(hole(0))))
+            .prepare_slots()
+            .place_child(text("body").key("body"));
+        assert_eq!(element.children[0].children[0].key.as_deref(), Some("body"));
     }
 
     #[test]

@@ -24,7 +24,8 @@ fn probe(image: &Image, harness: &TestUi, key: &str) -> [u8; 4] {
 
 #[test]
 fn shapes_match_snapshot() {
-    let mut harness = harness(&context(), shapes());
+    let cx = context();
+    let mut harness = harness(&cx, shapes(&cx));
     let image = renderer().render(&harness.frame(), background()).unwrap();
     let snapshots = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots");
     assert_snapshot(&snapshots, "shapes", &image, SNAPSHOT_TOLERANCE);
@@ -32,7 +33,8 @@ fn shapes_match_snapshot() {
 
 #[test]
 fn effects_match_snapshot() {
-    let mut harness = harness(&context(), effects());
+    let cx = context();
+    let mut harness = harness(&cx, effects(&cx));
     let image = renderer().render(&harness.frame(), background()).unwrap();
     let snapshots = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots");
     assert_snapshot(&snapshots, "effects", &image, SNAPSHOT_TOLERANCE);
@@ -41,7 +43,7 @@ fn effects_match_snapshot() {
 #[test]
 fn colors_land_where_layout_put_them() {
     let cx = context();
-    let mut harness = harness(&cx, counter(cx.reactive(0)));
+    let mut harness = harness(&cx, counter(&cx, cx.reactive(0)));
     let image = renderer().render(&harness.frame(), background()).unwrap();
     let colors = Theme::light().tokens().colors.clone();
     assert_eq!(image.pixel(1, 1), colors.background.to_rgba8());
@@ -56,7 +58,7 @@ fn colors_land_where_layout_put_them() {
 #[test]
 fn text_is_drawn_inside_its_rect() {
     let cx = context();
-    let mut harness = harness(&cx, counter(cx.reactive(0)));
+    let mut harness = harness(&cx, counter(&cx, cx.reactive(0)));
     let image = renderer().render(&harness.frame(), background()).unwrap();
     let label = harness.rect("label");
     let background = background().to_rgba8();
@@ -73,8 +75,8 @@ fn text_is_drawn_inside_its_rect() {
 #[test]
 fn partial_repaint_matches_a_full_repaint() {
     let cx = context();
-    let count = cx.reactive(0);
-    let mut harness = harness(&cx, counter(count));
+    let count = cx.reactive(0i32);
+    let mut harness = harness(&cx, counter(&cx, count));
     let mut incremental = renderer();
     incremental.render(&harness.frame(), background()).unwrap();
 
@@ -94,7 +96,7 @@ fn partial_repaint_matches_a_full_repaint() {
 #[test]
 fn idle_frames_keep_the_previous_pixels() {
     let cx = context();
-    let mut harness = harness(&cx, counter(cx.reactive(0)));
+    let mut harness = harness(&cx, counter(&cx, cx.reactive(0)));
     let mut renderer = renderer();
     let first = renderer.render(&harness.frame(), background()).unwrap();
     let idle_frame = harness.frame();

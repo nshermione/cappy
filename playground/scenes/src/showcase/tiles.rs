@@ -13,33 +13,33 @@ pub struct TilesTab {
 }
 
 impl Component for TilesTab {
-    fn render(&self, _cx: &Context) -> Element {
+    fn render(&self, cx: &Context) -> Element {
         let selected = self.selected;
-        let tiles = (0..TILE_COUNT).map(|index| tile(index, selected));
-        element! {
-            div(class = [ThemeClass::Card, Class::Grow]) {
-                text("Tiles", class = ThemeClass::Subtitle)
-                div(class = Class::TileGrid) {
+        let tiles = (0..TILE_COUNT).map(|index| tile(cx, index, selected));
+        element!((cx) {
+            Container(class = [ThemeClass::Card, Class::Grow]) {
+                Text("Tiles", class = ThemeClass::Subtitle)
+                Container(class = Class::TileGrid) {
                     { ..tiles }
                 }
-                text(:match self.selected.get() {
+                Text(:match self.selected.get() {
                     Some(index) => format!("Selected tile {}", index + 1),
                     None => "Click a tile".to_owned(),
                 }, class = ThemeClass::Muted, key = "selection")
             }
-        }
+        })
     }
 }
 
-fn tile(index: usize, selected: Reactive<Option<usize>>) -> Element {
-    element! {
-        div(
+fn tile(cx: &Context, index: usize, selected: Reactive<Option<usize>>) -> Element {
+    element!((cx) {
+        Container(
             class = ThemeClass::Tile,
             :class = class_when(selected.get() == Some(index), Class::TileSelected),
             key = format!("tile-{index}"),
             on_click = move |_| selected.set(Some(index)),
         ) {
-            text(format!("Tile {}", index + 1))
+            Text(format!("Tile {}", index + 1))
         }
-    }
+    })
 }

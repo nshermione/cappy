@@ -14,47 +14,47 @@ pub struct PaintTab {
 }
 
 impl Component for PaintTab {
-    fn render(&self, _cx: &Context) -> Element {
+    fn render(&self, cx: &Context) -> Element {
         let pixels = landscape();
         let lifted = self.lifted;
-        element! {
-            div(class = [ThemeClass::Card, Class::Grow]) {
-                text("Paint", class = ThemeClass::Subtitle)
-                text("Two-stop gradients, one drop shadow, and a fitted image.", class = ThemeClass::Muted)
-                div(class = ThemeClass::Row) {
-                    { specimen(Class::GradientRight, "Right", "gradient-right") }
-                    { specimen(Class::GradientDown, "Down", "gradient-down") }
-                    { specimen(Class::GradientLeft, "Left", "gradient-left") }
+        element!((cx) {
+            Container(class = [ThemeClass::Card, Class::Grow]) {
+                Text("Paint", class = ThemeClass::Subtitle)
+                Text("Two-stop gradients, one drop shadow, and a fitted image.", class = ThemeClass::Muted)
+                Container(class = ThemeClass::Row) {
+                    { specimen(cx, Class::GradientRight, "Right", "gradient-right") }
+                    { specimen(cx, Class::GradientDown, "Down", "gradient-down") }
+                    { specimen(cx, Class::GradientLeft, "Left", "gradient-left") }
                 }
-                div(class = ThemeClass::Row) {
-                    { specimen(Class::ShadowSoft, "Soft", "shadow-soft") }
-                    { liftable(lifted) }
-                    { specimen(Class::ShadowHard, "Hard", "shadow-hard") }
-                    { specimen(Class::ShadowGlow, "Glow", "shadow-glow") }
+                Container(class = ThemeClass::Row) {
+                    { specimen(cx, Class::ShadowSoft, "Soft", "shadow-soft") }
+                    { liftable(cx, lifted) }
+                    { specimen(cx, Class::ShadowHard, "Hard", "shadow-hard") }
+                    { specimen(cx, Class::ShadowGlow, "Glow", "shadow-glow") }
                 }
-                div(class = ThemeClass::Row) {
-                    { picture("Contain", ObjectFit::Contain, pixels.clone(), "picture-contain") }
-                    { picture("Cover", ObjectFit::Cover, pixels.clone(), "picture-cover") }
-                    { picture("Fill", ObjectFit::Fill, pixels, "picture-fill") }
+                Container(class = ThemeClass::Row) {
+                    { picture(cx, "Contain", ObjectFit::Contain, pixels.clone(), "picture-contain") }
+                    { picture(cx, "Cover", ObjectFit::Cover, pixels.clone(), "picture-cover") }
+                    { picture(cx, "Fill", ObjectFit::Fill, pixels, "picture-fill") }
                 }
             }
-        }
+        })
     }
 }
 
-fn specimen(class: Class, caption: &'static str, key: &'static str) -> Element {
-    element! {
-        div(class = Class::Specimen) {
-            div(class = class, key = key)
-            text(caption, class = ThemeClass::Muted)
+fn specimen(cx: &Context, class: Class, caption: &'static str, key: &'static str) -> Element {
+    element!((cx) {
+        Container(class = Class::Specimen) {
+            Container(class = class, key = key)
+            Text(caption, class = ThemeClass::Muted)
         }
-    }
+    })
 }
 
-fn liftable(lifted: Reactive<bool>) -> Element {
-    element! {
-        div(class = Class::Specimen) {
-            div(
+fn liftable(cx: &Context, lifted: Reactive<bool>) -> Element {
+    element!((cx) {
+        Container(class = Class::Specimen) {
+            Container(
                 class = Class::ShadowCard,
                 key = "shadow-card",
                 :style = style! {
@@ -67,31 +67,32 @@ fn liftable(lifted: Reactive<bool>) -> Element {
                     )
                 },
             ) {
-                text(:if lifted.get() { "Lifted" } else { "Resting" }.to_owned(), key = "shadow-state")
+                Text(:if lifted.get() { "Lifted" } else { "Resting" }.to_owned(), key = "shadow-state")
             }
-            div(
+            Container(
                 class = ThemeClass::Btn,
                 key = "shadow-toggle",
                 on_click = move |_| lifted.update(|value| *value = !*value),
             ) {
-                text("Lift")
+                Text("Lift")
             }
         }
-    }
+    })
 }
 
 fn picture(
+    cx: &Context,
     caption: &'static str,
     fit: ObjectFit,
     pixels: Arc<ImagePixels>,
     key: &'static str,
 ) -> Element {
-    element! {
-        div(class = Class::Specimen) {
-            image(pixels, fit = fit, class = Class::Picture, key = key)
-            text(caption, class = ThemeClass::Muted)
+    element!((cx) {
+        Container(class = Class::Specimen) {
+            Image(pixels, fit = fit, class = Class::Picture, key = key)
+            Text(caption, class = ThemeClass::Muted)
         }
-    }
+    })
 }
 
 /// A wide landscape, so Contain letterboxes and Cover crops inside the square frame.

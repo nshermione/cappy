@@ -29,10 +29,10 @@ impl Component for ChecklistTab {
         );
         let next_id = cx.reactive(TASKS.len() as u64);
         element!((cx) {
-            div(class = ThemeClass::Card) {
-                div(class = ThemeClass::Row) {
-                    text("Phase 1 checklist", class = ThemeClass::Subtitle)
-                    div(class = ThemeClass::Btn, key = "add-task", on_click = move |_| {
+            Container(class = ThemeClass::Card) {
+                Container(class = ThemeClass::Row) {
+                    Text("Phase 1 checklist", class = ThemeClass::Subtitle)
+                    Container(class = ThemeClass::Btn, key = "add-task", on_click = move |_| {
                         let id = next_id.get();
                         next_id.update(|value| *value += 1);
                         tasks.update(|list| {
@@ -42,13 +42,13 @@ impl Component for ChecklistTab {
                             });
                         });
                     }) {
-                        text("Add")
+                        Text("Add")
                     }
                 }
-                text("show keeps its count while hidden. if starts over.", class = ThemeClass::Muted),
+                Text("show keeps its count while hidden. if starts over.", class = ThemeClass::Muted),
                 { show_row(cx) }
                 { branch_row(cx) }
-                div(class = ThemeClass::Column, key = "tasks") {
+                Container(class = ThemeClass::Column, key = "tasks") {
                     for (task in :tasks, key = task.id) {
                         { task_row(cx, tasks, cx.reactive(task)) }
                     }
@@ -62,9 +62,9 @@ impl Component for ChecklistTab {
 fn show_row(cx: &Context) -> Element {
     let open = cx.reactive(true);
     element!((cx) {
-        div(class = ThemeClass::Row) {
-            div(class = ThemeClass::Btn, key = "show-toggle", on_click = move |_| open.update(|value| *value = !*value)) {
-                text(:if open.get() { "Hide kept" } else { "Show kept" }.to_owned())
+        Container(class = ThemeClass::Row) {
+            Container(class = ThemeClass::Btn, key = "show-toggle", on_click = move |_| open.update(|value| *value = !*value)) {
+                Text(:if open.get() { "Hide kept" } else { "Show kept" }.to_owned())
             }
             show (:open.get()) {
                 { kept_count(cx) }
@@ -75,23 +75,23 @@ fn show_row(cx: &Context) -> Element {
 
 fn kept_count(cx: &Context) -> Element {
     let count = cx.reactive(0i64);
-    element! {
-        div(class = ThemeClass::Row, key = "kept-count") {
-            text(:format!("Kept: {}", count), key = "show-count")
-            div(class = ThemeClass::Btn, key = "show-increment", on_click = move |_| count.update(|value| *value += 1)) {
-                text("+1")
+    element!((cx) {
+        Container(class = ThemeClass::Row, key = "kept-count") {
+            Text(:format!("Kept: {}", count), key = "show-count")
+            Container(class = ThemeClass::Btn, key = "show-increment", on_click = move |_| count.update(|value| *value += 1)) {
+                Text("+1")
             }
         }
-    }
+    })
 }
 
 /// Switching branches throws the counter away. Coming back starts at zero.
 fn branch_row(cx: &Context) -> Element {
     let sent = cx.reactive(false);
     element!((cx) {
-        div(class = ThemeClass::Row) {
-            div(class = ThemeClass::Btn, key = "branch-toggle", on_click = move |_| sent.update(|value| *value = !*value)) {
-                text(:if sent.get() { "To draft" } else { "To sent" }.to_owned())
+        Container(class = ThemeClass::Row) {
+            Container(class = ThemeClass::Btn, key = "branch-toggle", on_click = move |_| sent.update(|value| *value = !*value)) {
+                Text(:if sent.get() { "To draft" } else { "To sent" }.to_owned())
             }
             if (:sent.get()) {
                 { branch_count(cx, "Sent") }
@@ -104,30 +104,30 @@ fn branch_row(cx: &Context) -> Element {
 
 fn branch_count(cx: &Context, name: &'static str) -> Element {
     let count = cx.reactive(0i64);
-    element! {
-        div(class = ThemeClass::Row, key = "branch") {
-            text(:format!("{name}: {}", count), key = "branch-count")
-            div(class = ThemeClass::Btn, key = "branch-increment", on_click = move |_| count.update(|value| *value += 1)) {
-                text("+1")
+    element!((cx) {
+        Container(class = ThemeClass::Row, key = "branch") {
+            Text(:format!("{name}: {}", count), key = "branch-count")
+            Container(class = ThemeClass::Btn, key = "branch-increment", on_click = move |_| count.update(|value| *value += 1)) {
+                Text("+1")
             }
         }
-    }
+    })
 }
 
 fn task_row(cx: &Context, tasks: Reactive<Vec<Task>>, task: Reactive<Task>) -> Element {
     let done = cx.reactive(false);
     let id = task.with(|row| row.id);
-    element! {
-        div(class = ThemeClass::Row, key = format!("task-{id}"), on_click = move |_| done.update(|value| *value = !*value)) {
-            div(class = ThemeClass::Badge, :class = class_when(done.get(), Class::BadgeDone)) {
-                text(:if done.get() { "done" } else { "todo" }.to_owned())
+    element!((cx) {
+        Container(class = ThemeClass::Row, key = format!("task-{id}"), on_click = move |_| done.update(|value| *value = !*value)) {
+            Container(class = ThemeClass::Badge, :class = class_when(done.get(), Class::BadgeDone)) {
+                Text(:if done.get() { "done" } else { "todo" }.to_owned())
             }
-            text(
+            Text(
                 :task.with(|row| row.title.clone()),
                 :class = class_when(done.get(), Class::TaskDone),
                 key = format!("task-title-{id}"),
             ),
-            div(class = ThemeClass::Btn, key = format!("task-up-{id}"), on_click = move |_| {
+            Container(class = ThemeClass::Btn, key = format!("task-up-{id}"), on_click = move |_| {
                 tasks.update(|list| {
                     let Some(index) = list.iter().position(|row| row.id == id) else {
                         return;
@@ -137,15 +137,15 @@ fn task_row(cx: &Context, tasks: Reactive<Vec<Task>>, task: Reactive<Task>) -> E
                     }
                 });
             }) {
-                text("Up")
+                Text("Up")
             }
-            div(class = ThemeClass::Btn, key = format!("task-drop-{id}"), on_click = move |_| {
+            Container(class = ThemeClass::Btn, key = format!("task-drop-{id}"), on_click = move |_| {
                 tasks.update(|list| list.retain(|row| row.id != id));
             }) {
-                text("Drop")
+                Text("Drop")
             }
         }
-    }
+    })
 }
 
 #[derive(Clone, PartialEq)]
