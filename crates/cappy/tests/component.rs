@@ -38,7 +38,8 @@ impl Component for Badge {
         Some(BadgeClass::sheet())
     }
 
-    fn render(&self, cx: &Context) -> Element {
+    fn render(&self) -> Element {
+        let cx = Context::current();
         element!((cx) {
             div(class = BadgeClass::Root, key = "badge-root", on_click = cx.on(Self::press)) {
                 text(:format!("{}:{}", self.text, self.label), class = BadgeClass::Label, key = "badge-label")
@@ -186,7 +187,8 @@ struct Panel {
 }
 
 impl Component for Panel {
-    fn render(&self, cx: &Context) -> Element {
+    fn render(&self) -> Element {
+        let cx = Context::current();
         element!((cx) {
             div(key = "panel") {
                 slot(icon)
@@ -203,7 +205,8 @@ struct Frame {
 }
 
 impl Component for Frame {
-    fn render(&self, cx: &Context) -> Element {
+    fn render(&self) -> Element {
+        let cx = Context::current();
         element!((cx) {
             div(key = "frame") {
                 text("before", key = "before")
@@ -221,7 +224,8 @@ struct Inner {
 }
 
 impl Component for Inner {
-    fn render(&self, cx: &Context) -> Element {
+    fn render(&self) -> Element {
+        let cx = Context::current();
         element!((cx) {
             div(key = "inner") { slot(body) }
         })
@@ -235,7 +239,8 @@ struct Outer {
 }
 
 impl Component for Outer {
-    fn render(&self, cx: &Context) -> Element {
+    fn render(&self) -> Element {
+        let cx = Context::current();
         element!((cx) {
             div(key = "outer") {
                 slot(body)
@@ -249,7 +254,7 @@ impl Component for Outer {
 fn slots_land_in_declaration_order_and_drop_the_rest() {
     let cx = context();
     let panel = Panel::open(&cx);
-    let _rendered = panel.render(&cx);
+    let _rendered = cx.enter(|| panel.render());
     let _again = panel.clone();
     let ui = settled(
         &cx,
@@ -335,7 +340,8 @@ struct Shelf {
 }
 
 impl Component for Shelf {
-    fn render(&self, cx: &Context) -> Element {
+    fn render(&self) -> Element {
+        let cx = Context::current();
         element!((cx) {
             div(key = "shelf") {
                 slot(header)

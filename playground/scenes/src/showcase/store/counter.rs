@@ -1,4 +1,5 @@
-//! Shared counter. `cx.use_store(Counter)` is one value in a context; `new` is a separate instance.
+//! Shared counter. `use_store(Counter)` is one value in a context. `use_local_store(Counter)` is a
+//! separate instance whose fields start at their defaults. `new` builds one from explicit values.
 
 use cappy::prelude::*;
 

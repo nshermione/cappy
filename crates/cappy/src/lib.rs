@@ -72,8 +72,8 @@ pub mod prelude {
         Element, FlexDirection, FontSize, FontWeight, FrameInput, HasContext, Image, ImagePixels,
         IntoElement, IntoReactive, Justify, ObjectFit, Radius, Reactive, Signal, Slot, Space,
         StyleRefinement, Stylesheet, Text, Theme, ThemeCatalog, ThemeHandle, Themes, Ui,
-        UpdateOutcome, div, for_each, fragment, hex, if_else, image, linear, percent, shadow, show,
-        slot, text, text_dyn,
+        UpdateOutcome, div, for_each, fragment, hex, if_else, image, linear, on, percent, reactive,
+        shadow, show, slot, text, text_dyn, use_local_store, use_store,
     };
     pub use cappy_dsl::{element, style, theme};
     pub use cappy_macros::{ClassName, Props, Reactive, component, store, stylesheet};

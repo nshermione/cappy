@@ -55,7 +55,7 @@ impl HasContext for Badge {
 }
 
 impl Component for Badge {
-    fn render(&self, _context: &Context) -> Element {
+    fn render(&self) -> Element {
         div()
             .class("badge")
             .key("badge")
@@ -451,7 +451,7 @@ impl HasContext for Mark {
 }
 
 impl Component for Mark {
-    fn render(&self, _context: &Context) -> Element {
+    fn render(&self) -> Element {
         text("mark")
     }
 }

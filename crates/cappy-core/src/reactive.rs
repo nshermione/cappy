@@ -8,6 +8,8 @@
 //! [`Context::reactive`] turns a primitive into a [`Reactive`] handle. `#[store]` on a struct keeps the
 //! struct's name and tracks each field. A value that is already reactive is returned as itself.
 //! `cx.use_store(Type)` returns the one value of that struct stored in the context.
+//! `cx.use_local_store(Type)` builds a new one. Its fields start the same way, and it is not the
+//! singleton.
 
 use std::any::{Any, TypeId};
 use std::cell::{Cell, RefCell};
@@ -654,6 +656,10 @@ thread_local! {
     /// handle point at a new runtime. [`Context`] also keeps its own [`Rc`], so dropping a
     /// context does not free the runtime while this list still holds it.
     static RUNTIMES: RefCell<Vec<Rc<Runtime>>> = RefCell::new(Vec::new());
+
+    /// Indexes into `RUNTIMES` for the contexts `Context::enter` is inside.
+    /// The last index is `Context::current`. Nested enters push and pop.
+    static CURRENT: RefCell<Vec<u32>> = RefCell::new(Vec::new());
 }
 
 /// Records `runtime` the first time a signal is created in it and returns its index.
@@ -675,6 +681,39 @@ fn register_runtime(runtime: &Rc<Runtime>) -> u32 {
 
 fn runtime_by_index(index: u32) -> Rc<Runtime> {
     RUNTIMES.with(|runtimes| Rc::clone(runtimes.borrow().get(index as usize).expect(DEAD_SIGNAL)))
+}
+
+struct PopCurrent;
+
+impl Drop for PopCurrent {
+    fn drop(&mut self) {
+        CURRENT.with(|stack| {
+            stack.borrow_mut().pop();
+        });
+    }
+}
+
+/// Pushes `runtime`'s registry index for the duration of `body`.
+pub(crate) fn enter_runtime<R>(runtime: &Rc<Runtime>, body: impl FnOnce() -> R) -> R {
+    let index = register_runtime(runtime);
+    CURRENT.with(|stack| stack.borrow_mut().push(index));
+    let _pop = PopCurrent;
+    body()
+}
+
+/// The runtime whose index is on top of the enter stack.
+///
+/// # Panics
+/// Panics when the stack is empty.
+pub(crate) fn current_runtime() -> Rc<Runtime> {
+    let index = CURRENT.with(|stack| {
+        stack
+            .borrow()
+            .last()
+            .copied()
+            .expect("Context::current called outside Context::enter")
+    });
+    runtime_by_index(index)
 }
 
 /// A reactive value. Copying copies its runtime index; every copy refers to the same value.
@@ -964,6 +1003,16 @@ impl crate::Context {
     /// Pass the marker `#[store]` emits under the struct's name: `cx.use_store(Counter)`.
     pub fn use_store<T: crate::Singleton>(&self, _of: crate::SingletonOf<T>) -> T {
         self.runtime.singleton(|| T::create(self))
+    }
+
+    /// Builds a new `T` in this context. Each call is a separate value.
+    ///
+    /// Pass the same marker as [`use_store`](Self::use_store): `cx.use_local_store(Counter)`.
+    /// Fields start the way the singleton's first value does. This does not read or replace that
+    /// singleton. [`Context::reactive`] does the same kind of step for a `#[derive(Reactive)]`
+    /// value: the caller names the value, and the context allocates the handle.
+    pub fn use_local_store<T: crate::Singleton>(&self, _of: crate::SingletonOf<T>) -> T {
+        T::create(self)
     }
 
     /// Replaces the themes this context can [`apply_theme`](Self::apply_theme).

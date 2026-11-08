@@ -14,45 +14,45 @@ pub struct PaintTab {
 }
 
 impl Component for PaintTab {
-    fn render(&self, cx: &Context) -> Element {
+    fn render(&self) -> Element {
         let pixels = landscape();
         let lifted = self.lifted;
-        element!((cx) {
+        element! {
             Container(class = [ThemeClass::Card, Class::Grow]) {
                 Text("Paint", class = ThemeClass::Subtitle)
                 Text("Two-stop gradients, one drop shadow, and a fitted image.", class = ThemeClass::Muted)
                 Container(class = ThemeClass::Row) {
-                    { specimen(cx, Class::GradientRight, "Right", "gradient-right") }
-                    { specimen(cx, Class::GradientDown, "Down", "gradient-down") }
-                    { specimen(cx, Class::GradientLeft, "Left", "gradient-left") }
+                    { specimen(Class::GradientRight, "Right", "gradient-right") }
+                    { specimen(Class::GradientDown, "Down", "gradient-down") }
+                    { specimen(Class::GradientLeft, "Left", "gradient-left") }
                 }
                 Container(class = ThemeClass::Row) {
-                    { specimen(cx, Class::ShadowSoft, "Soft", "shadow-soft") }
-                    { liftable(cx, lifted) }
-                    { specimen(cx, Class::ShadowHard, "Hard", "shadow-hard") }
-                    { specimen(cx, Class::ShadowGlow, "Glow", "shadow-glow") }
+                    { specimen(Class::ShadowSoft, "Soft", "shadow-soft") }
+                    { liftable(lifted) }
+                    { specimen(Class::ShadowHard, "Hard", "shadow-hard") }
+                    { specimen(Class::ShadowGlow, "Glow", "shadow-glow") }
                 }
                 Container(class = ThemeClass::Row) {
-                    { picture(cx, "Contain", ObjectFit::Contain, pixels.clone(), "picture-contain") }
-                    { picture(cx, "Cover", ObjectFit::Cover, pixels.clone(), "picture-cover") }
-                    { picture(cx, "Fill", ObjectFit::Fill, pixels, "picture-fill") }
+                    { picture("Contain", ObjectFit::Contain, pixels.clone(), "picture-contain") }
+                    { picture("Cover", ObjectFit::Cover, pixels.clone(), "picture-cover") }
+                    { picture("Fill", ObjectFit::Fill, pixels, "picture-fill") }
                 }
             }
-        })
+        }
     }
 }
 
-fn specimen(cx: &Context, class: Class, caption: &'static str, key: &'static str) -> Element {
-    element!((cx) {
+fn specimen(class: Class, caption: &'static str, key: &'static str) -> Element {
+    element! {
         Container(class = Class::Specimen) {
             Container(class = class, key = key)
             Text(caption, class = ThemeClass::Muted)
         }
-    })
+    }
 }
 
-fn liftable(cx: &Context, lifted: Reactive<bool>) -> Element {
-    element!((cx) {
+fn liftable(lifted: Reactive<bool>) -> Element {
+    element! {
         Container(class = Class::Specimen) {
             Container(
                 class = Class::ShadowCard,
@@ -77,22 +77,21 @@ fn liftable(cx: &Context, lifted: Reactive<bool>) -> Element {
                 Text("Lift")
             }
         }
-    })
+    }
 }
 
 fn picture(
-    cx: &Context,
     caption: &'static str,
     fit: ObjectFit,
     pixels: Arc<ImagePixels>,
     key: &'static str,
 ) -> Element {
-    element!((cx) {
+    element! {
         Container(class = Class::Specimen) {
             Image(pixels, fit = fit, class = Class::Picture, key = key)
             Text(caption, class = ThemeClass::Muted)
         }
-    })
+    }
 }
 
 /// A wide landscape, so Contain letterboxes and Cover crops inside the square frame.

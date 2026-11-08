@@ -27,7 +27,7 @@ impl HasContext for InfoCard {
 }
 
 impl Component for InfoCard {
-    fn render(&self, _context: &Context) -> Element {
+    fn render(&self) -> Element {
         let mut card = div()
             .class(Class::Card.as_str())
             .key("card")
@@ -145,7 +145,8 @@ struct Badge {
 }
 
 impl Component for Badge {
-    fn render(&self, cx: &Context) -> Element {
+    fn render(&self) -> Element {
+        let cx = Context::current();
         element!((cx) {
             div(class = "badge", key = "badge") {
                 text(:format!("{}", self.label))
@@ -178,9 +179,11 @@ fn singleton_is_shared_and_new_is_separate() {
     shared.count.set(4);
     assert_eq!(again.count.get(), 4);
 
-    let local = SharedCount::new(&context, 1);
-    assert_eq!(local.count.get(), 1);
+    let local = context.use_local_store(SharedCount);
+    assert_eq!(local.count.get(), 0);
+    let other = context.use_local_store(SharedCount);
     local.count.set(9);
+    assert_eq!(other.count.get(), 0);
     assert_eq!(shared.count.get(), 4);
 
     let name = context.use_store(SharedName);

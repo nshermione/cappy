@@ -27,10 +27,12 @@ use cappy::prelude::*;
 
 /// Header with a theme switcher, and one tab per demo: counter, tiles, checklist, paint.
 pub fn showcase(cx: &Context) -> Ui {
-    // A context reused for another scene still holds the previous singletons.
-    cx.use_store(store::Counter).reset();
-    cx.use_store(store::App).select(store::Tab::Counter);
-    cx.set_themes(theme::themes().into_iter().map(style::stylesheet));
-    // The catalog is already set, so this theme value is not installed.
-    Ui::new(cx, layout::root(cx), Theme::light())
+    cx.enter(|| {
+        // A context reused for another scene still holds the previous singletons.
+        use_store(store::Counter).reset();
+        use_store(store::App).select(store::Tab::Counter);
+        cx.set_themes(theme::themes().into_iter().map(style::stylesheet));
+        // The catalog is already set, so this theme value is not installed.
+        Ui::new(cx, layout::root(), Theme::light())
+    })
 }

@@ -8,6 +8,7 @@
 //! - `stylesheet!` defines those class names together with their style rules.
 //! - `#[store]` rewrites a struct in place so each field is tracked and the struct keeps its name.
 //!   `cx.use_store(Type)` returns the one value of that struct in the context.
+//!   `cx.use_local_store(Type)` builds a separate one from the same field defaults.
 //! - `#[component]` is a reactive struct whose plain fields are state, `#[prop]` fields are inputs,
 //!   `#[event]` fields are listeners and `#[slot]` fields are positions for parent children.
 //!   `#[props]`, `#[events]`, `#[slots]` and `#[state]` start a section that runs through the
@@ -112,8 +113,9 @@ pub fn derive_class_name(input: TokenStream) -> TokenStream {
 /// The struct implements [`Singleton`](cappy::Singleton). A marker with the struct's name lets
 /// `cx.use_store(Type)` returns the one value stored in that [`Context`](cappy::Context). Each field
 /// starts from [`Default`](core::default::Default), from the inner default of a
-/// [`Reactive`](cappy::Reactive) handle, or from a nested `#[store]` struct. `new` still builds
-/// a separate instance.
+/// [`Reactive`](cappy::Reactive) handle, or from a nested `#[store]` struct.
+/// `cx.use_local_store(Type)` builds another value the same way and does not touch the singleton.
+/// `new` still builds a separate instance from explicit field values.
 /// The struct stays [`Clone`](core::clone::Clone) when every tracked field is.
 ///
 /// A `#[component]` struct is already tracked. Remove `#[store]` from it.

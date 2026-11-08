@@ -13,7 +13,8 @@ struct Greeting {
 }
 
 impl Component for Greeting {
-    fn render(&self, cx: &Context) -> Element {
+    fn render(&self) -> Element {
+        let cx = Context::current();
         element!((cx) {
             div(class = Class::Card.as_str(), key = "greeting") {
                 text(format!("Hello, {}!", self.name), class = Class::Title.as_str())

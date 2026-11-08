@@ -12,11 +12,11 @@ use super::style::Class;
 pub struct CounterTab {}
 
 impl Component for CounterTab {
-    fn render(&self, cx: &Context) -> Element {
-        let shared = cx.use_store(Counter);
-        let mirror = cx.use_store(Counter);
-        let local = Counter::new(cx, 0);
-        element!((cx) {
+    fn render(&self) -> Element {
+        let shared = use_store(Counter);
+        let mirror = use_store(Counter);
+        let local = use_local_store(Counter);
+        element! {
             Container(class = [ThemeClass::Card, Class::Grow]) {
                 Text("Counter", class = ThemeClass::Subtitle)
                 Text(:format!("Count: {}", shared.count), key = "count", class = Class::Count)
@@ -42,6 +42,6 @@ impl Component for CounterTab {
                     Text("end", key = "badge-tail", slot = tail)
                 }
             }
-        })
+        }
     }
 }

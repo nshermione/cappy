@@ -36,8 +36,9 @@ pub use cappy_macros::{slot_self, ui_closure, ui_for_view, ui_view};
 /// - `Name(field = value, ...) { children }` builds `Name::open(&context)` and sets fields.
 ///   `div`, `text` and `image` are the same path, opening [`Container`](cappy_core::Container),
 ///   [`Text`](cappy_core::Text) and [`Image`](cappy_core::Image). Writing those type names opens
-///   the same builders. `context` is the name passed to
-///   [`element!`](element): `element!((context) { div() })`. A leading value is `content`, so
+///   the same builders. `element! { div() }` opens them with
+///   [`Context::current`](cappy_core::Context::current). `element!((context) { div() })` opens them
+///   with that binding. A leading value is `content`, so
 ///   `text("Title")` calls `.content("Title")`. `class`, `style` and `key` are applied to the
 ///   element `into_element` returns. Other fields are setters on the builder. Without slots,
 ///   children are appended. With slots, the first child that has no `slot = name` fills the first
@@ -51,16 +52,16 @@ pub use cappy_macros::{slot_self, ui_closure, ui_for_view, ui_view};
 ///   nested `show`, `if` and `for`. `else` may be omitted or written `else if`.
 /// - `for (item in :list, key = item.field) { ... }` repeats the block, keeping a row when its
 ///   key stays. `item` in the block is the row signal.
-/// - `show`, `if` and `for` build their elements in a `'static` closure. Pass the context for
-///   every tree that builds a node: `element!((context) { ... })`. Each block clones that binding,
-///   so several blocks can share it, and the same name is bound again inside the closure.
+/// - `show`, `if` and `for` build their elements in a `'static` closure. `element! { ... }` reads
+///   [`Context::current`](cappy_core::Context::current), which [`Context::enter`](cappy_core::Context::enter)
+///   and a component's [`IntoElement`](cappy_core::IntoElement) set. `element!((context) { ... })`
+///   uses that binding instead. Each block clones the context it resolved, so several blocks can
+///   share it, and the same name is bound again inside the closure.
 /// - `slot(field)` stays outside `show`, `if` and `for`. A parent fills slots before mount, and
 ///   those blocks build their contents at mount.
 ///
-/// ```compile_fail
-/// use cappy_dsl::element;
-/// let _tree = element! { div() };
-/// ```
+/// `element! { div() }` outside [`Context::enter`](cappy_core::Context::enter) panics when the tree
+/// is built.
 ///
 /// Every `field = value` calls the builder method `field(value)`. A leading `:` makes the value
 /// reactive: `:field = value` calls `field(Dynamic(move || value))` and the content `:value`
@@ -80,9 +81,11 @@ macro_rules! element {
     (( $cx:ident ) { $($body:tt)* }) => {
         $crate::__ui_node!(@cx [ $cx ] ; $($body)*)
     };
-    ($($body:tt)+) => {
-        $crate::__ui_node!(@cx [ ] ; $($body)*)
-    };
+    ($($body:tt)+) => {{
+        #[allow(unused_variables)]
+        let cx = $crate::__private::Context::current();
+        $crate::__ui_node!(@cx [ cx ] ; $($body)*)
+    }};
 }
 
 #[doc(hidden)]

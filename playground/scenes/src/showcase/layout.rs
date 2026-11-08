@@ -11,12 +11,12 @@ use super::store::{App, Tab};
 use super::style::{Class, class_when};
 use super::tiles::TilesTab;
 
-pub fn root(cx: &Context) -> Element {
-    let app = cx.use_store(App);
-    element!((cx) {
+pub fn root() -> Element {
+    let app = use_store(App);
+    element! {
         Container(class = ThemeClass::App) {
-            { header(cx) }
-            { tab_bar(cx, app) }
+            { header() }
+            { tab_bar(app) }
             show (:app.tab.get() == Tab::Counter) {
                 CounterTab()
             }
@@ -31,22 +31,22 @@ pub fn root(cx: &Context) -> Element {
             }
             Text("F12 toggles the repaint overlay. Idle frames repaint nothing.", class = ThemeClass::Muted)
         }
-    })
+    }
 }
 
-fn tab_bar(cx: &Context, app: App) -> Element {
-    element!((cx) {
+fn tab_bar(app: App) -> Element {
+    element! {
         Container(class = Class::TabBar) {
-            { tab(cx, app, Tab::Counter, "Counter", "tab-counter") }
-            { tab(cx, app, Tab::Tiles, "Tiles", "tab-tiles") }
-            { tab(cx, app, Tab::Checklist, "Checklist", "tab-checklist") }
-            { tab(cx, app, Tab::Paint, "Paint", "tab-paint") }
+            { tab(app, Tab::Counter, "Counter", "tab-counter") }
+            { tab(app, Tab::Tiles, "Tiles", "tab-tiles") }
+            { tab(app, Tab::Checklist, "Checklist", "tab-checklist") }
+            { tab(app, Tab::Paint, "Paint", "tab-paint") }
         }
-    })
+    }
 }
 
-fn tab(cx: &Context, app: App, tab: Tab, title: &'static str, key: &'static str) -> Element {
-    element!((cx) {
+fn tab(app: App, tab: Tab, title: &'static str, key: &'static str) -> Element {
+    element! {
         Container(
             class = ThemeClass::Btn,
             :class = class_when(app.tab.get() == tab, Class::TabActive),
@@ -55,12 +55,12 @@ fn tab(cx: &Context, app: App, tab: Tab, title: &'static str, key: &'static str)
         ) {
             Text(title)
         }
-    })
+    }
 }
 
-fn header(cx: &Context) -> Element {
-    let themes = cx.themes();
-    element!((cx) {
+fn header() -> Element {
+    let themes = Context::current().themes();
+    element! {
         Container(class = Class::Header) {
             Container(class = ThemeClass::Column) {
                 Text("cappy playground", class = ThemeClass::Title)
@@ -74,5 +74,5 @@ fn header(cx: &Context) -> Element {
                 Text(:format!("Theme: {}", themes.with(|current| current.name().to_owned())))
             }
         }
-    })
+    }
 }

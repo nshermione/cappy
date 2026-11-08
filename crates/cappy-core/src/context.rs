@@ -108,23 +108,118 @@ impl Context {
     /// # Panics
     /// Panics when called outside [`Context::with`], or when `method`'s receiver is not the
     /// component currently on the stack.
-    pub fn on<T, E>(&self, method: fn(&T, &Context, &E)) -> impl FnMut(&E) + 'static
+    pub fn on<T, E>(&self, method: fn(&T, &Context, &E)) -> impl FnMut(&E) + use<T, E>
     where
         T: 'static,
         E: 'static,
     {
-        let frame = self
-            .runtime
-            .components
-            .borrow()
-            .last()
-            .cloned()
-            .expect("cx.on called outside cx.with");
-        let instance = frame.downcast::<T>().unwrap_or_else(|_| {
-            panic!("cx.on method does not belong to the component being rendered")
+        bind_handler(self.clone(), method)
+    }
+
+    /// Runs `body` while this context is [`Context::current`].
+    ///
+    /// Nested calls push their own runtime index and pop it before this one is current again.
+    /// Entering the same context twice pushes its index twice.
+    pub fn enter<R>(&self, body: impl FnOnce() -> R) -> R {
+        crate::reactive::enter_runtime(&self.runtime, body)
+    }
+
+    /// The context the innermost [`Context::enter`] selected.
+    ///
+    /// # Panics
+    /// Panics when called outside [`Context::enter`].
+    pub fn current() -> Self {
+        Self {
+            runtime: crate::reactive::current_runtime(),
+        }
+    }
+}
+
+/// [`Context::reactive`] on [`Context::current`].
+///
+/// # Panics
+/// Panics when called outside [`Context::enter`].
+pub fn reactive<T: crate::reactive::IntoReactive>(value: T) -> T::Output {
+    Context::current().reactive(value)
+}
+
+/// [`Context::use_store`] on [`Context::current`].
+///
+/// # Panics
+/// Panics when called outside [`Context::enter`].
+pub fn use_store<T: Singleton>(of: SingletonOf<T>) -> T {
+    Context::current().use_store(of)
+}
+
+/// [`Context::use_local_store`] on [`Context::current`].
+///
+/// # Panics
+/// Panics when called outside [`Context::enter`].
+pub fn use_local_store<T: Singleton>(of: SingletonOf<T>) -> T {
+    Context::current().use_local_store(of)
+}
+
+/// [`Context::on`] on [`Context::current`].
+///
+/// # Panics
+/// Panics when called outside [`Context::enter`], or when [`Context::on`] would panic.
+pub fn on<T, E>(method: fn(&T, &Context, &E)) -> impl FnMut(&E) + use<T, E>
+where
+    T: 'static,
+    E: 'static,
+{
+    bind_handler(Context::current(), method)
+}
+
+fn bind_handler<T, E>(cx: Context, method: fn(&T, &Context, &E)) -> impl FnMut(&E) + use<T, E>
+where
+    T: 'static,
+    E: 'static,
+{
+    let frame = cx
+        .runtime
+        .components
+        .borrow()
+        .last()
+        .cloned()
+        .expect("cx.on called outside cx.with");
+    let instance = frame
+        .downcast::<T>()
+        .unwrap_or_else(|_| panic!("cx.on method does not belong to the component being rendered"));
+    move |event| method(&instance, &cx, event)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+
+    use super::{Application, Context};
+
+    #[test]
+    fn nested_enter_keeps_each_runtime() {
+        let first = Application::new();
+        let second = Application::new();
+        first.context().enter(|| {
+            let left = Context::current().reactive(1_i32);
+            assert!(Rc::ptr_eq(
+                &Context::current().runtime,
+                &first.context().runtime
+            ));
+            let right = second.context().enter(|| {
+                assert!(Rc::ptr_eq(
+                    &Context::current().runtime,
+                    &second.context().runtime
+                ));
+                Context::current().reactive(2_i32)
+            });
+            assert!(Rc::ptr_eq(
+                &Context::current().runtime,
+                &first.context().runtime
+            ));
+            left.set(3);
+            assert_eq!(left.get(), 3);
+            assert_eq!(right.get(), 2);
         });
-        let cx = self.clone();
-        move |event| method(&instance, &cx, event)
     }
 }
 

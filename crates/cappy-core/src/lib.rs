@@ -15,7 +15,10 @@ mod reactive;
 mod theme_handle;
 mod ui;
 
-pub use context::{Application, Context, FieldInit, Singleton, SingletonOf};
+pub use context::{
+    Application, Context, FieldInit, Singleton, SingletonOf, on, reactive, use_local_store,
+    use_store,
+};
 
 pub use binding::{Dynamic, IntoClasses, IntoStyle, IntoText};
 pub use bitmap::{ImagePixels, ImagePixelsError, ObjectFit};

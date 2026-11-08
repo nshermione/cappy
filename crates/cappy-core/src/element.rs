@@ -146,14 +146,15 @@ pub fn show(when: impl Fn() -> bool + 'static, view: impl Fn() -> Element + 'sta
 
 /// Gives `view` the caller's [`Context`](crate::Context) without the `'static` closure borrowing it.
 ///
-/// `element!` uses this for `show` and `if`. The closure receives `&Context` when it runs.
+/// `element!` uses this for `show` and `if`. The closure receives `&Context` when it runs, and that
+/// call also enters the context so [`Context::current`](crate::Context::current) resolves to it.
 #[doc(hidden)]
 pub fn with_context(
     context: &crate::Context,
     view: impl Fn(&crate::Context) -> Element + 'static,
 ) -> impl Fn() -> Element + 'static {
     let context = context.clone();
-    move || view(&context)
+    move || context.enter(|| view(&context))
 }
 
 /// Keeps the branch `when` selects and disposes the other one, including every nested `show`,
@@ -447,7 +448,7 @@ pub trait HasContext {
 }
 
 pub trait Component: HasContext + Clone {
-    fn render(&self, context: &crate::Context) -> Element;
+    fn render(&self) -> Element;
 
     fn stylesheet() -> Option<Arc<Stylesheet>> {
         None
@@ -471,13 +472,15 @@ impl IntoElement for Element {
 impl<C: Component + 'static> IntoElement for C {
     fn into_element(self) -> Element {
         let context = self.context().clone();
-        context.with(&self, || {
-            let mut element = self.render(&context);
-            element.slot_owner = COMPONENT_SLOT_OWNER;
-            if let Some(sheet) = C::stylesheet() {
-                stamp_stylesheet(&mut element, &sheet);
-            }
-            element
+        context.enter(|| {
+            context.with(&self, || {
+                let mut element = self.render();
+                element.slot_owner = COMPONENT_SLOT_OWNER;
+                if let Some(sheet) = C::stylesheet() {
+                    stamp_stylesheet(&mut element, &sheet);
+                }
+                element
+            })
         })
     }
 }
@@ -620,7 +623,7 @@ mod tests {
     }
 
     impl Component for Badge {
-        fn render(&self, _context: &crate::Context) -> Element {
+        fn render(&self) -> Element {
             text(self.text).class("badge")
         }
     }

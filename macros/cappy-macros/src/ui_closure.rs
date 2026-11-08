@@ -149,9 +149,11 @@ pub fn expand_for_view(input: TokenStream) -> TokenStream {
                 #read,
                 #key,
                 move |#args| {
-                    #[allow(unused_variables)]
-                    let #context = &#captured;
-                    #rewritten
+                    #captured.enter(|| {
+                        #[allow(unused_variables)]
+                        let #context = &#captured;
+                        #rewritten
+                    })
                 },
             )
         }

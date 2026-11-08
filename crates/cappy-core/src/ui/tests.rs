@@ -580,7 +580,7 @@ fn component_stylesheet_covers_the_rendered_tree() {
             Some(sheet())
         }
 
-        fn render(&self, _context: &Context) -> Element {
+        fn render(&self) -> Element {
             div().class("card").key("panel").children([
                 div().class("card").key("inner"),
                 div().class("card").key("own").stylesheet(own_sheet()),
