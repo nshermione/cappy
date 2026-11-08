@@ -32,6 +32,7 @@ stylesheet! {
             background: ColorToken::Primary,
             text_color: ColorToken::OnPrimary,
             font_size: FontSize::Sm,
+
         }
     }
 }
@@ -54,9 +55,9 @@ impl Component for Badge {
 }
 
 impl Badge {
-    fn press(&self, cx: &Context, _event: &ClickEvent) {
+    fn press(&self, _event: &ClickEvent) {
         self.hits.update(|hits| *hits += 1);
-        let counter = cx.use_store(Counter);
+        let counter = use_store(Counter);
         counter.increment();
         self.on_click.emit(self.label.get());
     }

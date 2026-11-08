@@ -103,14 +103,15 @@ impl Context {
     /// Binds `method` to the component [`Context::with`] is rendering.
     ///
     /// The returned closure owns a clone of that component and of this context, so it outlives
-    /// `render`. The method receives `&self`, `&Context`, then the event.
+    /// `render`. The method receives `&self`, then the event. The call enters this context, so
+    /// [`use_store`](use_store) and [`reactive`](reactive) see it.
     ///
     /// # Panics
     /// Panics when called outside [`Context::with`], or when `method`'s receiver is not the
     /// component currently on the stack.
-    pub fn on<T, E>(&self, method: fn(&T, &Context, &E)) -> impl FnMut(&E) + use<T, E>
+    pub fn on<T, E>(&self, method: fn(&T, &E)) -> impl FnMut(&E) + use<T, E>
     where
-        T: 'static,
+        T: Clone + 'static,
         E: 'static,
     {
         bind_handler(self.clone(), method)
@@ -163,17 +164,17 @@ pub fn use_local_store<T: Singleton>(of: SingletonOf<T>) -> T {
 ///
 /// # Panics
 /// Panics when called outside [`Context::enter`], or when [`Context::on`] would panic.
-pub fn on<T, E>(method: fn(&T, &Context, &E)) -> impl FnMut(&E) + use<T, E>
+pub fn on<T, E>(method: fn(&T, &E)) -> impl FnMut(&E) + use<T, E>
 where
-    T: 'static,
+    T: Clone + 'static,
     E: 'static,
 {
     bind_handler(Context::current(), method)
 }
 
-fn bind_handler<T, E>(cx: Context, method: fn(&T, &Context, &E)) -> impl FnMut(&E) + use<T, E>
+fn bind_handler<T, E>(cx: Context, method: fn(&T, &E)) -> impl FnMut(&E) + use<T, E>
 where
-    T: 'static,
+    T: Clone + 'static,
     E: 'static,
 {
     let frame = cx
@@ -186,7 +187,7 @@ where
     let instance = frame
         .downcast::<T>()
         .unwrap_or_else(|_| panic!("cx.on method does not belong to the component being rendered"));
-    move |event| method(&instance, &cx, event)
+    move |event| cx.enter(|| cx.with(instance.as_ref(), || method(instance.as_ref(), event)))
 }
 
 #[cfg(test)]
