@@ -1,7 +1,40 @@
-//! The stylesheet: every class the layout may use. Values refer to theme tokens, so one
-//! stylesheet serves every theme.
+//! Themes and the stylesheet. A theme decides colors, radius, spacing and elevation.
+//! The stylesheet is every class the layout may use. Values refer to theme tokens, so one
+//! stylesheet serves every theme, and switching themes only repaints.
 
 use cappy::prelude::*;
+
+/// Near and far elevation, stored on a theme the first time it is overwritten.
+#[style_token(f32)]
+enum Depth {
+    Near,
+    Far,
+}
+
+/// The themes the header button cycles through, in order.
+pub fn themes() -> [Theme; 3] {
+    [Theme::light(), Theme::dark(), ocean()]
+}
+
+/// A custom theme: the dark one with blue surfaces, rounder corners and a deeper far elevation.
+fn ocean() -> Theme {
+    let mut theme = Theme::dark();
+    theme.set_name("ocean");
+    theme.patch_tokens((
+        ColorToken::patch()
+            .background(hex!("#0b1d2a"))
+            .surface(hex!("#10293b"))
+            .surface_alt(hex!("#15354c"))
+            .surface_hover(hex!("#1c4462"))
+            .border(hex!("#24506f"))
+            .primary(hex!("#0ea5e9"))
+            .primary_hover(hex!("#38bdf8"))
+            .primary_active(hex!("#0284c7"))
+            .on_primary(hex!("#04121c")),
+        Radius::patch().md(10.0).lg(16.0),
+    ));
+    theme
+}
 
 const TILE_COLUMNS: u16 = 3;
 
@@ -49,7 +82,7 @@ stylesheet! {
         Swatch {
             width: 128,
             height: 72,
-            radius: Radius::Md,
+            radius: Depth::Far,
         }
         GradientRight {
             @include Swatch,
@@ -94,8 +127,15 @@ stylesheet! {
     TabActive:hover { background: ColorToken::PrimaryHover }
 }
 
-/// Adds the scene's own classes to `theme`.
-pub fn stylesheet(theme: Theme) -> Theme {
+/// Adds the scene's own classes to `theme`. Light and dark themes receive the default elevation.
+/// Ocean already stored its own.
+pub fn stylesheet(mut theme: Theme) -> Theme {
+    if !theme.has_tokens::<Depth>() {
+        theme.patch_tokens(DepthPatch {
+            near: Some(4.0),
+            far: Some(12.0),
+        });
+    }
     Class::apply(theme)
 }
 
@@ -110,8 +150,7 @@ pub fn class_when(active: bool, class: Class) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Class, stylesheet};
-    use crate::showcase::theme::themes;
+    use super::{Class, stylesheet, themes};
 
     #[test]
     fn every_class_is_defined_in_every_theme() {

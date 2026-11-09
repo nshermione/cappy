@@ -6,6 +6,7 @@
 //!   handle. [`Reactive`](cappy::Reactive) itself, a [`Signal`](cappy::Signal), and a `#[store]` or
 //!   `#[component]` struct stay as they are, so this cannot be a blanket impl.
 //! - `stylesheet!` defines those class names together with their style rules.
+//! - `#[style_token(Type)]` turns a fieldless enum into named slots of one value type.
 //! - `#[store]` rewrites a struct in place so each field is tracked and the struct keeps its name.
 //!   `cx.use_store(Type)` returns the one value of that struct in the context.
 //!   `cx.use_local_store(Type)` builds a separate one from the same field defaults.
@@ -19,6 +20,7 @@ mod component;
 mod derive_reactive;
 mod props;
 mod reactive;
+mod style_token;
 mod stylesheet;
 mod ui_closure;
 
@@ -97,7 +99,6 @@ pub fn derive_reactive(input: TokenStream) -> TokenStream {
 /// assert_eq!(Class::Heading.to_string(), "title");
 /// assert_eq!(Class::ALL.len(), 3);
 /// ```
-
 #[proc_macro_derive(ClassName, attributes(class))]
 pub fn derive_class_name(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -199,6 +200,30 @@ pub fn ui_view(input: TokenStream) -> TokenStream {
 #[proc_macro]
 pub fn ui_for_view(input: TokenStream) -> TokenStream {
     ui_closure::expand_for_view(input.into()).into()
+}
+
+/// Turns a fieldless enum into a style token whose values live in a generated `{Enum}Values`
+/// struct. The argument is the value type of every variant. A second argument names the field of
+/// [`Tokens`](cappy::Tokens) that stores a built-in set; without it, a theme stores the values
+/// itself the first time they are overwritten.
+///
+/// The macro adds `Clone`, `Copy`, `Debug`, `PartialEq`, `Eq` and `Hash` to the enum. `Enum::patch()`
+/// returns a builder. A setter changes that slot; a slot with no setter keeps its current value.
+///
+/// ```ignore
+/// #[style_token(f32)]
+/// enum Depth {
+///     Near,
+///     Far,
+/// }
+///
+/// theme.overwrites(Depth::patch().far(20.0));
+/// ```
+#[proc_macro_attribute]
+pub fn style_token(attr: TokenStream, item: TokenStream) -> TokenStream {
+    style_token::expand(attr.into(), item.into())
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
 }
 
 /// Defines class names and their style rules together.

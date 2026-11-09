@@ -4,7 +4,7 @@
 //!
 //! Features:
 //! - `basic` (default): reactive core, styles and themes, layout, text, the renderer-independent
-//!   window host, `element!`/`style!`/`theme!` macros and derives. Enough to build any component
+//!   window host, `element!`/`style!` macros and derives. Enough to build any component
 //!   yourself.
 //! - `gpu` (default): the wgpu renderer, as [`render`].
 //! - `cpu`: the tiny-skia + softbuffer renderer, as [`render_cpu`]. It loads no GPU driver, so it
@@ -32,9 +32,9 @@
 #[cfg(feature = "basic")]
 pub use cappy_core::*;
 #[cfg(feature = "basic")]
-pub use cappy_dsl::{element, style, theme};
+pub use cappy_dsl::{element, style};
 #[cfg(feature = "basic")]
-pub use cappy_macros::{ClassName, Props, Reactive, component, store, stylesheet};
+pub use cappy_macros::{ClassName, Props, Reactive, component, store, style_token, stylesheet};
 
 /// Fonts, shaping and text measurement shared by the renderers.
 #[cfg(feature = "basic")]
@@ -75,6 +75,6 @@ pub mod prelude {
         UpdateOutcome, div, for_each, fragment, hex, if_else, image, linear, on, percent, reactive,
         shadow, show, slot, text, text_dyn, use_local_store, use_store,
     };
-    pub use cappy_dsl::{element, style, theme};
-    pub use cappy_macros::{ClassName, Props, Reactive, component, store, stylesheet};
+    pub use cappy_dsl::{element, style};
+    pub use cappy_macros::{ClassName, Props, Reactive, component, store, style_token, stylesheet};
 }

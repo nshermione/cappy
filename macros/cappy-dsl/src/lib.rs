@@ -1,5 +1,5 @@
-//! Declarative macros for cappy: [`element!`] builds element trees, [`style!`] builds style
-//! refinements and [`theme!`] derives themes, all expanding to plain builder calls.
+//! Declarative macros for cappy: [`element!`] builds element trees and [`style!`] builds style
+//! refinements, both expanding to plain builder calls.
 
 #[doc(hidden)]
 pub mod __private {
@@ -1455,72 +1455,5 @@ macro_rules! __ui_partition_slot {
 macro_rules! style {
     ($($key:ident : $value:expr),* $(,)?) => {
         $crate::__private::StyleRefinement::default()$(.$key($value))*
-    };
-}
-
-/// Builds a [`Theme`](cappy_core::Theme) from a base theme plus overrides. Layout is never part
-/// of a theme, so switching themes restyles an app without changing its structure.
-///
-/// Sections are optional but must appear in this order. Colors are hex literals, checked at
-/// compile time.
-///
-/// ```
-/// use cappy_dsl::{style, theme};
-/// use cappy_core::{ColorToken, Theme};
-///
-/// let ocean = theme! {
-///     name: "ocean",
-///     extends: Theme::dark(),
-///     colors { primary: "#0ea5e9", primary_hover: "#38bdf8" },
-///     spacing { md: 10.0 },
-///     radius { md: 8.0 },
-///     font_sizes { md: 15.0 },
-///     line_height: 1.5,
-///     classes {
-///         "chip" => style! { background: ColorToken::Primary },
-///         "chip:hover" => style! { background: ColorToken::PrimaryHover },
-///     },
-/// };
-/// assert_eq!(ocean.name(), "ocean");
-/// assert!(ocean.has_class("chip"));
-/// ```
-///
-/// An invalid color does not compile:
-///
-/// ```compile_fail
-/// let broken = cappy_dsl::theme! { colors { primary: "#12345" } };
-/// ```
-#[macro_export]
-macro_rules! theme {
-    (
-        $(name: $name:expr,)?
-        $(extends: $base:expr,)?
-        $(colors { $($color:ident : $hex:literal),* $(,)? } $(,)?)?
-        $(spacing { $($space:ident : $space_value:expr),* $(,)? } $(,)?)?
-        $(radius { $($radius:ident : $radius_value:expr),* $(,)? } $(,)?)?
-        $(font_sizes { $($font:ident : $font_value:expr),* $(,)? } $(,)?)?
-        $(line_height: $line_height:expr,)?
-        $(classes { $($selector:literal => $class:expr),* $(,)? } $(,)?)?
-    ) => {{
-        let mut theme: $crate::__private::Theme = $crate::__theme_base!($($base)?);
-        $(theme.set_name($name);)?
-        $($(theme.tokens_mut().colors.$color = $crate::__private::hex!($hex);)*)?
-        $($(theme.tokens_mut().spacing.$space = $space_value;)*)?
-        $($(theme.tokens_mut().radius.$radius = $radius_value;)*)?
-        $($(theme.tokens_mut().font_sizes.$font = $font_value;)*)?
-        $(theme.tokens_mut().line_height = $line_height;)?
-        $($(theme.set_class($selector, $class);)*)?
-        theme
-    }};
-}
-
-#[doc(hidden)]
-#[macro_export]
-macro_rules! __theme_base {
-    () => {
-        $crate::__private::Theme::light()
-    };
-    ($base:expr) => {
-        $base
     };
 }

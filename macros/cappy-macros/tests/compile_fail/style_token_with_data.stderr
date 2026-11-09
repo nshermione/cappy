@@ -1,0 +1,5 @@
+error: style token variants cannot hold data
+ --> tests/compile_fail/style_token_with_data.rs:5:5
+  |
+5 |     Near(f32),
+  |     ^^^^

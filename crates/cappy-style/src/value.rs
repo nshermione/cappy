@@ -1,19 +1,44 @@
 //! Style values that are either literal or refer to a theme token.
 
-use crate::{Color, ColorToken, FontSize, Radius, Space, Tokens};
+use std::any::TypeId;
 
-/// A color that is either fixed or taken from the theme palette.
+use crate::{Color, StyleToken, Tokens};
+
+/// A color that is either fixed or taken from a theme token.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ColorValue {
     Literal(Color),
-    Token(ColorToken),
+    Token(TokenColor),
+}
+
+/// A color read from a [`StyleToken`] slot when a style is resolved.
+#[derive(Clone, Copy)]
+pub struct TokenColor {
+    index: u8,
+    type_id: TypeId,
+    read: fn(&Tokens, u8) -> Color,
+}
+
+impl PartialEq for TokenColor {
+    fn eq(&self, other: &Self) -> bool {
+        self.index == other.index && self.type_id == other.type_id
+    }
+}
+
+impl std::fmt::Debug for TokenColor {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("TokenColor")
+            .field("index", &self.index)
+            .finish_non_exhaustive()
+    }
 }
 
 impl ColorValue {
     pub fn resolve(self, tokens: &Tokens) -> Color {
         match self {
             Self::Literal(color) => color,
-            Self::Token(token) => tokens.colors.get(token),
+            Self::Token(token) => (token.read)(tokens, token.index),
         }
     }
 }
@@ -24,28 +49,54 @@ impl From<Color> for ColorValue {
     }
 }
 
-impl From<ColorToken> for ColorValue {
-    fn from(token: ColorToken) -> Self {
-        Self::Token(token)
+impl<T> From<T> for ColorValue
+where
+    T: StyleToken<Value = Color>,
+{
+    fn from(token: T) -> Self {
+        Self::Token(TokenColor {
+            index: token.index(),
+            type_id: TypeId::of::<T>(),
+            read: |tokens, index| T::from_index(index).read(tokens),
+        })
     }
 }
 
-/// A length in logical pixels, either fixed or taken from one of the theme scales.
+/// A length in logical pixels, either fixed or taken from a theme token.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Length {
     Px(f32),
-    Space(Space),
-    Radius(Radius),
-    Font(FontSize),
+    Token(TokenLength),
+}
+
+/// A length read from a [`StyleToken`] slot when a style is resolved.
+#[derive(Clone, Copy)]
+pub struct TokenLength {
+    index: u8,
+    type_id: TypeId,
+    read: fn(&Tokens, u8) -> f32,
+}
+
+impl PartialEq for TokenLength {
+    fn eq(&self, other: &Self) -> bool {
+        self.index == other.index && self.type_id == other.type_id
+    }
+}
+
+impl std::fmt::Debug for TokenLength {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("TokenLength")
+            .field("index", &self.index)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Length {
     pub fn resolve(self, tokens: &Tokens) -> f32 {
         match self {
             Self::Px(value) => value,
-            Self::Space(step) => tokens.spacing.get(step),
-            Self::Radius(step) => tokens.radius.get(step),
-            Self::Font(step) => tokens.font_sizes.get(step),
+            Self::Token(token) => (token.read)(tokens, token.index),
         }
     }
 }
@@ -62,21 +113,16 @@ impl From<i32> for Length {
     }
 }
 
-impl From<Space> for Length {
-    fn from(step: Space) -> Self {
-        Self::Space(step)
-    }
-}
-
-impl From<Radius> for Length {
-    fn from(step: Radius) -> Self {
-        Self::Radius(step)
-    }
-}
-
-impl From<FontSize> for Length {
-    fn from(step: FontSize) -> Self {
-        Self::Font(step)
+impl<T> From<T> for Length
+where
+    T: StyleToken<Value = f32>,
+{
+    fn from(token: T) -> Self {
+        Self::Token(TokenLength {
+            index: token.index(),
+            type_id: TypeId::of::<T>(),
+            read: |tokens, index| T::from_index(index).read(tokens),
+        })
     }
 }
 
@@ -122,6 +168,7 @@ pub enum Extent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{ColorToken, FontSize, Radius, Space};
 
     #[test]
     fn token_values_follow_the_theme() {

@@ -26,10 +26,9 @@ impl Component for Greeting {
 #[test]
 fn prelude_covers_a_small_app() {
     let accent = hex!("#ff8800");
-    let custom = theme! {
-        name: "warm",
-        colors { primary: "#ff8800" },
-    };
+    let mut custom = Theme::light();
+    custom.set_name("warm");
+    custom.patch_tokens(ColorToken::patch().primary(accent));
     let cx = Application::new().context().clone();
     let app = element!((cx) {
         div(class = "app", style = style! { gap: Space::Lg, background: ColorToken::Background }) {

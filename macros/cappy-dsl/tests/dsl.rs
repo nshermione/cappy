@@ -2,7 +2,7 @@ use cappy_core::{
     Application, Color, ColorToken, Component, Context, Element, FrameInput, HasContext, Radius,
     Space, StyleRefinement, Theme, Ui, div, text, text_dyn,
 };
-use cappy_dsl::{element, style, theme};
+use cappy_dsl::{element, style};
 
 const VIEWPORT: FrameInput = FrameInput {
     physical_width: 640,
@@ -331,14 +331,15 @@ fn style_macro_matches_the_builder() {
 }
 
 #[test]
-fn theme_macro_overrides_tokens_and_classes() {
-    let custom = theme! {
-        name: "ocean",
-        colors { primary: "#0ea5e9" },
-        spacing { md: 10.0 },
-        line_height: 1.5,
-        classes { "pill" => style! { radius: Radius::Full } },
-    };
+fn theme_overwrites_tokens_and_classes() {
+    let mut custom = Theme::light();
+    custom.set_name("ocean");
+    custom.patch_tokens((
+        ColorToken::patch().primary(Color::hex("#0ea5e9")),
+        Space::patch().md(10.0),
+    ));
+    custom.tokens_mut().line_height = 1.5;
+    custom.set_class("pill", style! { radius: Radius::Full });
     assert_eq!(custom.name(), "ocean");
     assert_eq!(custom.tokens().colors.primary, Color::hex("#0ea5e9"));
     assert_eq!(custom.tokens().spacing.md, 10.0);
@@ -511,11 +512,9 @@ fn deferred_blocks_receive_the_callers_context() {
 }
 
 #[test]
-fn theme_macro_extends_another_theme() {
-    let dimmed = theme! {
-        extends: Theme::dark(),
-        radius { md: 2.0 },
-    };
+fn overwrites_extend_another_theme() {
+    let mut dimmed = Theme::dark();
+    dimmed.patch_tokens(Radius::patch().md(2.0));
     assert_eq!(dimmed.name(), "dark");
     assert_eq!(dimmed.tokens().colors, Theme::dark().tokens().colors);
     assert_eq!(dimmed.tokens().radius.md, 2.0);

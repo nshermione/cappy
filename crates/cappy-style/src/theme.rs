@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
-use crate::{Style, StyleRefinement, TextStyle, Tokens};
+use crate::{PatchList, Style, StyleRefinement, StyleToken, TextStyle, Tokens};
 
 /// Name of a style class, e.g. `"card"` or `"btn-primary"`.
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -189,6 +189,28 @@ impl Theme {
 
     pub fn has_class(&self, name: &str) -> bool {
         self.classes.has_class(name)
+    }
+
+    /// Applies one patch, or a tuple of up to eight patches, from left to right.
+    ///
+    /// A setter on a patch changes that slot. A slot with no setter keeps the value already on
+    /// this theme. A token set that is not one of the built-in fields is stored on the first call.
+    pub fn patch_tokens<P: PatchList>(&mut self, patches: P) {
+        self.tokens.overwrites(patches);
+    }
+
+    /// The value stored for `token`.
+    ///
+    /// # Panics
+    /// Panics when `token` belongs to a set that has never been [overwritten](Self::overwrites)
+    /// onto this theme. Built-in tokens are always present.
+    pub fn get<T: StyleToken>(&self, token: T) -> T::Value {
+        self.tokens.get(token)
+    }
+
+    /// Whether this theme has values for `token`'s set.
+    pub fn has_tokens<T: StyleToken>(&self) -> bool {
+        self.tokens.has_tokens::<T>()
     }
 
     /// Resolves the style of a node.
