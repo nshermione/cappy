@@ -2,10 +2,11 @@ use cappy_macros::stylesheet;
 
 stylesheet! {
     enum Class {
-        Badge {}
-    }
-    Badge:hover {
-        @include Badge,
+        Badge {
+            :hover {
+                @include Badge,
+            }
+        }
     }
 }
 

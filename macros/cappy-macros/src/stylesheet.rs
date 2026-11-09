@@ -14,7 +14,6 @@ pub struct Input {
     visibility: Visibility,
     name: Ident,
     classes: Vec<ClassDecl>,
-    pseudos: Vec<Pseudo>,
 }
 
 struct ClassDecl {
@@ -24,7 +23,7 @@ struct ClassDecl {
 }
 
 struct Pseudo {
-    class: Ident,
+    kind_name: Ident,
     kind: PseudoKind,
     properties: Vec<Property>,
 }
@@ -60,6 +59,7 @@ impl PseudoKind {
 enum BodyItem {
     Include(Ident),
     Property(Property),
+    Pseudo(Pseudo),
 }
 
 /// A resolved rule: links keep included class names as real paths, then setters run in order.
@@ -83,19 +83,16 @@ impl syn::parse::Parse for Input {
             }
             classes.push(content.parse()?);
         }
-        let mut pseudos = Vec::new();
-        while !input.is_empty() {
-            if input.peek(Token![,]) {
-                input.parse::<Token![,]>()?;
-                continue;
-            }
-            pseudos.push(input.parse()?);
+        if !input.is_empty() {
+            return Err(syn::Error::new(
+                input.span(),
+                "`:hover` and `:active` go inside the class",
+            ));
         }
         Ok(Self {
             visibility,
             name,
             classes,
-            pseudos,
         })
     }
 }
@@ -112,7 +109,6 @@ impl syn::parse::Parse for ClassDecl {
 
 impl syn::parse::Parse for Pseudo {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
-        let class = input.parse()?;
         input.parse::<Token![:]>()?;
         let kind_name: Ident = input.parse()?;
         let kind = match kind_name.to_string().as_str() {
@@ -135,11 +131,17 @@ impl syn::parse::Parse for Pseudo {
                         "hover and active blocks only set properties",
                     ));
                 }
+                BodyItem::Pseudo(nested) => {
+                    return Err(syn::Error::new(
+                        nested.kind_name.span(),
+                        "hover and active blocks only set properties",
+                    ));
+                }
                 BodyItem::Property(property) => properties.push(property),
             }
         }
         Ok(Self {
-            class,
+            kind_name,
             kind,
             properties,
         })
@@ -148,6 +150,9 @@ impl syn::parse::Parse for Pseudo {
 
 impl syn::parse::Parse for BodyItem {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+        if input.peek(Token![:]) {
+            return Ok(Self::Pseudo(input.parse()?));
+        }
         if input.peek(Token![@]) {
             input.parse::<Token![@]>()?;
             let keyword: Ident = input.parse()?;
@@ -180,54 +185,7 @@ pub fn expand(input: &Input) -> syn::Result<TokenStream> {
         let resolved = resolve_class(class, &input.classes, &mut Vec::new())?;
         let selector = class_name(&class.name, &class.attributes)?;
         rules.push(emit_rule(&input.name, selector, &resolved));
-    }
-
-    let mut seen_pseudos = Vec::new();
-    for pseudo in &input.pseudos {
-        let Some(class) = input
-            .classes
-            .iter()
-            .find(|class| class.name == pseudo.class)
-        else {
-            return Err(syn::Error::new(
-                pseudo.class.span(),
-                format!("class `{}` is not defined in this sheet", pseudo.class),
-            ));
-        };
-        let key = (pseudo.class.to_string(), pseudo.kind);
-        if seen_pseudos.contains(&key) {
-            return Err(syn::Error::new(
-                pseudo.class.span(),
-                format!(
-                    "`{}:{}` is already defined",
-                    pseudo.class,
-                    pseudo.kind.label()
-                ),
-            ));
-        }
-        seen_pseudos.push(key);
-        let selector = format!(
-            "{}{}",
-            class_name(&class.name, &class.attributes)?,
-            pseudo.kind.suffix()
-        );
-        let base = resolve_class(class, &input.classes, &mut Vec::new())?;
-        let mut properties = base.properties;
-        properties.extend(pseudo.properties.iter().cloned());
-        let link = &pseudo.class;
-        let body = emit_rule(
-            &input.name,
-            selector,
-            &Rule {
-                links: base.links,
-                properties,
-            },
-        );
-        let enum_name = &input.name;
-        rules.push(quote! {
-            let _ = #enum_name::#link;
-            #body
-        });
+        rules.extend(emit_pseudos(input, class, &resolved)?);
     }
 
     let visibility = &input.visibility;
@@ -349,10 +307,50 @@ fn resolve_class(
                 rule.properties.extend(nested.properties);
             }
             BodyItem::Property(property) => rule.properties.push(property.clone()),
+            BodyItem::Pseudo(_) => {}
         }
     }
     stack.pop();
     Ok(rule)
+}
+
+fn emit_pseudos(input: &Input, class: &ClassDecl, base: &Rule) -> syn::Result<Vec<TokenStream>> {
+    let mut seen = Vec::new();
+    let mut rules = Vec::new();
+    for item in &class.items {
+        let BodyItem::Pseudo(pseudo) = item else {
+            continue;
+        };
+        if seen.contains(&pseudo.kind) {
+            return Err(syn::Error::new(
+                pseudo.kind_name.span(),
+                format!("`:{}` is already defined", pseudo.kind.label()),
+            ));
+        }
+        seen.push(pseudo.kind);
+        let selector = format!(
+            "{}{}",
+            class_name(&class.name, &class.attributes)?,
+            pseudo.kind.suffix()
+        );
+        let mut properties = base.properties.clone();
+        properties.extend(pseudo.properties.iter().cloned());
+        let body = emit_rule(
+            &input.name,
+            selector,
+            &Rule {
+                links: base.links.clone(),
+                properties,
+            },
+        );
+        let enum_name = &input.name;
+        let link = &class.name;
+        rules.push(quote! {
+            let _ = #enum_name::#link;
+            #body
+        });
+    }
+    Ok(rules)
 }
 
 fn emit_rule(enum_name: &Ident, selector: String, rule: &Rule) -> TokenStream {

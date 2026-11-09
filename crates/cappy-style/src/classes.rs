@@ -60,11 +60,15 @@ stylesheet! {
             border_color: ColorToken::Border,
             background: ColorToken::Surface,
             font_weight: FontWeight::MEDIUM,
+            :hover { background: ColorToken::SurfaceHover },
+            :active { border_color: ColorToken::Primary },
         }
         BtnPrimary {
             background: ColorToken::Primary,
             border_color: ColorToken::Primary,
             text_color: ColorToken::OnPrimary,
+            :hover { background: ColorToken::PrimaryHover },
+            :active { background: ColorToken::PrimaryActive },
         }
         Badge {
             padding_x: Space::Sm,
@@ -81,13 +85,9 @@ stylesheet! {
             background: ColorToken::SurfaceAlt,
             border_width: 1,
             border_color: ColorToken::Border,
+            :hover { background: ColorToken::SurfaceHover },
         }
     }
-    Btn:hover { background: ColorToken::SurfaceHover }
-    Btn:active { border_color: ColorToken::Primary }
-    BtnPrimary:hover { background: ColorToken::PrimaryHover }
-    BtnPrimary:active { background: ColorToken::PrimaryActive }
-    Tile:hover { background: ColorToken::SurfaceHover }
 }
 
 impl Theme {
@@ -129,6 +129,7 @@ mod tests {
             Badge {
                 background: ColorToken::Surface,
                 text_color: ColorToken::Text,
+                :active { background: ColorToken::PrimaryActive },
             }
             BadgeDone {
                 @include Badge,
@@ -137,10 +138,9 @@ mod tests {
             Tile {
                 background: ColorToken::SurfaceAlt,
                 padding: Space::Md,
+                :hover { background: ColorToken::SurfaceHover },
             }
         }
-        Tile:hover { background: ColorToken::SurfaceHover }
-        Badge:active { background: ColorToken::PrimaryActive }
     }
 
     fn names(list: &str) -> Vec<ClassName> {

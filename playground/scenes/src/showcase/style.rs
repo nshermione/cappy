@@ -54,6 +54,9 @@ stylesheet! {
             background: ColorToken::Primary,
             border_color: ColorToken::Primary,
             text_color: ColorToken::OnPrimary,
+            :hover {
+                background: ColorToken::PrimaryHover
+            },
         }
         Grow { flex_grow: 1.0 }
         Count { font_size: FontSize::Xl }
@@ -66,6 +69,9 @@ stylesheet! {
             background: ColorToken::Primary,
             border_color: ColorToken::Primary,
             text_color: ColorToken::OnPrimary,
+            :hover {
+                background: ColorToken::PrimaryHover
+            },
         }
         BadgeDone {
             background: ColorToken::Success,
@@ -123,8 +129,6 @@ stylesheet! {
             background: ColorToken::SurfaceAlt,
         }
     }
-    TileSelected:hover { background: ColorToken::PrimaryHover }
-    TabActive:hover { background: ColorToken::PrimaryHover }
 }
 
 /// Adds the scene's own classes to `theme`. Light and dark themes receive the default elevation.

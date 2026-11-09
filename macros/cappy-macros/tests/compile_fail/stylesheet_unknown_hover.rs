@@ -2,9 +2,10 @@ use cappy_macros::stylesheet;
 
 stylesheet! {
     enum Class {
-        Badge {}
+        Badge {
+            :pressed {}
+        }
     }
-    Missing:hover {}
 }
 
 fn main() {}
