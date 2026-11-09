@@ -4,6 +4,7 @@
 mod bindings;
 pub(crate) mod flow;
 mod input;
+mod motion;
 mod node;
 mod passes;
 mod scroll;
@@ -20,6 +21,7 @@ use crate::paint::{Primitive, RenderFrame};
 use crate::reactive::{BindingQueue, Signal};
 use crate::{Context, CursorIcon, Damage, DamageTracker, ThemeHandle};
 use bindings::{Binding, BindingKind};
+pub use motion::{Ease, Motion, MotionCtx};
 pub use node::NodeId;
 use node::{Node, NodeContent};
 
@@ -173,6 +175,7 @@ impl Ui {
         };
         ui.root = ui.mount(root.into_element(), None);
         ui.add_binding(ui.root, BindingKind::Theme);
+        ui.queue.runtime.attach_ui();
         ui
     }
 
@@ -220,12 +223,13 @@ impl Ui {
             || self.positions_dirty
             || self.paint_dirty
             || self.scroll_animating()
+            || self.motion_animating()
+            || self.queue.runtime.has_motions()
     }
 
-    /// When the host should draw the next scroll-ease frame. `None` once every offset rests.
+    /// When the host should draw the next animation frame. `None` once scroll and tweens rest.
     pub fn frame_deadline(&self, now: Instant) -> Option<Instant> {
-        self.scroll_animating()
-            .then_some(now + scroll::SCROLL_FRAME)
+        (self.scroll_animating() || self.motion_animating()).then_some(now + scroll::SCROLL_FRAME)
     }
 
     fn scroll_animating(&self) -> bool {
@@ -250,12 +254,14 @@ impl Ui {
         // Hover changes caused by layout can restyle nodes again.
         self.resolve_styles();
         self.run_layout();
+        self.drain_motions();
         self.step_scroll(dt);
+        self.step_motion(now);
         self.run_layout();
         self.collect_paint_damage();
         self.rebuild_display_list();
         self.reclaim_unused();
-        if self.damage.is_empty() && !self.scroll_animating() {
+        if self.damage.is_empty() && !self.scroll_animating() && !self.motion_animating() {
             UpdateOutcome::Idle
         } else {
             UpdateOutcome::Redraw {
@@ -436,9 +442,23 @@ impl Ui {
     }
 }
 
+impl Context {
+    /// Queues `apply` to run on the next [`Ui::update`](Ui::update), after layout.
+    ///
+    /// The closure does not run at the call. A context has one [`Ui`]; that `Ui` drains the queue.
+    /// A call made before the `Ui` exists waits for its first update. The host waker set on the
+    /// `Ui` fires when the queue goes from empty to occupied.
+    pub fn animate(&self, apply: impl FnOnce(&mut MotionCtx) + 'static) {
+        self.runtime.push_motion(Box::new(move |ui| {
+            apply(&mut MotionCtx::new(ui));
+        }));
+    }
+}
+
 impl Drop for Ui {
     fn drop(&mut self) {
         self.dispose_tree();
+        self.queue.runtime.detach_ui();
     }
 }
 

@@ -18,7 +18,7 @@ pub(crate) fn paint_image(
     if placement.dest.is_empty() {
         return;
     }
-    let Some(raster) = rasterize(&image.pixels) else {
+    let Some(raster) = rasterize(&image.pixels, image.opacity) else {
         return;
     };
     let clip = image.rect.scale(scale_factor);
@@ -95,12 +95,12 @@ fn image_axis(
     (scale, dest - scale * uv_min * texture_size)
 }
 
-fn rasterize(pixels: &ImagePixels) -> Option<Pixmap> {
+fn rasterize(pixels: &ImagePixels, opacity: f32) -> Option<Pixmap> {
     let mut pixmap = Pixmap::new(pixels.width(), pixels.height())?;
     let (chunks, _) = pixels.rgba().as_chunks::<4>();
     for (pixel, chunk) in pixmap.pixels_mut().iter_mut().zip(chunks) {
-        *pixel =
-            tiny_skia::ColorU8::from_rgba(chunk[0], chunk[1], chunk[2], chunk[3]).premultiply();
+        let alpha = (chunk[3] as f32 * opacity).round().clamp(0.0, 255.0) as u8;
+        *pixel = tiny_skia::ColorU8::from_rgba(chunk[0], chunk[1], chunk[2], alpha).premultiply();
     }
     Some(pixmap)
 }
@@ -124,6 +124,7 @@ mod tests {
             fit: ObjectFit::Contain,
             corner_radius: 0.0,
             clip: None,
+            opacity: 1.0,
         };
         let mut pixmap = Pixmap::new(40, 24).expect("pixmap");
         paint_image(&mut pixmap.as_mut(), &image, 1.0, (0.0, 0.0));

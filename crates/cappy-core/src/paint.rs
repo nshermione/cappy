@@ -71,6 +71,8 @@ pub struct ImagePrimitive {
     pub corner_radius: f32,
     /// Ancestor scrollports. `None` means the primitive is not clipped further.
     pub clip: Option<Rect>,
+    /// Multiplier applied to the texture alpha. 1 leaves the bitmap unchanged.
+    pub opacity: f32,
 }
 
 impl ImagePrimitive {

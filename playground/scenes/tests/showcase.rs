@@ -1,4 +1,4 @@
-use cappy::{Application, Background, Damage};
+use cappy::{Application, Background, Damage, Primitive};
 use cappy_testing::TestUi;
 use playground_scenes::showcase;
 
@@ -226,6 +226,48 @@ fn paint_tab_uses_gradient_shadow_and_image() {
     assert!(harness.rect("picture-contain").width > 0.0);
     assert!(harness.rect("picture-cover").width > 0.0);
     assert!(harness.rect("picture-fill").width > 0.0);
+}
+
+#[test]
+fn motion_tab_fades_and_slides_from_manual_animate() {
+    use std::thread::sleep;
+    use std::time::{Duration, Instant};
+
+    let mut harness = harness();
+    open_tab(&mut harness, "tab-motion");
+    let slide_y = harness.rect("motion-slide").y;
+
+    harness.click("motion-fade");
+    harness.click("motion-shift");
+    harness.update();
+    assert!(harness.ui().frame_deadline(Instant::now()).is_some());
+    assert!((harness.rect("motion-slide").y - slide_y).abs() < 0.5);
+
+    sleep(Duration::from_millis(120));
+    harness.update();
+    assert!(harness.rect("motion-slide").y > slide_y + 8.0);
+    assert!(fill_alpha(&harness, "motion-opacity") < 0.95);
+}
+
+fn fill_alpha(harness: &TestUi, key: &str) -> f32 {
+    let rect = harness.rect(key);
+    harness
+        .ui()
+        .display_list()
+        .iter()
+        .find_map(|primitive| {
+            let Primitive::Quad(quad) = primitive else {
+                return None;
+            };
+            if quad.rect != rect {
+                return None;
+            }
+            let Background::Solid(color) = quad.background else {
+                return None;
+            };
+            Some(color.a)
+        })
+        .expect("solid fill")
 }
 
 #[test]

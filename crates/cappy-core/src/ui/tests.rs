@@ -9,7 +9,7 @@ use crate::{
     Application, ButtonState, Context, Element, InputEvent, IntoElement, PointerButton, Signal,
     Slot, div, for_each, fragment, if_else, show, slot, text, text_dyn,
 };
-use cappy_style::{Color, FlexDirection, Overflow, StyleRefinement};
+use cappy_style::{Background, Color, FlexDirection, Overflow, StyleRefinement};
 
 const VIEWPORT: FrameInput = FrameInput {
     physical_width: 800,
@@ -1509,4 +1509,311 @@ fn dragging_the_thumb_scrolls_immediately_and_does_not_click() {
         state: ButtonState::Released,
     });
     assert_eq!(clicks.get_untracked(), 1);
+}
+
+fn sized_box(key: &str, color: Color) -> Element {
+    div().key(key).style(
+        StyleRefinement::default()
+            .width(40)
+            .height(20)
+            .background(color),
+    )
+}
+
+fn solid_fill(ui: &Ui, key: &str) -> Color {
+    let rect = ui.node_rect(ui.find_by_key(key).unwrap()).unwrap();
+    ui.display_list()
+        .iter()
+        .find_map(|primitive| match primitive {
+            Primitive::Quad(quad) if quad.rect == rect => match quad.background {
+                Background::Solid(color) => Some(color),
+                Background::Linear { .. } => None,
+            },
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("{key} has no solid fill"))
+}
+
+#[test]
+fn translation_moves_the_node_without_moving_its_sibling() {
+    let cx = context();
+    let mut ui = settled(
+        &cx,
+        div().children([sized_box("a", Color::BLACK), sized_box("b", Color::BLACK)]),
+    );
+    let a = ui.find_by_key("a").unwrap();
+    let b = ui.find_by_key("b").unwrap();
+    let a_start = ui.node_rect(a).unwrap();
+    let b_start = ui.node_rect(b).unwrap();
+    let start = Instant::now();
+    ui.animate(
+        a,
+        Motion::translation(0.0, 40.0)
+            .duration(Duration::from_millis(1000))
+            .ease(Ease::Linear),
+    );
+    ui.update_at(VIEWPORT, start);
+    assert_eq!(ui.node_rect(a).unwrap(), a_start);
+    ui.update_at(VIEWPORT, start + Duration::from_millis(500));
+    let moved = ui.node_rect(a).unwrap();
+    assert!((moved.y - (a_start.y + 20.0)).abs() < 0.01);
+    assert_eq!(ui.node_rect(b).unwrap(), b_start);
+    let hit = Point::new(moved.x + 1.0, moved.y + 1.0);
+    assert!(ui.hit_path(hit).contains(&a));
+    let old = Point::new(a_start.x + 1.0, a_start.y + 1.0);
+    assert!(!ui.hit_path(old).contains(&a));
+}
+
+#[test]
+fn a_child_moves_with_its_parent_translation() {
+    let cx = context();
+    let mut ui = settled(
+        &cx,
+        div().key("parent").child(sized_box("child", Color::BLACK)),
+    );
+    let parent = ui.find_by_key("parent").unwrap();
+    let child = ui.find_by_key("child").unwrap();
+    let child_start = ui.node_rect(child).unwrap();
+    let start = Instant::now();
+    ui.animate(
+        parent,
+        Motion::translation(0.0, 12.0)
+            .duration(Duration::from_millis(1000))
+            .ease(Ease::Linear),
+    );
+    ui.update_at(VIEWPORT, start);
+    ui.update_at(VIEWPORT, start + Duration::from_millis(500));
+    let child_now = ui.node_rect(child).unwrap();
+    assert!((child_now.y - (child_start.y + 6.0)).abs() < 0.01);
+}
+
+#[test]
+fn opacity_scales_the_fill_and_a_new_animate_replaces_the_tween() {
+    let cx = context();
+    let mut ui = settled(&cx, sized_box("box", Color::rgb(0, 0, 255)));
+    let id = ui.find_by_key("box").unwrap();
+    let start = Instant::now();
+    ui.animate(
+        id,
+        Motion::opacity(0.0)
+            .duration(Duration::from_millis(1000))
+            .ease(Ease::Linear),
+    );
+    ui.update_at(VIEWPORT, start);
+    ui.update_at(VIEWPORT, start + Duration::from_millis(500));
+    let faded = solid_fill(&ui, "box");
+    assert!((faded.a - 0.5).abs() < 0.01);
+    assert_eq!((faded.r, faded.g, faded.b), (0.0, 0.0, 1.0));
+
+    ui.animate(
+        id,
+        Motion::opacity(1.0)
+            .duration(Duration::from_millis(500))
+            .ease(Ease::Linear),
+    );
+    ui.update_at(VIEWPORT, start + Duration::from_millis(500));
+    ui.update_at(VIEWPORT, start + Duration::from_millis(750));
+    let replaced = solid_fill(&ui, "box");
+    assert!((replaced.a - 0.75).abs() < 0.01);
+}
+
+#[test]
+fn style_dyn_does_not_reset_a_running_opacity_tween() {
+    let cx = context();
+    let red = cx.signal(false);
+    let paint = red.clone();
+    let mut ui = settled(
+        &cx,
+        div().key("box").style_dyn(move || {
+            let color = if paint.get() {
+                Color::rgb(255, 0, 0)
+            } else {
+                Color::rgb(0, 0, 255)
+            };
+            StyleRefinement::default()
+                .width(40)
+                .height(20)
+                .background(color)
+        }),
+    );
+    let id = ui.find_by_key("box").unwrap();
+    let start = Instant::now();
+    ui.animate(
+        id,
+        Motion::opacity(0.0)
+            .duration(Duration::from_millis(1000))
+            .ease(Ease::Linear),
+    );
+    ui.update_at(VIEWPORT, start);
+    ui.update_at(VIEWPORT, start + Duration::from_millis(500));
+    red.set(true);
+    ui.update_at(VIEWPORT, start + Duration::from_millis(501));
+    let color = solid_fill(&ui, "box");
+    assert!((color.a - 0.499).abs() < 0.02);
+    assert!(color.r > 0.9);
+    assert_eq!(color.b, 0.0);
+}
+
+#[test]
+fn a_finished_tween_stays_put_when_style_changes_later() {
+    let cx = context();
+    let wide = cx.signal(false);
+    let width = wide.clone();
+    let mut ui = settled(
+        &cx,
+        div().key("box").style_dyn(move || {
+            StyleRefinement::default()
+                .width(if width.get() { 80 } else { 40 })
+                .height(20)
+                .background(Color::BLACK)
+        }),
+    );
+    let id = ui.find_by_key("box").unwrap();
+    let start_y = ui.node_rect(id).unwrap().y;
+    let start = Instant::now();
+    ui.animate(
+        id,
+        Motion::translation(0.0, 30.0)
+            .duration(Duration::from_millis(100))
+            .ease(Ease::Linear),
+    );
+    ui.update_at(VIEWPORT, start);
+    ui.update_at(VIEWPORT, start + Duration::from_millis(150));
+    assert!((ui.node_rect(id).unwrap().y - (start_y + 30.0)).abs() < 0.01);
+    assert!(!ui.motion_animating());
+    wide.set(true);
+    ui.update_at(VIEWPORT, start + Duration::from_millis(160));
+    let settled_rect = ui.node_rect(id).unwrap();
+    assert!((settled_rect.y - (start_y + 30.0)).abs() < 0.01);
+    assert!((settled_rect.width - 80.0).abs() < 0.01);
+
+    ui.animate(
+        id,
+        Motion::translation(0.0, 0.0)
+            .duration(Duration::from_millis(100))
+            .ease(Ease::Linear),
+    );
+    let returned = start + Duration::from_millis(160);
+    ui.update_at(VIEWPORT, returned);
+    ui.update_at(VIEWPORT, returned + Duration::from_millis(50));
+    assert!((ui.node_rect(id).unwrap().y - (start_y + 15.0)).abs() < 0.01);
+}
+
+#[test]
+fn hiding_a_node_cancels_its_tween() {
+    let cx = context();
+    let open = cx.signal(true);
+    let shown = open.clone();
+    let mut ui = settled(
+        &cx,
+        show(move || shown.get(), || sized_box("box", Color::BLACK)),
+    );
+    let id = ui.find_by_key("box").unwrap();
+    let start_y = ui.node_rect(id).unwrap().y;
+    let start = Instant::now();
+    ui.animate(
+        id,
+        Motion::translation(0.0, 40.0)
+            .duration(Duration::from_millis(1000))
+            .ease(Ease::Linear),
+    );
+    ui.update_at(VIEWPORT, start);
+    ui.update_at(VIEWPORT, start + Duration::from_millis(500));
+    assert!(ui.node_rect(id).unwrap().y > start_y + 10.0);
+    open.set(false);
+    ui.update_at(VIEWPORT, start + Duration::from_millis(500));
+    open.set(true);
+    ui.update_at(VIEWPORT, start + Duration::from_millis(500));
+    let again = ui.find_by_key("box").unwrap();
+    assert!((ui.node_rect(again).unwrap().y - start_y).abs() < 0.01);
+    assert!(!ui.motion_animating());
+}
+
+#[test]
+fn disposing_a_node_drops_its_tween() {
+    let cx = context();
+    let left = cx.signal(true);
+    let branch = left.clone();
+    let mut ui = settled(
+        &cx,
+        if_else(
+            move || branch.get(),
+            || sized_box("box", Color::BLACK),
+            || sized_box("box", Color::BLACK),
+        ),
+    );
+    let id = ui.find_by_key("box").unwrap();
+    let rest_y = ui.node_rect(id).unwrap().y;
+    let start = Instant::now();
+    ui.animate(
+        id,
+        Motion::translation(0.0, 40.0)
+            .duration(Duration::from_millis(1000))
+            .ease(Ease::Linear),
+    );
+    ui.update_at(VIEWPORT, start);
+    ui.update_at(VIEWPORT, start + Duration::from_millis(500));
+    left.set(false);
+    ui.update_at(VIEWPORT, start + Duration::from_millis(500));
+    ui.animate(
+        id,
+        Motion::translation(0.0, 80.0)
+            .duration(Duration::from_millis(1000))
+            .ease(Ease::Linear),
+    );
+    ui.update_at(VIEWPORT, start + Duration::from_millis(900));
+    let replacement = ui.find_by_key("box").unwrap();
+    assert_ne!(replacement, id);
+    assert!(!ui.motion_animating());
+    assert!((ui.node_rect(replacement).unwrap().y - rest_y).abs() < 0.01);
+}
+
+#[test]
+fn context_animate_reads_layout_and_shares_the_driver() {
+    let cx = context();
+    let mut ui = settled(&cx, sized_box("panel", Color::BLACK));
+    let start_y = ui.node_rect(ui.find_by_key("panel").unwrap()).unwrap().y;
+    cx.animate(|motion| {
+        let id = motion.find_by_key("panel").expect("panel");
+        let height = motion.node_rect(id).unwrap().height;
+        motion.animate(
+            id,
+            Motion::translation(0.0, height)
+                .duration(Duration::from_millis(1000))
+                .ease(Ease::Linear),
+        );
+    });
+    let start = Instant::now();
+    ui.update_at(VIEWPORT, start);
+    ui.update_at(VIEWPORT, start + Duration::from_millis(500));
+    let moved = ui.node_rect(ui.find_by_key("panel").unwrap()).unwrap();
+    assert!((moved.y - (start_y + 10.0)).abs() < 0.01);
+    assert!(
+        ui.frame_deadline(start + Duration::from_millis(500))
+            .is_some()
+    );
+}
+
+#[test]
+fn context_animate_wakes_the_host_once_per_batch() {
+    let cx = context();
+    let mut ui = settled(&cx, div());
+    let wakes = Rc::new(Cell::new(0));
+    let counter = wakes.clone();
+    ui.set_waker(move || counter.set(counter.get() + 1));
+    cx.animate(|_| {});
+    assert_eq!(wakes.get(), 1);
+    cx.animate(|_| {});
+    assert_eq!(wakes.get(), 1);
+    ui.update(VIEWPORT);
+    cx.animate(|_| {});
+    assert_eq!(wakes.get(), 2);
+}
+
+#[test]
+#[should_panic(expected = "a context drives one Ui")]
+fn a_context_has_one_ui() {
+    let cx = context();
+    let _first = Ui::new(&cx, div(), Theme::light());
+    let _second = Ui::new(&cx, div(), Theme::light());
 }

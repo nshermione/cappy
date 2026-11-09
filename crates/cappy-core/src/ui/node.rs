@@ -81,10 +81,16 @@ pub(crate) struct Node {
     pub(crate) scroll: Point,
     /// Where [`Self::scroll`] is easing toward.
     pub(crate) scroll_target: Point,
-    /// Absolute rectangle in logical pixels from the last layout.
+    /// Absolute rectangle in logical pixels from the last layout, plus this node's translation.
     pub(crate) rect: Rect,
     /// Ink painted last frame, including shadow that falls outside [`Self::rect`].
     pub(crate) painted: Rect,
+    /// Visual offset added after layout. Identity is zero.
+    pub(crate) translation: Point,
+    /// Multiplier applied while painting this node and its descendants. Identity is 1.
+    pub(crate) opacity: f32,
+    pub(crate) translation_tween: Option<crate::ui::motion::Tween<Point>>,
+    pub(crate) opacity_tween: Option<crate::ui::motion::Tween<f32>>,
     pub(crate) style_dirty: bool,
     pub(crate) paint_dirty: bool,
 }

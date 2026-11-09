@@ -10,12 +10,14 @@
 //!   The counter tab hosts one. Badges are not nested;
 //! - [`tiles`]: the tiles tab;
 //! - [`checklist`]: the checklist tab;
-//! - [`paint`]: the paint tab (linear gradients, drop shadows and a fitted image).
+//! - [`paint`]: the paint tab (linear gradients, drop shadows and a fitted image);
+//! - [`motion`]: the motion tab. Buttons call [`Context::animate`] for opacity and translation.
 
 mod badge;
 mod checklist;
 mod counter;
 mod layout;
+mod motion;
 mod paint;
 mod store;
 mod style;
@@ -23,7 +25,7 @@ mod tiles;
 
 use cappy::prelude::*;
 
-/// Header with a theme switcher, and one tab per demo: counter, tiles, checklist, paint.
+/// Header with a theme switcher, and one tab per demo: counter, tiles, checklist, paint, motion.
 pub fn showcase(cx: &Context) -> Ui {
     cx.enter(|| {
         // A context reused for another scene still holds the previous singletons.

@@ -11,7 +11,7 @@ struct ImageInput {
     @location(0) clip_rect: vec4<f32>,
     @location(1) dest_rect: vec4<f32>,
     @location(2) uv_rect: vec4<f32>,
-    @location(3) radius: f32,
+    @location(3) radius_opacity: vec2<f32>,
     @location(4) scroll_clip: vec4<f32>,
 }
 
@@ -22,7 +22,8 @@ struct ImageOutput {
     @location(2) dest_rect: vec4<f32>,
     @location(3) uv_rect: vec4<f32>,
     @location(4) radius: f32,
-    @location(5) scroll_clip: vec4<f32>,
+    @location(5) opacity: f32,
+    @location(6) scroll_clip: vec4<f32>,
 }
 
 @group(0) @binding(0) var image_texture: texture_2d<f32>;
@@ -49,7 +50,8 @@ fn vs_image(@builtin(vertex_index) vertex_index: u32, image: ImageInput) -> Imag
     out.clip_rect = image.clip_rect;
     out.dest_rect = image.dest_rect;
     out.uv_rect = image.uv_rect;
-    out.radius = image.radius;
+    out.radius = image.radius_opacity.x;
+    out.opacity = image.radius_opacity.y;
     out.scroll_clip = image.scroll_clip;
     return out;
 }
@@ -71,7 +73,7 @@ fn image_color(in: ImageOutput) -> vec4<f32> {
     let uv = mix(in.uv_rect.xy, in.uv_rect.zw, clamp(dest_uv, vec2<f32>(0.0), vec2<f32>(1.0)));
     let sample = textureSample(image_texture, image_sampler, uv);
     let premul = vec4<f32>(sample.rgb * sample.a, sample.a);
-    return premul * coverage * inside.x * inside.y * scroll_coverage(in.pixel, in.scroll_clip);
+    return premul * coverage * inside.x * inside.y * scroll_coverage(in.pixel, in.scroll_clip) * in.opacity;
 }
 
 @fragment

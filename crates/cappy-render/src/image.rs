@@ -25,7 +25,8 @@ struct ImageInstance {
     dest_rect: [f32; 4],
     uv_rect: [f32; 4],
     radius: f32,
-    _padding: [f32; 3],
+    opacity: f32,
+    _padding: [f32; 2],
     scroll_clip: [f32; 4],
 }
 
@@ -49,7 +50,7 @@ impl ImageInstance {
         wgpu::VertexAttribute {
             offset: 48,
             shader_location: 3,
-            format: wgpu::VertexFormat::Float32,
+            format: wgpu::VertexFormat::Float32x2,
         },
         wgpu::VertexAttribute {
             offset: 64,
@@ -72,7 +73,8 @@ impl ImageInstance {
                 placement.uv_max_y,
             ],
             radius: image.corner_radius * scale_factor,
-            _padding: [0.0; 3],
+            opacity: image.opacity,
+            _padding: [0.0; 2],
             scroll_clip: crate::quad::physical_clip(image.clip, scale_factor),
         }
     }

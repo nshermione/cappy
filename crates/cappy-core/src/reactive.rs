@@ -83,7 +83,8 @@ impl BindingQueue {
     }
 
     pub(crate) fn set_waker(&self, waker: Option<Rc<dyn Fn()>>) {
-        *self.waker.borrow_mut() = waker;
+        *self.waker.borrow_mut() = waker.clone();
+        *self.runtime.waker.borrow_mut() = waker;
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -230,6 +231,9 @@ struct MountOwner {
     signals: Vec<SignalKey>,
 }
 
+/// One [`crate::Context::animate`] closure, waiting for the runtime's [`crate::Ui`] to drain it.
+pub(crate) type MotionJob = Box<dyn FnOnce(&mut crate::ui::Ui)>;
+
 #[derive(Default)]
 pub(crate) struct Runtime {
     /// Slot in [`RUNTIMES`]. `None` until the first signal is created in this runtime.
@@ -247,6 +251,12 @@ pub(crate) struct Runtime {
     singletons: RefCell<HashMap<TypeId, Box<dyn Any>>>,
     pub(crate) components: RefCell<Vec<Rc<dyn Any>>>,
     themes: RefCell<Option<ThemeSlot>>,
+    /// Closures from [`crate::Context::animate`], run by the one [`crate::Ui`] on this runtime.
+    motion_jobs: RefCell<Vec<MotionJob>>,
+    /// Host waker, shared with the binding queue so a motion enqueue can wake a sleeping loop.
+    waker: RefCell<Option<Rc<dyn Fn()>>>,
+    /// True while a [`crate::Ui`] built on this runtime is alive.
+    ui_attached: Cell<bool>,
 }
 
 struct ThemeSlot {
@@ -258,6 +268,39 @@ const DEAD_SIGNAL: &str =
     "signal was disposed, or used on a thread other than the one that created it";
 
 impl Runtime {
+    pub(crate) fn attach_ui(&self) {
+        if self.ui_attached.replace(true) {
+            panic!("a context drives one Ui");
+        }
+    }
+
+    pub(crate) fn detach_ui(&self) {
+        self.ui_attached.set(false);
+    }
+
+    pub(crate) fn push_motion(&self, job: MotionJob) {
+        let wake = {
+            let mut jobs = self.motion_jobs.borrow_mut();
+            let wake = jobs.is_empty();
+            jobs.push(job);
+            wake
+        };
+        if wake {
+            let waker = self.waker.borrow().clone();
+            if let Some(waker) = waker {
+                waker();
+            }
+        }
+    }
+
+    pub(crate) fn take_motions(&self) -> Vec<MotionJob> {
+        std::mem::take(&mut *self.motion_jobs.borrow_mut())
+    }
+
+    pub(crate) fn has_motions(&self) -> bool {
+        !self.motion_jobs.borrow().is_empty()
+    }
+
     fn create(&self, value: Box<dyn Any>, ephemeral: bool) -> (u32, u32) {
         let generation = {
             let mut next = self.next_generation.borrow_mut();

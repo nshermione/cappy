@@ -36,7 +36,7 @@ pub use paint::{
 pub use prop::{ByHandle, ByValue, PropInput};
 pub use reactive::{IntoReactive, Reactive, RetirePlaceholder, Signal};
 pub use theme_handle::{ThemeCatalog, ThemeHandle, Themes};
-pub use ui::{FrameInput, NodeId, ResourceCensus, Ui, UpdateOutcome};
+pub use ui::{Ease, FrameInput, Motion, MotionCtx, NodeId, ResourceCensus, Ui, UpdateOutcome};
 
 pub use cappy_layout::{
     ApproximateTextMeasurer, Point, Rect, Size, TextMeasureRequest, TextMeasurer,

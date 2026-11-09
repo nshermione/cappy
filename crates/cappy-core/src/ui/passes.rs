@@ -235,11 +235,13 @@ impl Ui {
             clip: None,
         }];
         while let Some(Placed { id, origin, clip }) = stack.pop() {
-            let rect = self
+            let layout_rect = self
                 .layout
                 .local_rect(id)
                 .expect(LAYOUT_OUT_OF_SYNC)
                 .translate(origin);
+            let translation = self.nodes[id.index()].translation;
+            let rect = layout_rect.translate(translation);
             let (previous, shadow, moved) = {
                 let node = &mut self.nodes[id.index()];
                 let moved = node.rect != rect;
@@ -314,22 +316,24 @@ impl Ui {
         let mut stack = vec![Painted::Enter {
             id: self.root,
             clip: None,
+            opacity: 1.0,
         }];
         while let Some(step) = stack.pop() {
             match step {
-                Painted::Thumb { id, clip } => {
-                    self.push_thumbs(&mut primitives, id, clip);
+                Painted::Thumb { id, clip, opacity } => {
+                    self.push_thumbs(&mut primitives, id, clip, opacity);
                     continue;
                 }
-                Painted::Enter { id, clip } => {
+                Painted::Enter { id, clip, opacity } => {
                     let node = &self.nodes[id.index()];
                     if !node.alive || node.suppressed || node.style.layout.display == Display::None
                     {
                         continue;
                     }
+                    let opacity = opacity * node.opacity;
                     let visual = &node.style.visual;
                     painted[id.index()] = paint_bounds(node.rect, visual.shadow);
-                    push_box(&mut primitives, node.rect, visual, clip);
+                    push_box(&mut primitives, node.rect, visual, clip, opacity);
                     match &node.content {
                         super::NodeContent::Text(text) => {
                             let padding = node.style.layout.padding;
@@ -343,7 +347,7 @@ impl Ui {
                             primitives.push(Primitive::Text(TextPrimitive {
                                 rect: content,
                                 text: text.clone(),
-                                color: text_style.color,
+                                color: fade_color(text_style.color, opacity),
                                 font_size: text_style.font_size,
                                 line_height: text_style.line_height_px(),
                                 weight: text_style.weight.0,
@@ -357,6 +361,7 @@ impl Ui {
                                 fit: *fit,
                                 corner_radius: visual.corner_radius,
                                 clip,
+                                opacity,
                             }));
                         }
                         super::NodeContent::Container => {}
@@ -376,10 +381,12 @@ impl Ui {
                     stack.push(Painted::Thumb {
                         id,
                         clip: child_clip,
+                        opacity,
                     });
                     stack.extend(node.children.iter().rev().map(|child| Painted::Enter {
                         id: *child,
                         clip: child_clip,
+                        opacity,
                     }));
                 }
             }
@@ -390,7 +397,13 @@ impl Ui {
         self.display_list = Arc::new(primitives);
     }
 
-    fn push_thumbs(&self, primitives: &mut Vec<Primitive>, id: NodeId, clip: Option<Rect>) {
+    fn push_thumbs(
+        &self,
+        primitives: &mut Vec<Primitive>,
+        id: NodeId,
+        clip: Option<Rect>,
+        opacity: f32,
+    ) {
         let node = &self.nodes[id.index()];
         let layout = &node.style.layout;
         if !layout.overflow_x.scrolls() && !layout.overflow_y.scrolls() {
@@ -401,12 +414,12 @@ impl Ui {
         if layout.overflow_y.scrolls()
             && let Some(rect) = vertical_thumb(port, node.scroll.y, max.y)
         {
-            push_thumb(primitives, rect, clip);
+            push_thumb(primitives, rect, clip, opacity);
         }
         if layout.overflow_x.scrolls()
             && let Some(rect) = horizontal_thumb(port, node.scroll.x, max.x)
         {
-            push_thumb(primitives, rect, clip);
+            push_thumb(primitives, rect, clip, opacity);
         }
     }
 }
@@ -421,11 +434,13 @@ enum Painted {
     Enter {
         id: NodeId,
         clip: Option<Rect>,
+        opacity: f32,
     },
     /// Drawn after the node's descendants so the thumb stays above the content.
     Thumb {
         id: NodeId,
         clip: Option<Rect>,
+        opacity: f32,
     },
 }
 
@@ -436,22 +451,30 @@ fn clip_rect(rect: Rect, clip: Option<Rect>) -> Option<Rect> {
     }
 }
 
-fn push_box(primitives: &mut Vec<Primitive>, rect: Rect, visual: &VisualStyle, clip: Option<Rect>) {
+fn push_box(
+    primitives: &mut Vec<Primitive>,
+    rect: Rect,
+    visual: &VisualStyle,
+    clip: Option<Rect>,
+    opacity: f32,
+) {
     if let Some(shape) = shadow_shape(rect, visual.shadow) {
         primitives.push(Primitive::Shadow(ShadowPrimitive {
             rect: shape,
             corner_radius: visual.corner_radius,
             blur: visual.shadow.blur.max(0.0),
-            color: visual.shadow.color,
+            color: fade_color(visual.shadow.color, opacity),
             clip,
         }));
     }
-    let has_border = visual.border_width > 0.0 && !visual.border_color.is_transparent();
-    if !visual.background.is_transparent() || has_border {
+    let background = fade_background(visual.background, opacity);
+    let border_color = fade_color(visual.border_color, opacity);
+    let has_border = visual.border_width > 0.0 && !border_color.is_transparent();
+    if !background.is_transparent() || has_border {
         primitives.push(Primitive::Quad(QuadPrimitive {
             rect,
-            background: visual.background,
-            border_color: visual.border_color,
+            background,
+            border_color,
             border_width: visual.border_width,
             corner_radius: visual.corner_radius,
             clip,
@@ -459,15 +482,39 @@ fn push_box(primitives: &mut Vec<Primitive>, rect: Rect, visual: &VisualStyle, c
     }
 }
 
-fn push_thumb(primitives: &mut Vec<Primitive>, rect: Rect, clip: Option<Rect>) {
+fn push_thumb(primitives: &mut Vec<Primitive>, rect: Rect, clip: Option<Rect>, opacity: f32) {
     primitives.push(Primitive::Quad(QuadPrimitive {
         rect,
-        background: Background::Solid(scroll::THUMB_COLOR),
+        background: Background::Solid(fade_color(scroll::THUMB_COLOR, opacity)),
         border_color: Color::TRANSPARENT,
         border_width: 0.0,
         corner_radius: 2.0,
         clip,
     }));
+}
+
+fn fade_color(color: Color, opacity: f32) -> Color {
+    Color {
+        a: color.a * opacity,
+        ..color
+    }
+}
+
+fn fade_background(background: Background, opacity: f32) -> Background {
+    match background {
+        Background::Solid(color) => Background::Solid(fade_color(color, opacity)),
+        Background::Linear {
+            from,
+            to,
+            start,
+            end,
+        } => Background::Linear {
+            from: fade_color(from, opacity),
+            to: fade_color(to, opacity),
+            start,
+            end,
+        },
+    }
 }
 
 fn text_leaf(text: &str, style: &TextStyle) -> TextLeaf {

@@ -6,6 +6,7 @@ use cappy::prelude::*;
 
 use super::checklist::ChecklistTab;
 use super::counter::CounterTab;
+use super::motion::MotionTab;
 use super::paint::PaintTab;
 use super::store::{App, Tab};
 use super::style::{Class, class_when};
@@ -29,6 +30,9 @@ pub fn root() -> Element {
             show (:app.tab.get() == Tab::Paint) {
                 PaintTab()
             }
+            show (:app.tab.get() == Tab::Motion) {
+                MotionTab()
+            }
             Text("F12 toggles the repaint overlay. Idle frames repaint nothing.", class = ThemeClass::Muted)
         }
     }
@@ -41,6 +45,7 @@ fn tab_bar(app: App) -> Element {
             { tab(app, Tab::Tiles, "Tiles", "tab-tiles") }
             { tab(app, Tab::Checklist, "Checklist", "tab-checklist") }
             { tab(app, Tab::Paint, "Paint", "tab-paint") }
+            { tab(app, Tab::Motion, "Motion", "tab-motion") }
         }
     }
 }

@@ -233,6 +233,10 @@ impl Ui {
             scroll_target: cappy_layout::Point::default(),
             rect: cappy_layout::Rect::ZERO,
             painted: cappy_layout::Rect::ZERO,
+            translation: cappy_layout::Point::default(),
+            opacity: 1.0,
+            translation_tween: None,
+            opacity_tween: None,
             style_dirty: true,
             paint_dirty: true,
         };
@@ -428,6 +432,9 @@ impl Ui {
         }
         if self.nodes[id.index()].suppressed != suppressed {
             self.nodes[id.index()].suppressed = suppressed;
+            if suppressed {
+                self.cancel_motion(id);
+            }
             let layout_style = self.layout_style_of(id);
             self.layout
                 .set_style(id, &layout_style)
@@ -559,6 +566,10 @@ impl Ui {
         node.suppressed = true;
         node.paint_dirty = false;
         node.style_dirty = false;
+        node.translation = cappy_layout::Point::default();
+        node.opacity = 1.0;
+        node.translation_tween = None;
+        node.opacity_tween = None;
         node.parent = None;
         if self.pressed == Some(id) {
             self.pressed = None;

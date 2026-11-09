@@ -137,6 +137,27 @@ stylesheet! {
             radius: Radius::Lg,
             background: ColorToken::SurfaceAlt,
         }
+        /// Colored box the motion tab fades with [`cappy::Motion::opacity`].
+        MotionOpacity {
+            width: 120,
+            height: 72,
+            radius: Radius::Lg,
+            background: ColorToken::Primary,
+            text_color: ColorToken::OnPrimary,
+            align: Align::Center,
+            justify: Justify::Center,
+        }
+        /// Box the motion tab slides with [`cappy::Motion::translation`].
+        MotionSlide {
+            width: 120,
+            height: 72,
+            radius: Radius::Lg,
+            background: ColorToken::Surface,
+            border_color: ColorToken::Border,
+            border_width: 1,
+            align: Align::Center,
+            justify: Justify::Center,
+        }
     }
 }
 
