@@ -58,7 +58,16 @@ stylesheet! {
                 background: ColorToken::PrimaryHover
             },
         }
-        Grow { flex_grow: 1.0 }
+        /// Takes leftover space in a fixed column. `min_height: 0` lets it shrink below its
+        /// content, which is what gives a nested scroll column a definite height.
+        Grow { flex_grow: 1.0, min_height: 0 }
+        /// Fills leftover height and scrolls when its children are taller.
+        ScrollList {
+            direction: FlexDirection::Column,
+            flex_grow: 1.0,
+            gap: Space::Sm,
+            overflow_y: Overflow::Auto,
+        }
         Count { font_size: FontSize::Xl }
         TileGrid {
             display: Display::Grid,

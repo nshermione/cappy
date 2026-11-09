@@ -27,6 +27,12 @@ pub enum InputEvent {
     },
     /// The pointer left the UI surface.
     PointerLeft,
+    /// Wheel or trackpad scroll at the current pointer position.
+    ///
+    /// Positive values move content right and down, revealing what was above and to the left.
+    Wheel {
+        delta: Point,
+    },
 }
 
 /// Passed to click handlers.

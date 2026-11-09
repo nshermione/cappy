@@ -57,7 +57,12 @@ impl TextPainter {
         scale_factor: f32,
         origin: (u32, u32),
     ) {
-        let clip = clip_bounds(text.rect, scale_factor, origin, target);
+        let visible = match text.clip.and_then(|clip| text.rect.intersection(&clip)) {
+            Some(visible) => visible,
+            None if text.clip.is_some() => Rect::ZERO,
+            None => text.rect,
+        };
+        let clip = clip_bounds(visible, scale_factor, origin, target);
         if clip.is_empty() {
             return;
         }
@@ -186,6 +191,7 @@ mod tests {
             font_size: 16.0,
             line_height: 20.0,
             weight: 400,
+            clip: None,
         }
     }
 

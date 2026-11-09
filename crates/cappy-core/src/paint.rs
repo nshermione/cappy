@@ -16,6 +16,8 @@ pub struct QuadPrimitive {
     pub border_color: Color,
     pub border_width: f32,
     pub corner_radius: f32,
+    /// Ancestor scrollports. `None` means the primitive is not clipped further.
+    pub clip: Option<Rect>,
 }
 
 /// A drop shadow drawn behind a box. `rect` is the shadow shape, already offset and spread.
@@ -25,6 +27,8 @@ pub struct ShadowPrimitive {
     pub corner_radius: f32,
     pub blur: f32,
     pub color: Color,
+    /// Ancestor scrollports. `None` means the primitive is not clipped further.
+    pub clip: Option<Rect>,
 }
 
 impl ShadowPrimitive {
@@ -44,6 +48,8 @@ pub struct TextPrimitive {
     /// Line height in logical pixels.
     pub line_height: f32,
     pub weight: u16,
+    /// Ancestor scrollports. `None` means the primitive is not clipped further.
+    pub clip: Option<Rect>,
 }
 
 /// Where an image is drawn inside its box, and which part of the texture that shows.
@@ -63,6 +69,8 @@ pub struct ImagePrimitive {
     pub pixels: Arc<ImagePixels>,
     pub fit: ObjectFit,
     pub corner_radius: f32,
+    /// Ancestor scrollports. `None` means the primitive is not clipped further.
+    pub clip: Option<Rect>,
 }
 
 impl ImagePrimitive {
@@ -86,11 +94,16 @@ pub enum Primitive {
 
 impl Primitive {
     pub fn bounds(&self) -> Rect {
-        match self {
-            Self::Shadow(shadow) => shadow.ink_bounds(),
-            Self::Quad(quad) => quad.rect,
-            Self::Image(image) => image.rect,
-            Self::Text(text) => text.rect,
+        let (rect, clip) = match self {
+            Self::Shadow(shadow) => (shadow.ink_bounds(), shadow.clip),
+            Self::Quad(quad) => (quad.rect, quad.clip),
+            Self::Image(image) => (image.rect, image.clip),
+            Self::Text(text) => (text.rect, text.clip),
+        };
+        match clip.and_then(|clip| rect.intersection(&clip)) {
+            Some(clipped) => clipped,
+            None if clip.is_some() => Rect::ZERO,
+            None => rect,
         }
     }
 }

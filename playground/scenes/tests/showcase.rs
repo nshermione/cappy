@@ -109,6 +109,27 @@ fn show_keeps_its_count_and_if_starts_over() {
 }
 
 #[test]
+fn checklist_rows_extend_past_the_scrollport() {
+    let mut harness = harness();
+    open_tab(&mut harness, "tab-checklist");
+    let list = harness.rect("tasks");
+    let first = harness.rect("task-0");
+    let last = harness.rect("task-19");
+    assert!(
+        (first.y - list.y).abs() < 1.0,
+        "first row should start at the scrollport, first {first:?} list {list:?}"
+    );
+    assert!(
+        list.bottom() <= 600.0,
+        "the scrollport should stay inside the window, got {list:?}"
+    );
+    assert!(
+        last.bottom() > list.bottom(),
+        "the checklist column should be taller than its scrollport"
+    );
+}
+
+#[test]
 fn for_keeps_a_task_row_when_it_moves() {
     let mut harness = harness();
     open_tab(&mut harness, "tab-checklist");
@@ -126,7 +147,7 @@ fn for_keeps_a_task_row_when_it_moves() {
 
     harness.click("add-task");
     harness.update();
-    assert_eq!(harness.text("task-title-4"), "Added 4");
+    assert_eq!(harness.text("task-title-20"), "Added 20");
 
     harness.click("task-drop-0");
     harness.update();

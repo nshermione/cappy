@@ -38,6 +38,12 @@ pub(crate) fn paint_image(
         return;
     };
     mask.fill_path(&clip_path, FillRule::Winding, true, transform);
+    if let Some(scroll) = image.clip {
+        let scroll = scroll.scale(scale_factor);
+        if let Some(path) = rounded_rect_path(scroll, 0.0) {
+            mask.intersect_path(&path, FillRule::Winding, true, transform);
+        }
+    }
 
     let (scale_x, translate_x) = image_axis(
         dest.x - origin.0,
@@ -117,6 +123,7 @@ mod tests {
             pixels,
             fit: ObjectFit::Contain,
             corner_radius: 0.0,
+            clip: None,
         };
         let mut pixmap = Pixmap::new(40, 24).expect("pixmap");
         paint_image(&mut pixmap.as_mut(), &image, 1.0, (0.0, 0.0));

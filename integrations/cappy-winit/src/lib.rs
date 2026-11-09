@@ -294,6 +294,9 @@ impl ApplicationHandler<Wake> for WinitHost {
             WindowEvent::MouseInput { state, button, .. } => {
                 translate::pointer_button(button, state)
             }
+            WindowEvent::MouseWheel { delta, .. } => {
+                Some(translate::mouse_wheel(delta, window.scale_factor()))
+            }
             WindowEvent::KeyboardInput { event, .. } if is_debug_toggle(&event) => {
                 running.host.toggle_debug_damage();
                 window.request_redraw();

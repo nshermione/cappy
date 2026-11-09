@@ -17,6 +17,7 @@ struct QuadInput {
     @location(3) color_to: vec4<f32>,
     @location(4) shape: vec4<f32>,
     @location(5) gradient: vec4<f32>,
+    @location(6) clip: vec4<f32>,
 }
 
 struct VertexOutput {
@@ -28,6 +29,8 @@ struct VertexOutput {
     @location(4) color_to: vec4<f32>,
     @location(5) shape: vec4<f32>,
     @location(6) gradient: vec4<f32>,
+    @location(7) pixel: vec2<f32>,
+    @location(8) clip: vec4<f32>,
 }
 
 @vertex
@@ -55,6 +58,8 @@ fn vs_quad(@builtin(vertex_index) vertex_index: u32, quad: QuadInput) -> VertexO
     out.color_to = quad.color_to;
     out.shape = quad.shape;
     out.gradient = quad.gradient;
+    out.pixel = pixel;
+    out.clip = quad.clip;
     return out;
 }
 
@@ -88,11 +93,17 @@ fn fill_color(in: VertexOutput) -> vec4<f32> {
     return mix(in.background, in.color_to, t);
 }
 
+fn clip_coverage(pixel: vec2<f32>, clip: vec4<f32>) -> f32 {
+    let end = clip.xy + clip.zw;
+    let inside = step(clip.xy, pixel) * step(pixel, end);
+    return inside.x * inside.y;
+}
+
 fn quad_color(in: VertexOutput) -> vec4<f32> {
     let radius = min(in.shape.y, min(in.half_size.x, in.half_size.y));
     if in.shape.w > 0.5 {
         let distance = rounded_box_distance(in.local, in.half_size, radius);
-        return in.background * shadow_coverage(distance, in.shape.z);
+        return in.background * shadow_coverage(distance, in.shape.z) * clip_coverage(in.pixel, in.clip);
     }
     let coverage = clamp(0.5 - rounded_box_distance(in.local, in.half_size, radius), 0.0, 1.0);
     let border_width = in.shape.x;
@@ -105,7 +116,7 @@ fn quad_color(in: VertexOutput) -> vec4<f32> {
         let border_over_background = in.border_color + color * (1.0 - in.border_color.a);
         color = mix(border_over_background, color, inside);
     }
-    return color * coverage;
+    return color * coverage * clip_coverage(in.pixel, in.clip);
 }
 
 @fragment

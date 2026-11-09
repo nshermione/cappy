@@ -119,7 +119,12 @@ fn batch_texts<'a>(
 }
 
 fn text_area<'a>(buffer: &'a Buffer, text: &TextPrimitive, scale_factor: f32) -> TextArea<'a> {
-    let clip = text.rect.scale(scale_factor).round_out();
+    let visible = match text.clip.and_then(|clip| text.rect.intersection(&clip)) {
+        Some(visible) => visible,
+        None if text.clip.is_some() => cappy_core::Rect::ZERO,
+        None => text.rect,
+    };
+    let clip = visible.scale(scale_factor).round_out();
     let [red, green, blue, alpha] = text.color.to_rgba8();
     TextArea {
         buffer,

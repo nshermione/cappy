@@ -26,14 +26,36 @@ struct ImageInstance {
     uv_rect: [f32; 4],
     radius: f32,
     _padding: [f32; 3],
+    scroll_clip: [f32; 4],
 }
 
 impl ImageInstance {
-    const ATTRIBUTES: [wgpu::VertexAttribute; 4] = wgpu::vertex_attr_array![
-        0 => Float32x4,
-        1 => Float32x4,
-        2 => Float32x4,
-        3 => Float32
+    const ATTRIBUTES: [wgpu::VertexAttribute; 5] = [
+        wgpu::VertexAttribute {
+            offset: 0,
+            shader_location: 0,
+            format: wgpu::VertexFormat::Float32x4,
+        },
+        wgpu::VertexAttribute {
+            offset: 16,
+            shader_location: 1,
+            format: wgpu::VertexFormat::Float32x4,
+        },
+        wgpu::VertexAttribute {
+            offset: 32,
+            shader_location: 2,
+            format: wgpu::VertexFormat::Float32x4,
+        },
+        wgpu::VertexAttribute {
+            offset: 48,
+            shader_location: 3,
+            format: wgpu::VertexFormat::Float32,
+        },
+        wgpu::VertexAttribute {
+            offset: 64,
+            shader_location: 4,
+            format: wgpu::VertexFormat::Float32x4,
+        },
     ];
 
     fn from_primitive(image: &ImagePrimitive, scale_factor: f32) -> Self {
@@ -51,6 +73,7 @@ impl ImageInstance {
             ],
             radius: image.corner_radius * scale_factor,
             _padding: [0.0; 3],
+            scroll_clip: crate::quad::physical_clip(image.clip, scale_factor),
         }
     }
 

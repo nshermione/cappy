@@ -229,6 +229,8 @@ impl Ui {
             alive: true,
             generation: 0,
             bindings: Vec::new(),
+            scroll: cappy_layout::Point::default(),
+            scroll_target: cappy_layout::Point::default(),
             rect: cappy_layout::Rect::ZERO,
             painted: cappy_layout::Rect::ZERO,
             style_dirty: true,
@@ -561,6 +563,13 @@ impl Ui {
         if self.pressed == Some(id) {
             self.pressed = None;
         }
+        if self
+            .scrollbar_drag
+            .as_ref()
+            .is_some_and(|drag| drag.id == id)
+        {
+            self.scrollbar_drag = None;
+        }
         self.display_list_stale = true;
         self.free_nodes.push(id.index() as u32);
     }
@@ -573,6 +582,14 @@ impl Ui {
     }
 
     fn refresh_pointer(&mut self) {
+        if let Some(drag) = self.scrollbar_drag
+            && (!self.is_current(drag.id) || self.nodes[drag.id.index()].suppressed)
+        {
+            self.scrollbar_drag = None;
+        }
+        if self.scrollbar_drag.is_some() {
+            return;
+        }
         if self.pointer.is_some() {
             self.refresh_hover();
         }

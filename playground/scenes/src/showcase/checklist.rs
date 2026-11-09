@@ -12,6 +12,8 @@ const TASKS: [&str; 4] = [
     "Host in winit",
 ];
 
+const EXTRA_TASKS: usize = 16;
+
 #[component]
 pub struct ChecklistTab {}
 
@@ -25,11 +27,18 @@ impl Component for ChecklistTab {
                     id: index as u64,
                     title: (*title).to_owned(),
                 })
+                .chain((0..EXTRA_TASKS).map(|index| {
+                    let id = (TASKS.len() + index) as u64;
+                    Task {
+                        id,
+                        title: format!("Scroll row {id}"),
+                    }
+                }))
                 .collect::<Vec<_>>(),
         );
-        let next_id = reactive(TASKS.len() as u64);
+        let next_id = reactive((TASKS.len() + EXTRA_TASKS) as u64);
         element! {
-            Container(class = ThemeClass::Card) {
+            Container(class = [ThemeClass::Card, Class::Grow]) {
                 Container(class = ThemeClass::Row) {
                     Text("Phase 1 checklist", class = ThemeClass::Subtitle)
                     Container(class = ThemeClass::Btn, key = "add-task", on_click = move |_| {
@@ -48,7 +57,7 @@ impl Component for ChecklistTab {
                 Text("show keeps its count while hidden. if starts over.", class = ThemeClass::Muted),
                 { show_row() }
                 { branch_row() }
-                Container(class = ThemeClass::Column, key = "tasks") {
+                Container(class = Class::ScrollList, key = "tasks") {
                     for (task in :tasks, key = task.id) {
                         { task_row(tasks, reactive(task)) }
                     }

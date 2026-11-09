@@ -291,7 +291,7 @@ impl WindowHost {
         Ok(RedrawResult {
             present,
             cursor: self.take_cursor_change(),
-            settle_at: None,
+            settle_at: self.ui.frame_deadline(Instant::now()),
         })
     }
 

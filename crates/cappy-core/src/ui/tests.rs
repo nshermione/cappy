@@ -1,13 +1,15 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use super::*;
+use crate::paint::Primitive;
 use crate::reactive::{live_signal_count, signal_is_alive, signal_subscriber_count};
 use crate::{
     Application, ButtonState, Context, Element, InputEvent, IntoElement, PointerButton, Signal,
     Slot, div, for_each, fragment, if_else, show, slot, text, text_dyn,
 };
-use cappy_style::{Color, StyleRefinement};
+use cappy_style::{Color, FlexDirection, Overflow, StyleRefinement};
 
 const VIEWPORT: FrameInput = FrameInput {
     physical_width: 800,
@@ -1206,4 +1208,305 @@ fn add_and_drop_returns_resources_to_the_baseline() {
     }
     assert_eq!(ui.resources(), baseline);
     assert!(ui.find_by_key("row-0").is_none());
+}
+
+fn scroll_column(overflow: Overflow) -> Element {
+    div().child(
+        div()
+            .key("scroller")
+            .style(
+                StyleRefinement::default()
+                    .direction(FlexDirection::Column)
+                    .width(120)
+                    .height(80)
+                    .overflow_y(overflow),
+            )
+            .child(
+                div().key("tall").style(
+                    StyleRefinement::default()
+                        .width(100)
+                        .height(200)
+                        .flex_shrink(0.0)
+                        .background(Color::BLACK),
+                ),
+            ),
+    )
+}
+
+fn settle_scroll(ui: &mut Ui, start: Instant) {
+    let mut now = start;
+    for _ in 0..40 {
+        now += Duration::from_millis(16);
+        ui.update_at(VIEWPORT, now);
+        if !ui.needs_update() {
+            return;
+        }
+    }
+    panic!("scroll ease did not reach its target");
+}
+
+#[test]
+fn overflow_auto_clips_layout_eases_to_the_wheel_target_and_stops() {
+    let cx = context();
+    let start = Instant::now();
+    let mut ui = Ui::new(&cx, scroll_column(Overflow::Auto), Theme::light());
+    ui.update_at(VIEWPORT, start);
+    ui.prepare_frame();
+    let scroller = ui.node_rect(ui.find_by_key("scroller").unwrap()).unwrap();
+    let tall_id = ui.find_by_key("tall").unwrap();
+    let before = ui.node_rect(tall_id).unwrap();
+    assert_eq!(scroller.height, 80.0);
+    assert_eq!(before.height, 200.0);
+
+    let clip = ui
+        .display_list()
+        .iter()
+        .find_map(|primitive| match primitive {
+            Primitive::Quad(quad) if quad.rect == before => quad.clip,
+            _ => None,
+        });
+    let clip = clip.expect("the tall box paints a quad");
+    assert_eq!(clip.y, scroller.y);
+    assert_eq!(clip.height, scroller.height);
+    assert!(
+        ui.display_list().iter().any(|primitive| {
+            matches!(
+                primitive,
+                Primitive::Quad(quad)
+                    if quad.rect.width == 4.0 && scroller.contains_rect(&quad.rect)
+            )
+        }),
+        "an overflowing auto box paints a thumb inside the scrollport"
+    );
+
+    let below = Point::new(scroller.x + 8.0, scroller.bottom() + 10.0);
+    assert!(!ui.hit_path(below).contains(&tall_id));
+    let inside = Point::new(scroller.x + 8.0, scroller.y + 8.0);
+    assert!(ui.hit_path(inside).contains(&tall_id));
+
+    ui.handle_event(InputEvent::PointerMoved { position: inside });
+    ui.handle_event(InputEvent::Wheel {
+        delta: Point::new(0.0, -40.0),
+    });
+    ui.update_at(VIEWPORT, start);
+    assert_eq!(ui.node_rect(tall_id).unwrap().y, before.y);
+    assert!(ui.needs_update());
+
+    let stepped = ui.update_at(VIEWPORT, start + Duration::from_millis(32));
+    let moved = before.y - ui.node_rect(tall_id).unwrap().y;
+    assert!(moved > 1.0 && moved < 40.0, "eased {moved} px");
+    match stepped {
+        UpdateOutcome::Redraw {
+            damage: Damage::Regions(regions),
+        } => {
+            assert!(!regions.is_empty());
+            for region in regions {
+                assert_eq!(region.intersection(&scroller), Some(region));
+            }
+        }
+        other => panic!("expected clipped damage, got {other:?}"),
+    }
+
+    settle_scroll(&mut ui, start + Duration::from_millis(32));
+    assert!(!ui.needs_update());
+    assert!((ui.node_rect(tall_id).unwrap().y - (before.y - 40.0)).abs() < 0.5);
+}
+
+#[test]
+fn overflow_hidden_clips_without_scrolling() {
+    let cx = context();
+    let start = Instant::now();
+    let mut ui = Ui::new(&cx, scroll_column(Overflow::Hidden), Theme::light());
+    ui.update_at(VIEWPORT, start);
+    let scroller = ui.node_rect(ui.find_by_key("scroller").unwrap()).unwrap();
+    let tall_id = ui.find_by_key("tall").unwrap();
+    let before = ui.node_rect(tall_id).unwrap().y;
+    let inside = Point::new(scroller.x + 8.0, scroller.y + 8.0);
+    ui.handle_event(InputEvent::PointerMoved { position: inside });
+    ui.handle_event(InputEvent::Wheel {
+        delta: Point::new(0.0, -40.0),
+    });
+    ui.update_at(VIEWPORT, start + Duration::from_millis(32));
+    assert_eq!(ui.node_rect(tall_id).unwrap().y, before);
+    assert!(!ui.needs_update());
+    let below = Point::new(scroller.x + 8.0, scroller.bottom() + 10.0);
+    assert!(!ui.hit_path(below).contains(&tall_id));
+}
+
+#[test]
+fn nested_scroll_gives_leftover_wheel_to_the_parent() {
+    let cx = context();
+    let root = div().child(
+        div()
+            .key("outer")
+            .style(
+                StyleRefinement::default()
+                    .direction(FlexDirection::Column)
+                    .width(140)
+                    .height(120)
+                    .overflow_y(Overflow::Auto),
+            )
+            .children([
+                div()
+                    .key("inner")
+                    .style(
+                        StyleRefinement::default()
+                            .direction(FlexDirection::Column)
+                            .width(120)
+                            .height(80)
+                            .flex_shrink(0.0)
+                            .overflow_y(Overflow::Auto),
+                    )
+                    .child(
+                        div().key("inner-body").style(
+                            StyleRefinement::default()
+                                .height(200)
+                                .flex_shrink(0.0)
+                                .background(Color::BLACK),
+                        ),
+                    ),
+                div().key("outer-body").style(
+                    StyleRefinement::default()
+                        .height(200)
+                        .flex_shrink(0.0)
+                        .background(Color::BLACK),
+                ),
+            ]),
+    );
+    let start = Instant::now();
+    let mut ui = Ui::new(&cx, root, Theme::light());
+    ui.update_at(VIEWPORT, start);
+    let inner = ui.node_rect(ui.find_by_key("inner").unwrap()).unwrap();
+    let inner_body = ui
+        .node_rect(ui.find_by_key("inner-body").unwrap())
+        .unwrap()
+        .y;
+    let outer_body = ui
+        .node_rect(ui.find_by_key("outer-body").unwrap())
+        .unwrap()
+        .y;
+    ui.handle_event(InputEvent::PointerMoved {
+        position: Point::new(inner.x + 4.0, inner.y + 4.0),
+    });
+    ui.handle_event(InputEvent::Wheel {
+        delta: Point::new(0.0, -1000.0),
+    });
+    settle_scroll(&mut ui, start);
+    assert!(!ui.needs_update());
+    let inner_after = ui.node_rect(ui.find_by_key("inner").unwrap()).unwrap().y;
+    let inner_body_after = ui
+        .node_rect(ui.find_by_key("inner-body").unwrap())
+        .unwrap()
+        .y;
+    let outer_body_after = ui
+        .node_rect(ui.find_by_key("outer-body").unwrap())
+        .unwrap()
+        .y;
+    assert!((inner.y - inner_after - 160.0).abs() < 0.5);
+    assert!((inner_body - inner_body_after - 280.0).abs() < 0.5);
+    assert!((outer_body - outer_body_after - 160.0).abs() < 0.5);
+}
+
+#[test]
+fn dragging_the_thumb_scrolls_immediately_and_does_not_click() {
+    let cx = context();
+    let clicks = cx.signal(0i32);
+    let clicked = clicks.clone();
+    let root = div().child(
+        div()
+            .key("scroller")
+            .style(
+                StyleRefinement::default()
+                    .direction(FlexDirection::Column)
+                    .width(120)
+                    .height(80)
+                    .overflow_y(Overflow::Auto),
+            )
+            .child(
+                div()
+                    .key("tall")
+                    .style(
+                        StyleRefinement::default()
+                            .width(120)
+                            .height(200)
+                            .flex_shrink(0.0)
+                            .background(Color::BLACK),
+                    )
+                    .on_click(move |_| clicked.update(|value| *value += 1)),
+            ),
+    );
+    let start = Instant::now();
+    let mut ui = Ui::new(&cx, root, Theme::light());
+    ui.update_at(VIEWPORT, start);
+    ui.prepare_frame();
+    let scroller = ui.node_rect(ui.find_by_key("scroller").unwrap()).unwrap();
+    let tall = ui.find_by_key("tall").unwrap();
+    let before = ui.node_rect(tall).unwrap().y;
+    let thumb = ui
+        .display_list()
+        .iter()
+        .find_map(|primitive| match primitive {
+            Primitive::Quad(quad)
+                if quad.rect.width == 4.0 && scroller.contains_rect(&quad.rect) =>
+            {
+                Some(quad.rect)
+            }
+            _ => None,
+        })
+        .expect("thumb");
+    let on_thumb = Point::new(thumb.x + thumb.width * 0.5, thumb.y + thumb.height * 0.5);
+
+    ui.handle_event(InputEvent::PointerMoved { position: on_thumb });
+    ui.handle_event(InputEvent::PointerButton {
+        button: PointerButton::Primary,
+        state: ButtonState::Pressed,
+    });
+    ui.handle_event(InputEvent::PointerMoved {
+        position: Point::new(on_thumb.x, on_thumb.y + 20.0),
+    });
+    ui.update_at(VIEWPORT, start);
+    let dragged = before - ui.node_rect(tall).unwrap().y;
+    assert!(dragged > 1.0, "dragged {dragged}");
+    assert!(
+        !ui.needs_update(),
+        "a drag writes the offset, it does not ease"
+    );
+
+    ui.handle_event(InputEvent::PointerButton {
+        button: PointerButton::Primary,
+        state: ButtonState::Released,
+    });
+    assert_eq!(clicks.get_untracked(), 0);
+
+    let on_track = Point::new(scroller.right() - 4.0, scroller.bottom() - 4.0);
+    ui.handle_event(InputEvent::PointerMoved { position: on_track });
+    ui.handle_event(InputEvent::PointerButton {
+        button: PointerButton::Primary,
+        state: ButtonState::Pressed,
+    });
+    ui.update_at(VIEWPORT, start);
+    assert!(ui.node_rect(tall).unwrap().y < before - dragged);
+    ui.handle_event(InputEvent::PointerMoved {
+        position: Point::new(on_track.x, scroller.bottom() + 80.0),
+    });
+    ui.update_at(VIEWPORT, start);
+    assert!((ui.node_rect(tall).unwrap().y - (before - 120.0)).abs() < 0.5);
+    ui.handle_event(InputEvent::PointerButton {
+        button: PointerButton::Primary,
+        state: ButtonState::Released,
+    });
+    assert_eq!(clicks.get_untracked(), 0);
+
+    ui.handle_event(InputEvent::PointerMoved {
+        position: Point::new(scroller.x + 8.0, scroller.y + 8.0),
+    });
+    ui.handle_event(InputEvent::PointerButton {
+        button: PointerButton::Primary,
+        state: ButtonState::Pressed,
+    });
+    ui.handle_event(InputEvent::PointerButton {
+        button: PointerButton::Primary,
+        state: ButtonState::Released,
+    });
+    assert_eq!(clicks.get_untracked(), 1);
 }

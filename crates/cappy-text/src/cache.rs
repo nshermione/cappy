@@ -130,6 +130,7 @@ mod tests {
             font_size: 14.0,
             line_height: 20.0,
             weight: 400,
+            clip: None,
         }
     }
 

@@ -96,6 +96,7 @@ mod tests {
             border_color: Color::TRANSPARENT,
             border_width: 0.0,
             corner_radius: 0.0,
+            clip: None,
         })
     }
 
@@ -107,6 +108,7 @@ mod tests {
             font_size: 10.0,
             line_height: 10.0,
             weight: 400,
+            clip: None,
         })
     }
 

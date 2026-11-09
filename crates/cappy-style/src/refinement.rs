@@ -2,7 +2,7 @@
 
 use crate::{
     Align, BackgroundValue, ColorValue, Dimension, Display, Edges, FlexDirection, FontWeight,
-    Justify, Length, ShadowValue, Style, Tokens,
+    Justify, Length, Overflow, ShadowValue, Style, Tokens,
 };
 
 /// A partial style. Every field is optional; `None` keeps whatever an earlier layer set.
@@ -33,6 +33,8 @@ pub struct StyleRefinement {
     pub flex_grow: Option<f32>,
     pub flex_shrink: Option<f32>,
     pub grid_columns: Option<u16>,
+    pub overflow_x: Option<Overflow>,
+    pub overflow_y: Option<Overflow>,
     pub background: Option<BackgroundValue>,
     pub border_color: Option<ColorValue>,
     pub border_width: Option<Length>,
@@ -147,6 +149,8 @@ impl StyleRefinement {
         flex_grow => flex_grow: f32,
         flex_shrink => flex_shrink: f32,
         grid_columns => grid_columns: u16,
+        overflow_x => overflow_x: Overflow,
+        overflow_y => overflow_y: Overflow,
         /// Line height as a multiple of the font size.
         line_height => line_height: f32,
     }
@@ -155,6 +159,12 @@ impl StyleRefinement {
         padding_top, padding_right, padding_bottom, padding_left);
     sided_setters!(margin, margin_x, margin_y =>
         margin_top, margin_right, margin_bottom, margin_left);
+
+    /// Sets [`Overflow`] on both axes.
+    #[must_use]
+    pub fn overflow(self, value: Overflow) -> Self {
+        self.overflow_x(value).overflow_y(value)
+    }
 
     /// Sets width and height together.
     #[must_use]
@@ -170,7 +180,7 @@ impl StyleRefinement {
             padding_top, padding_right, padding_bottom, padding_left,
             margin_top, margin_right, margin_bottom, margin_left,
             width, height, min_width, min_height, max_width, max_height,
-            flex_grow, flex_shrink, grid_columns,
+            flex_grow, flex_shrink, grid_columns, overflow_x, overflow_y,
             background, border_color, border_width, corner_radius, shadow,
             text_color, font_size, line_height, font_weight,
         );
@@ -222,6 +232,8 @@ impl StyleRefinement {
         assign(&mut layout.flex_grow, self.flex_grow);
         assign(&mut layout.flex_shrink, self.flex_shrink);
         assign(&mut layout.grid_columns, self.grid_columns);
+        assign(&mut layout.overflow_x, self.overflow_x);
+        assign(&mut layout.overflow_y, self.overflow_y);
     }
 
     fn apply_visual(&self, style: &mut Style, tokens: &Tokens) {

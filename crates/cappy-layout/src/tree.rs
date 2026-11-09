@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::hash::Hash;
 
-use cappy_style::{Align, Display, Extent, FlexDirection, Justify, LayoutStyle};
+use cappy_style::{Align, Display, Edges, Extent, FlexDirection, Justify, LayoutStyle, Overflow};
 use taffy::prelude::{
     AvailableSpace, Dimension as TaffyDimension, LengthPercentage, LengthPercentageAuto, TaffyAuto,
     TaffyTree,
@@ -210,6 +210,30 @@ impl<K: Copy + Eq + Hash + fmt::Debug> LayoutTree<K> {
             .map_err(engine_error)
     }
 
+    /// Scroll extent of `key` from the last [`LayoutTree::compute`].
+    ///
+    /// `content.right` and `content.bottom` are the reachable content edges measured from the
+    /// padding-box origin. [`ScrollableOverflow::max_offset`] is how far the content can move.
+    pub fn scrollable_overflow(&self, key: K) -> Result<ScrollableOverflow, LayoutError> {
+        let layout = self.taffy.layout(self.node(key)?).map_err(engine_error)?;
+        let content = layout.scrollable_overflow_rect;
+        Ok(ScrollableOverflow {
+            size: Size::new(layout.size.width, layout.size.height),
+            border: Edges {
+                top: layout.border.top,
+                right: layout.border.right,
+                bottom: layout.border.bottom,
+                left: layout.border.left,
+            },
+            content: Edges {
+                top: content.top,
+                right: content.right,
+                bottom: content.bottom,
+                left: content.left,
+            },
+        })
+    }
+
     /// Rectangle of `key` relative to its parent, from the last [`LayoutTree::compute`].
     pub fn local_rect(&self, key: K) -> Result<Rect, LayoutError> {
         let layout = self.taffy.layout(self.node(key)?).map_err(engine_error)?;
@@ -263,13 +287,13 @@ fn measure_leaf(
 }
 
 fn to_taffy_style(style: &LayoutStyle) -> taffy::Style {
-    let edges = |edges: &cappy_style::Edges| taffy::Rect {
+    let edges = |edges: &Edges| taffy::Rect {
         left: LengthPercentage::length(edges.left),
         right: LengthPercentage::length(edges.right),
         top: LengthPercentage::length(edges.top),
         bottom: LengthPercentage::length(edges.bottom),
     };
-    let margin = |edges: &cappy_style::Edges| taffy::Rect {
+    let margin = |edges: &Edges| taffy::Rect {
         left: LengthPercentageAuto::length(edges.left),
         right: LengthPercentageAuto::length(edges.right),
         top: LengthPercentageAuto::length(edges.top),
@@ -325,6 +349,10 @@ fn to_taffy_style(style: &LayoutStyle) -> taffy::Style {
         },
         flex_grow: style.flex_grow,
         flex_shrink: style.flex_shrink,
+        overflow: taffy::Point {
+            x: taffy_overflow(style.overflow_x),
+            y: taffy_overflow(style.overflow_y),
+        },
         ..Default::default()
     };
     if style.display == Display::Grid && style.grid_columns > 0 {
@@ -339,6 +367,35 @@ fn dimension(extent: Extent) -> TaffyDimension {
         Extent::Auto => TaffyDimension::AUTO,
         Extent::Px(value) => TaffyDimension::length(value),
         Extent::Percent(value) => TaffyDimension::percent(value / 100.0),
+    }
+}
+
+fn taffy_overflow(overflow: Overflow) -> taffy::Overflow {
+    match overflow {
+        Overflow::Visible => taffy::Overflow::Visible,
+        // `Auto` reserves no scrollbar gutter. The runtime draws an overlay thumb.
+        Overflow::Hidden | Overflow::Auto => taffy::Overflow::Hidden,
+    }
+}
+
+/// Content reach of one node after layout.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ScrollableOverflow {
+    pub size: Size,
+    pub border: Edges,
+    /// Edges of the scrollable overflow rectangle. `right` and `bottom` are the reachable extent.
+    pub content: Edges,
+}
+
+impl ScrollableOverflow {
+    /// How far content can move before the far edge meets the padding box.
+    pub fn max_offset(self) -> crate::Point {
+        let port_width = (self.size.width - self.border.horizontal()).max(0.0);
+        let port_height = (self.size.height - self.border.vertical()).max(0.0);
+        crate::Point::new(
+            (self.content.right - port_width).max(0.0),
+            (self.content.bottom - port_height).max(0.0),
+        )
     }
 }
 
@@ -381,6 +438,63 @@ mod tests {
             line_height: 14.0,
             weight: 400,
         }
+    }
+
+    #[test]
+    fn a_fixed_column_clips_a_taller_child_and_reports_the_leftover() {
+        let mut tree = LayoutTree::new();
+        let mut parent = fixed(100.0, 40.0);
+        parent.direction = FlexDirection::Column;
+        parent.overflow_y = Overflow::Auto;
+        let mut child = fixed(80.0, 90.0);
+        child.flex_shrink = 0.0;
+        tree.insert(0, &parent).unwrap();
+        tree.insert(1, &child).unwrap();
+        tree.set_children(0, &[1]).unwrap();
+        tree.compute(
+            0,
+            Size::new(200.0, 200.0),
+            &mut ApproximateTextMeasurer::default(),
+        )
+        .unwrap();
+
+        assert_eq!(tree.local_rect(0).unwrap().height, 40.0);
+        assert_eq!(tree.local_rect(1).unwrap().height, 90.0);
+        assert_eq!(tree.scrollable_overflow(0).unwrap().max_offset().y, 50.0);
+    }
+
+    #[test]
+    fn a_scroll_column_shrinks_inside_a_parent_that_can_shrink() {
+        let mut tree = LayoutTree::new();
+        let mut root = column(0.0, 0.0);
+        root.width = Extent::Px(200.0);
+        root.height = Extent::Px(100.0);
+        let mut card = column(0.0, 0.0);
+        card.flex_grow = 1.0;
+        card.min_height = Extent::Px(0.0);
+        let mut list = column(0.0, 0.0);
+        list.flex_grow = 1.0;
+        list.overflow_y = Overflow::Auto;
+        let mut child = fixed(80.0, 180.0);
+        child.flex_shrink = 0.0;
+
+        tree.insert(0, &root).unwrap();
+        tree.insert(1, &card).unwrap();
+        tree.insert(2, &list).unwrap();
+        tree.insert(3, &child).unwrap();
+        tree.set_children(0, &[1]).unwrap();
+        tree.set_children(1, &[2]).unwrap();
+        tree.set_children(2, &[3]).unwrap();
+        tree.compute(
+            0,
+            Size::new(200.0, 200.0),
+            &mut ApproximateTextMeasurer::default(),
+        )
+        .unwrap();
+
+        assert_eq!(tree.local_rect(0).unwrap().height, 100.0);
+        assert!(tree.local_rect(2).unwrap().height < 180.0);
+        assert!(tree.scrollable_overflow(2).unwrap().max_offset().y > 0.0);
     }
 
     #[test]

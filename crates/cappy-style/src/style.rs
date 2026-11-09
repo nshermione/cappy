@@ -29,6 +29,30 @@ pub enum Justify {
     SpaceEvenly,
 }
 
+/// Whether a box shows content outside its bounds, and whether the wheel can move that content.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Overflow {
+    /// Children paint outside the box and the box grows with them.
+    #[default]
+    Visible,
+    /// Children are clipped to the box. The wheel does not move them.
+    Hidden,
+    /// Children are clipped. The wheel moves them when they are larger than the box.
+    Auto,
+}
+
+impl Overflow {
+    /// Content outside the box is clipped.
+    pub const fn clips(self) -> bool {
+        matches!(self, Self::Hidden | Self::Auto)
+    }
+
+    /// The wheel may change this box's scroll offset.
+    pub const fn scrolls(self) -> bool {
+        matches!(self, Self::Auto)
+    }
+}
+
 /// Placement of children along the cross axis.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Align {
@@ -106,6 +130,15 @@ pub struct LayoutStyle {
     pub flex_shrink: f32,
     /// Number of equal grid columns when `display` is [`Display::Grid`].
     pub grid_columns: u16,
+    pub overflow_x: Overflow,
+    pub overflow_y: Overflow,
+}
+
+impl LayoutStyle {
+    /// Either axis clips children to this box.
+    pub const fn clips(&self) -> bool {
+        self.overflow_x.clips() || self.overflow_y.clips()
+    }
 }
 
 /// Properties that only affect painting.

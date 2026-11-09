@@ -6,4 +6,4 @@ mod tree;
 
 pub use geometry::{Point, Rect, Size};
 pub use text::{ApproximateTextMeasurer, TextMeasureRequest, TextMeasurer};
-pub use tree::{LayoutError, LayoutTree, TextLeaf};
+pub use tree::{LayoutError, LayoutTree, ScrollableOverflow, TextLeaf};

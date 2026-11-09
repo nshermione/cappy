@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use cappy_layout::Rect;
+use cappy_layout::{Point, Rect};
 use cappy_style::{ClassName, InteractionState, Style, StyleRefinement, Stylesheet};
 
 use crate::bitmap::{ImagePixels, ObjectFit};
@@ -77,6 +77,10 @@ pub(crate) struct Node {
     /// Bumped when this slot is mounted again after dispose.
     pub(crate) generation: u32,
     pub(crate) bindings: Vec<crate::reactive::BindingId>,
+    /// Distance the content is shifted, in logical pixels. Positive moves content up and left.
+    pub(crate) scroll: Point,
+    /// Where [`Self::scroll`] is easing toward.
+    pub(crate) scroll_target: Point,
     /// Absolute rectangle in logical pixels from the last layout.
     pub(crate) rect: Rect,
     /// Ink painted last frame, including shadow that falls outside [`Self::rect`].

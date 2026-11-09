@@ -6,9 +6,11 @@ pub(crate) mod flow;
 mod input;
 mod node;
 mod passes;
+mod scroll;
 
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Instant;
 
 use cappy_layout::{ApproximateTextMeasurer, LayoutTree, Point, Rect, Size, TextMeasurer};
 use cappy_style::{Style, Theme};
@@ -116,10 +118,17 @@ pub struct Ui {
     display_list_stale: bool,
     style_dirty: bool,
     layout_dirty: bool,
+    /// Child positions must be rewritten from the last taffy result. Scroll changes this
+    /// without running taffy again.
+    positions_dirty: bool,
     paint_dirty: bool,
+    /// Instant of the previous [`Ui::update`], used to ease scroll offsets.
+    updated_at: Option<Instant>,
     pointer: Option<Point>,
     hovered: Vec<NodeId>,
     pressed: Option<NodeId>,
+    /// Thumb or track drag. The offset follows the pointer until the button is released.
+    scrollbar_drag: Option<input::ScrollbarDrag>,
 }
 
 impl Ui {
@@ -154,10 +163,13 @@ impl Ui {
             display_list_stale: true,
             style_dirty: true,
             layout_dirty: true,
+            positions_dirty: true,
             paint_dirty: true,
+            updated_at: None,
             pointer: None,
             hovered: Vec::new(),
             pressed: None,
+            scrollbar_drag: None,
         };
         ui.root = ui.mount(root.into_element(), None);
         ui.add_binding(ui.root, BindingKind::Theme);
@@ -205,11 +217,32 @@ impl Ui {
             || !self.queue.is_empty()
             || self.style_dirty
             || self.layout_dirty
+            || self.positions_dirty
             || self.paint_dirty
+            || self.scroll_animating()
+    }
+
+    /// When the host should draw the next scroll-ease frame. `None` once every offset rests.
+    pub fn frame_deadline(&self, now: Instant) -> Option<Instant> {
+        self.scroll_animating()
+            .then_some(now + scroll::SCROLL_FRAME)
+    }
+
+    fn scroll_animating(&self) -> bool {
+        self.nodes
+            .iter()
+            .any(|node| node.alive && scroll::scrolling(node.scroll, node.scroll_target))
     }
 
     /// Applies pending signal changes, restyles, relayouts and collects damage.
     pub fn update(&mut self, input: FrameInput) -> UpdateOutcome {
+        self.update_at(input, Instant::now())
+    }
+
+    /// [`Ui::update`] at `now`, so tests can step the scroll ease without waiting.
+    pub(crate) fn update_at(&mut self, input: FrameInput, now: Instant) -> UpdateOutcome {
+        let dt = scroll::scroll_dt(self.updated_at, now);
+        self.updated_at = Some(now);
         self.apply_viewport(input);
         self.process_bindings();
         self.resolve_styles();
@@ -217,10 +250,12 @@ impl Ui {
         // Hover changes caused by layout can restyle nodes again.
         self.resolve_styles();
         self.run_layout();
+        self.step_scroll(dt);
+        self.run_layout();
         self.collect_paint_damage();
         self.rebuild_display_list();
         self.reclaim_unused();
-        if self.damage.is_empty() {
+        if self.damage.is_empty() && !self.scroll_animating() {
             UpdateOutcome::Idle
         } else {
             UpdateOutcome::Redraw {
@@ -353,6 +388,13 @@ impl Ui {
         self.hovered.shrink_to_fit();
         if self.pressed.is_some_and(|id| !self.is_current(id)) {
             self.pressed = None;
+        }
+        if self
+            .scrollbar_drag
+            .as_ref()
+            .is_some_and(|drag| !self.is_current(drag.id))
+        {
+            self.scrollbar_drag = None;
         }
         crate::reactive::reclaim_unused_slots(&self.queue.runtime);
     }

@@ -188,6 +188,7 @@ mod tests {
             border_color: Color::TRANSPARENT,
             border_width: 0.0,
             corner_radius: 0.0,
+            clip: None,
         })
     }
 

@@ -4,7 +4,7 @@
 use cappy_core::rounded_box_distance;
 use cappy_core::{Background, BoxShadow, Color, QuadPrimitive, Rect, ShadowPrimitive};
 use tiny_skia::{
-    FillRule, GradientStop, LinearGradient, Paint, Path, PathBuilder, PixmapMut, SpreadMode,
+    FillRule, GradientStop, LinearGradient, Mask, Paint, Path, PathBuilder, PixmapMut, SpreadMode,
     Transform,
 };
 
@@ -30,11 +30,22 @@ pub(crate) fn paint_quad(
         .min(rect.height / 2.0)
         .max(0.0);
     let transform = Transform::from_translate(-origin.0, -origin.1);
+    let mask = quad
+        .clip
+        .and_then(|clip| clip_mask(target, clip, scale_factor, origin));
 
     if !quad.background.is_transparent()
         && let Some(path) = rounded_rect_path(rect, radius)
     {
-        fill_background(target, &path, quad.background, rect, transform, origin);
+        fill_background(
+            target,
+            &path,
+            quad.background,
+            rect,
+            transform,
+            origin,
+            mask.as_ref(),
+        );
     }
 
     let border_width = quad.border_width * scale_factor;
@@ -48,6 +59,7 @@ pub(crate) fn paint_quad(
             quad.border_color,
             FillRule::EvenOdd,
             transform,
+            mask.as_ref(),
         );
     }
 }
@@ -92,6 +104,16 @@ pub(crate) fn paint_shadow(
         for x in left..right {
             let world_x = x as f32 + 0.5 + origin.0;
             let world_y = y as f32 + 0.5 + origin.1;
+            if let Some(clip) = shadow.clip {
+                let clip = clip.scale(scale_factor);
+                if world_x < clip.x
+                    || world_y < clip.y
+                    || world_x >= clip.right()
+                    || world_y >= clip.bottom()
+                {
+                    continue;
+                }
+            }
             let distance = rounded_box_distance(
                 world_x - center_x,
                 world_y - center_y,
@@ -116,6 +138,25 @@ pub(crate) fn rounded_rect_path(rect: Rect, radius: f32) -> Option<Path> {
     builder.finish()
 }
 
+fn clip_mask(
+    target: &PixmapMut<'_>,
+    clip: Rect,
+    scale_factor: f32,
+    origin: (f32, f32),
+) -> Option<Mask> {
+    let clip = clip.scale(scale_factor);
+    let mut mask = Mask::new(target.width(), target.height())?;
+    let local = Rect::new(
+        clip.x - origin.0,
+        clip.y - origin.1,
+        clip.width,
+        clip.height,
+    );
+    let path = rounded_rect_path(local, 0.0)?;
+    mask.fill_path(&path, FillRule::Winding, true, Transform::identity());
+    Some(mask)
+}
+
 fn fill_background(
     target: &mut PixmapMut<'_>,
     path: &Path,
@@ -123,9 +164,10 @@ fn fill_background(
     rect: Rect,
     transform: Transform,
     origin: (f32, f32),
+    mask: Option<&Mask>,
 ) {
     match background {
-        Background::Solid(color) => fill(target, path, color, FillRule::Winding, transform),
+        Background::Solid(color) => fill(target, path, color, FillRule::Winding, transform, mask),
         Background::Linear {
             from,
             to,
@@ -147,7 +189,7 @@ fn fill_background(
             let Some(shader) =
                 LinearGradient::new(start, end, stops, SpreadMode::Pad, Transform::identity())
             else {
-                fill(target, path, from, FillRule::Winding, transform);
+                fill(target, path, from, FillRule::Winding, transform, mask);
                 return;
             };
             let paint = Paint {
@@ -155,7 +197,7 @@ fn fill_background(
                 anti_alias: true,
                 ..Paint::default()
             };
-            target.fill_path(path, &paint, FillRule::Winding, transform, None);
+            target.fill_path(path, &paint, FillRule::Winding, transform, mask);
         }
     }
 }
@@ -171,12 +213,13 @@ fn fill(
     color: Color,
     fill_rule: FillRule,
     transform: Transform,
+    mask: Option<&Mask>,
 ) {
     let [red, green, blue, alpha] = color.to_rgba8();
     let mut paint = Paint::default();
     paint.set_color_rgba8(red, green, blue, alpha);
     paint.anti_alias = true;
-    target.fill_path(path, &paint, fill_rule, transform, None);
+    target.fill_path(path, &paint, fill_rule, transform, mask);
 }
 
 /// The outer shape minus the inner one; filled with [`FillRule::EvenOdd`]. When the border is
@@ -259,6 +302,7 @@ mod tests {
             border_color: Color::rgb(255, 0, 0),
             border_width: 4.0,
             corner_radius: radius,
+            clip: None,
         }
     }
 
@@ -325,6 +369,7 @@ mod tests {
                 corner_radius: 0.0,
                 blur: 0.0,
                 color: Color::rgba(0, 0, 0, 255),
+                clip: None,
             },
             1.0,
             (0.0, 0.0),
