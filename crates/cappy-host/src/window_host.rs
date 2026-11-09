@@ -21,6 +21,11 @@ pub struct WindowOptions {
     pub logical_size: (f64, f64),
     /// Outline repainted regions; toggled at runtime with F12.
     pub debug_damage: bool,
+    /// Log each presented frame's repaint regions. Off unless a host opts in.
+    pub log_frames: bool,
+    /// Sample this process's memory and log it. Off unless a host opts in.
+    /// Debug builds only; release builds record nothing either way.
+    pub log_memory: bool,
     /// Backend to draw with; `None` picks the first one compiled in (GPU before CPU).
     /// The `CAPPY_RENDERER` environment variable overrides this.
     pub renderer: Option<RendererKind>,
@@ -34,6 +39,8 @@ impl Default for WindowOptions {
             title: DEFAULT_TITLE.to_owned(),
             logical_size: DEFAULT_LOGICAL_SIZE,
             debug_damage: false,
+            log_frames: false,
+            log_memory: false,
             renderer: None,
             fonts: cappy_text::FontOptions::new(),
         }
@@ -57,6 +64,21 @@ impl WindowOptions {
     #[must_use]
     pub fn with_debug_damage(mut self, enabled: bool) -> Self {
         self.debug_damage = enabled;
+        self
+    }
+
+    /// Logs one line per presented frame: how many regions were repainted and the damage.
+    #[must_use]
+    pub fn with_log_frames(mut self, enabled: bool) -> Self {
+        self.log_frames = enabled;
+        self
+    }
+
+    /// Samples process memory at startup stages and whenever the census changes.
+    /// Has no effect in release builds.
+    #[must_use]
+    pub fn with_log_memory(mut self, enabled: bool) -> Self {
+        self.log_memory = enabled;
         self
     }
 
@@ -112,6 +134,12 @@ pub struct WindowHost {
     /// Last size actually submitted to the GPU.
     presented: Option<PresentedFrame>,
     frames: u64,
+    /// When set, a motion or scroll frame is already scheduled. Pointer events wait for it
+    /// instead of running a second update, which freezes the window while the cursor moves
+    /// over a looping animation.
+    animation_due: Option<Instant>,
+    /// When set, each presented frame writes a repaint line. Off by default.
+    log_frames: bool,
     /// Previous resource snapshot, so the memory trace logs only when something changed.
     #[cfg(debug_assertions)]
     traced_resources: Option<ResourceCensus>,
@@ -134,6 +162,8 @@ impl WindowHost {
             last_resize: None,
             presented: None,
             frames: 0,
+            animation_due: None,
+            log_frames: false,
             #[cfg(debug_assertions)]
             traced_resources: None,
             #[cfg(debug_assertions)]
@@ -162,6 +192,10 @@ impl WindowHost {
         self.renderer.set_debug_damage(enabled);
     }
 
+    pub fn set_log_frames(&mut self, enabled: bool) {
+        self.log_frames = enabled;
+    }
+
     pub fn toggle_debug_damage(&mut self) {
         let enabled = self.renderer.debug_damage();
         self.renderer.set_debug_damage(!enabled);
@@ -178,7 +212,13 @@ impl WindowHost {
     }
 
     /// Runs pending updates at the last known size. Returns whether a redraw is needed.
+    ///
+    /// A frame already scheduled for motion or scroll applies this input. Updating again here
+    /// would restyle and rebuild the display list on every cursor event.
     fn settle(&mut self) -> bool {
+        if self.animation_due.is_some() {
+            return false;
+        }
         if !self.ui.needs_update() {
             return false;
         }
@@ -279,19 +319,23 @@ impl WindowHost {
             });
         }
         self.frames += 1;
-        if let PresentOutcome::Presented { repainted } = present {
-            log::debug!(
-                "frame {}: repainted {repainted} region(s), damage {:?}",
-                self.frames,
-                frame.damage
-            );
+        if self.log_frames {
+            if let PresentOutcome::Presented { repainted } = present {
+                log::info!(
+                    "frame {}: repainted {repainted} region(s), damage {:?}",
+                    self.frames,
+                    frame.damage
+                );
+            }
         }
         #[cfg(debug_assertions)]
         self.trace_memory();
+        let settle_at = self.ui.frame_deadline(Instant::now());
+        self.animation_due = settle_at;
         Ok(RedrawResult {
             present,
             cursor: self.take_cursor_change(),
-            settle_at: self.ui.frame_deadline(Instant::now()),
+            settle_at,
         })
     }
 
@@ -305,6 +349,9 @@ impl WindowHost {
     /// this census does not hold.
     #[cfg(debug_assertions)]
     fn trace_memory(&mut self) {
+        if !log_memory_enabled() {
+            return;
+        }
         let resources = self.ui.resources();
         let memory = process_memory();
         let resources_changed = self.traced_resources.as_ref() != Some(&resources);
@@ -360,15 +407,42 @@ impl WindowHost {
     }
 }
 
+/// Turns process-memory sampling on or off.
+///
+/// [`memory_mark`] and the host census both read this. It starts off. A window sets it from
+/// [`WindowOptions::log_memory`] before the first sample. Release builds ignore it.
+pub fn set_log_memory(enabled: bool) {
+    #[cfg(debug_assertions)]
+    {
+        use std::sync::atomic::Ordering;
+        LOG_MEMORY.store(enabled, Ordering::Relaxed);
+    }
+    #[cfg(not(debug_assertions))]
+    let _ = enabled;
+}
+
+#[cfg(debug_assertions)]
+fn log_memory_enabled() -> bool {
+    use std::sync::atomic::Ordering;
+    LOG_MEMORY.load(Ordering::Relaxed)
+}
+
+#[cfg(debug_assertions)]
+static LOG_MEMORY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Logs this process's private bytes at `stage`, and how much they moved since the previous mark.
 ///
-/// Debug builds only. The delta is in KiB, same as the totals. Release builds record nothing.
+/// Debug builds only, and only while [`set_log_memory`] is on. The delta is in KiB, same as the
+/// totals. Release builds record nothing and do not ask the OS.
 #[cfg(not(debug_assertions))]
 pub fn memory_mark(_stage: &str) {}
 
 #[cfg(debug_assertions)]
 pub fn memory_mark(stage: &str) {
     use std::sync::atomic::{AtomicUsize, Ordering};
+    if !log_memory_enabled() {
+        return;
+    }
     static PREVIOUS: AtomicUsize = AtomicUsize::new(0);
     let Some((private_bytes, working_set)) = process_memory() else {
         return;

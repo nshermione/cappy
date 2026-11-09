@@ -97,6 +97,7 @@ mod tests {
             border_width: 0.0,
             corner_radius: 0.0,
             clip: None,
+            spin: cappy_core::Spin::NONE,
         })
     }
 

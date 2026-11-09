@@ -2,7 +2,10 @@
 //! background fills the whole shape and the border is painted over it as a ring.
 
 use cappy_core::rounded_box_distance;
-use cappy_core::{Background, BoxShadow, Color, QuadPrimitive, Rect, ShadowPrimitive};
+use cappy_core::{
+    Background, BoxShadow, Color, Point, QuadPrimitive, Rect, ShadowPrimitive, Spin, spun_aabb,
+    unspin_point,
+};
 use tiny_skia::{
     FillRule, GradientStop, LinearGradient, Mask, Paint, Path, PathBuilder, PixmapMut, SpreadMode,
     Transform,
@@ -29,7 +32,14 @@ pub(crate) fn paint_quad(
         .min(rect.width / 2.0)
         .min(rect.height / 2.0)
         .max(0.0);
-    let transform = Transform::from_translate(-origin.0, -origin.1);
+    let mut transform = Transform::from_translate(-origin.0, -origin.1);
+    if !quad.spin.is_none() {
+        transform = transform.pre_concat(Transform::from_rotate_at(
+            quad.spin.radians.to_degrees(),
+            quad.spin.pivot.x * scale_factor,
+            quad.spin.pivot.y * scale_factor,
+        ));
+    }
     let mask = quad
         .clip
         .and_then(|clip| clip_mask(target, clip, scale_factor, origin));
@@ -43,7 +53,6 @@ pub(crate) fn paint_quad(
             quad.background,
             rect,
             transform,
-            origin,
             mask.as_ref(),
         );
     }
@@ -85,7 +94,14 @@ pub(crate) fn paint_shadow(
         ..BoxShadow::NONE
     }
     .blur_extent();
-    let ink = shape.inflate(extent + 1.0);
+    let spin = Spin {
+        pivot: Point::new(
+            shadow.spin.pivot.x * scale_factor,
+            shadow.spin.pivot.y * scale_factor,
+        ),
+        radians: shadow.spin.radians,
+    };
+    let ink = spun_aabb(shape.inflate(extent + 1.0), spin);
     let left = (ink.x - origin.0).floor().max(0.0) as i32;
     let top = (ink.y - origin.1).floor().max(0.0) as i32;
     let right = ((ink.right() - origin.0).ceil() as i32).min(target.width() as i32);
@@ -114,9 +130,16 @@ pub(crate) fn paint_shadow(
                     continue;
                 }
             }
+            let (sample_x, sample_y) = if spin.is_none() {
+                (world_x, world_y)
+            } else {
+                let local =
+                    unspin_point(Point::new(world_x, world_y), spin.pivot, 1.0, spin.radians);
+                (local.x, local.y)
+            };
             let distance = rounded_box_distance(
-                world_x - center_x,
-                world_y - center_y,
+                sample_x - center_x,
+                sample_y - center_y,
                 half_width,
                 half_height,
                 radius,
@@ -163,7 +186,6 @@ fn fill_background(
     background: Background,
     rect: Rect,
     transform: Transform,
-    origin: (f32, f32),
     mask: Option<&Mask>,
 ) {
     match background {
@@ -174,14 +196,16 @@ fn fill_background(
             start,
             end,
         } => {
-            let start = tiny_skia::Point::from_xy(
-                rect.x + start.x * rect.width - origin.0,
-                rect.y + start.y * rect.height - origin.1,
+            let mut start = tiny_skia::Point::from_xy(
+                rect.x + start.x * rect.width,
+                rect.y + start.y * rect.height,
             );
-            let end = tiny_skia::Point::from_xy(
-                rect.x + end.x * rect.width - origin.0,
-                rect.y + end.y * rect.height - origin.1,
+            let mut end = tiny_skia::Point::from_xy(
+                rect.x + end.x * rect.width,
+                rect.y + end.y * rect.height,
             );
+            transform.map_point(&mut start);
+            transform.map_point(&mut end);
             let stops = vec![
                 GradientStop::new(0.0, skia_color(from)),
                 GradientStop::new(1.0, skia_color(to)),
@@ -303,6 +327,7 @@ mod tests {
             border_width: 4.0,
             corner_radius: radius,
             clip: None,
+            spin: Spin::NONE,
         }
     }
 
@@ -370,11 +395,26 @@ mod tests {
                 blur: 0.0,
                 color: Color::rgba(0, 0, 0, 255),
                 clip: None,
+                spin: Spin::NONE,
             },
             1.0,
             (0.0, 0.0),
         );
         assert_eq!(pixel(&pixmap, 12, 12), [0, 0, 0, 255]);
         assert_eq!(pixel(&pixmap, 2, 12), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn a_quarter_turn_swings_a_wide_bar_upright() {
+        let mut quad = bordered(0.0);
+        quad.border_width = 0.0;
+        quad.rect = Rect::new(8.0, 16.0, 24.0, 8.0);
+        quad.spin = Spin {
+            pivot: Point::new(20.0, 20.0),
+            radians: std::f32::consts::FRAC_PI_2,
+        };
+        let pixmap = render(&quad);
+        assert_eq!(pixel(&pixmap, 20, 30), [0, 0, 255, 255]);
+        assert_eq!(pixel(&pixmap, 10, 20), [0, 0, 0, 0]);
     }
 }

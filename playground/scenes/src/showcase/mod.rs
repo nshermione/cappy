@@ -11,7 +11,7 @@
 //! - [`tiles`]: the tiles tab;
 //! - [`checklist`]: the checklist tab;
 //! - [`paint`]: the paint tab (linear gradients, drop shadows and a fitted image);
-//! - [`motion`]: the motion tab. Buttons call [`Context::animate`] for opacity and translation.
+//! - [`motion`]: the motion tab. Loops run on their own; Fade and Slide call [`Context::animate`].
 
 mod badge;
 mod checklist;

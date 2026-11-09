@@ -4,10 +4,12 @@ use cappy::host::WindowOptions;
 
 const DEBUG_DAMAGE_FLAG: &str = "--debug-damage";
 const DEBUG_DAMAGE_ENV: &str = "CAPPY_DEBUG_DAMAGE";
-/// Per-frame repaint statistics are logged by `cappy_host` at debug level.
-const DEFAULT_LOG_FILTER: &str = "info,cappy_host=debug";
+/// Startup and errors only. Per-frame lines and memory samples stay off until
+/// [`WindowOptions::with_log_frames`] or [`WindowOptions::with_log_memory`] is set.
+const DEFAULT_LOG_FILTER: &str = "info";
 
-/// Starts logging; `RUST_LOG` overrides the default filter, which shows per-frame repaints.
+/// Starts logging. `RUST_LOG` overrides this filter. Frame repaint lines are a window option,
+/// not part of the default filter.
 pub fn init_logging() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(DEFAULT_LOG_FILTER))
         .init();

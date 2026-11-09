@@ -706,7 +706,7 @@ thread_local! {
 }
 
 /// Records `runtime` the first time a signal is created in it and returns its index.
-fn register_runtime(runtime: &Rc<Runtime>) -> u32 {
+pub(crate) fn register_runtime(runtime: &Rc<Runtime>) -> u32 {
     if let Some(index) = runtime.registry_index.get() {
         return index;
     }
@@ -722,7 +722,7 @@ fn register_runtime(runtime: &Rc<Runtime>) -> u32 {
     })
 }
 
-fn runtime_by_index(index: u32) -> Rc<Runtime> {
+pub(crate) fn runtime_by_index(index: u32) -> Rc<Runtime> {
     RUNTIMES.with(|runtimes| Rc::clone(runtimes.borrow().get(index as usize).expect(DEAD_SIGNAL)))
 }
 

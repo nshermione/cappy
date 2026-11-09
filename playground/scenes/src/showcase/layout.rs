@@ -51,12 +51,18 @@ fn tab_bar(app: App) -> Element {
 }
 
 fn tab(app: App, tab: Tab, title: &'static str, key: &'static str) -> Element {
+    let cx = Context::current();
     element! {
         Container(
             class = ThemeClass::Btn,
             :class = class_when(app.tab.get() == tab, Class::TabActive),
             key = key,
-            on_click = move |_| app.select(tab),
+            on_click = move |_| {
+                app.select(tab);
+                if tab == Tab::Motion {
+                    cx.animate(super::motion::spawn_loops);
+                }
+            },
         ) {
             Text(title)
         }

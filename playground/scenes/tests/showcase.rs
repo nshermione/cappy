@@ -229,6 +229,33 @@ fn paint_tab_uses_gradient_shadow_and_image() {
 }
 
 #[test]
+fn motion_specimens_are_spaced_and_the_list_scrolls() {
+    let mut harness = harness();
+    open_tab(&mut harness, "tab-motion");
+    let color = harness.rect("motion-color");
+    let scale = harness.rect("motion-scale");
+    let spin = harness.rect("motion-spin");
+    assert!(
+        scale.x >= color.right() + 48.0,
+        "scale should sit clear of color, color {color:?} scale {scale:?}"
+    );
+    assert!(
+        spin.x >= scale.right() + 48.0,
+        "spin should sit clear of scale, scale {scale:?} spin {spin:?}"
+    );
+    let list = harness.rect("motion-scroll");
+    let last = harness.rect("ease-css-in-out");
+    assert!(
+        list.bottom() <= 600.0,
+        "the motion scrollport should stay inside the window, got {list:?}"
+    );
+    assert!(
+        last.bottom() > list.bottom(),
+        "the ease column should extend past the scrollport, last {last:?} list {list:?}"
+    );
+}
+
+#[test]
 fn motion_tab_fades_and_slides_from_manual_animate() {
     use std::thread::sleep;
     use std::time::{Duration, Instant};
@@ -268,6 +295,42 @@ fn fill_alpha(harness: &TestUi, key: &str) -> f32 {
             Some(color.a)
         })
         .expect("solid fill")
+}
+
+#[test]
+fn motion_loops_are_already_running() {
+    use std::thread::sleep;
+    use std::time::Duration;
+
+    let mut harness = harness();
+    open_tab(&mut harness, "tab-motion");
+    let fly_y = harness.rect("motion-fly").y;
+    let dot_x = harness.rect("ease-linear").x;
+    assert!(
+        harness
+            .ui()
+            .frame_deadline(std::time::Instant::now())
+            .is_some()
+    );
+
+    sleep(Duration::from_millis(200));
+    harness.update();
+    assert!(harness.rect("motion-fly").y < fly_y - 6.0);
+    assert!(harness.rect("ease-linear").x > dot_x + 12.0);
+    let spin = harness
+        .ui()
+        .display_list()
+        .iter()
+        .find_map(|primitive| {
+            let Primitive::Quad(quad) = primitive else {
+                return None;
+            };
+            let card = harness.rect("motion-spin");
+            let same = (quad.rect.x - card.x).abs() < 0.5 && (quad.rect.y - card.y).abs() < 0.5;
+            same.then_some(quad.spin.radians)
+        })
+        .expect("spin quad");
+    assert!(spin > 0.2);
 }
 
 #[test]

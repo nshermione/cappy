@@ -18,6 +18,8 @@ struct QuadInput {
     @location(4) shape: vec4<f32>,
     @location(5) gradient: vec4<f32>,
     @location(6) clip: vec4<f32>,
+    // pivot.xy in physical pixels, clockwise radians, unused.
+    @location(7) spin: vec4<f32>,
 }
 
 struct VertexOutput {
@@ -31,6 +33,8 @@ struct VertexOutput {
     @location(6) gradient: vec4<f32>,
     @location(7) pixel: vec2<f32>,
     @location(8) clip: vec4<f32>,
+    @location(9) spin: vec4<f32>,
+    @location(10) rect_origin: vec2<f32>,
 }
 
 @vertex
@@ -43,7 +47,19 @@ fn vs_quad(@builtin(vertex_index) vertex_index: u32, quad: QuadInput) -> VertexO
     let margin = 1.0 + quad.shape.z * 1.5;
     let origin = quad.rect.xy - vec2<f32>(margin);
     let extent = quad.rect.zw + vec2<f32>(2.0 * margin);
-    let pixel = origin + corners[vertex_index] * extent;
+    var pixel = origin + corners[vertex_index] * extent;
+    if abs(quad.spin.z) > 1e-5 {
+        // Cover every fragment of the rotated box, including the blur margin.
+        var min_p = vec2<f32>(1e9);
+        var max_p = vec2<f32>(-1e9);
+        for (var i = 0u; i < 4u; i = i + 1u) {
+            let unit = vec2<f32>(f32(i % 2u), f32(i / 2u));
+            let spun = rotate_about(origin + unit * extent, quad.spin.xy, quad.spin.z);
+            min_p = min(min_p, spun);
+            max_p = max(max_p, spun);
+        }
+        pixel = min_p + corners[vertex_index] * (max_p - min_p);
+    }
     let clip = vec2<f32>(
         pixel.x / globals.viewport.x * 2.0 - 1.0,
         1.0 - pixel.y / globals.viewport.y * 2.0,
@@ -60,7 +76,27 @@ fn vs_quad(@builtin(vertex_index) vertex_index: u32, quad: QuadInput) -> VertexO
     out.gradient = quad.gradient;
     out.pixel = pixel;
     out.clip = quad.clip;
+    out.spin = quad.spin;
+    out.rect_origin = quad.rect.xy;
     return out;
+}
+
+fn rotate_about(point: vec2<f32>, pivot: vec2<f32>, angle: f32) -> vec2<f32> {
+    let delta = point - pivot;
+    let c = cos(angle);
+    let s = sin(angle);
+    return pivot + vec2<f32>(c * delta.x - s * delta.y, s * delta.x + c * delta.y);
+}
+
+fn surface_local(in: VertexOutput) -> vec2<f32> {
+    if abs(in.spin.z) <= 1e-5 {
+        return in.local;
+    }
+    let delta = in.pixel - in.spin.xy;
+    let c = cos(-in.spin.z);
+    let s = sin(-in.spin.z);
+    let pixel = in.spin.xy + vec2<f32>(c * delta.x - s * delta.y, s * delta.x + c * delta.y);
+    return pixel - (in.rect_origin + in.half_size);
 }
 
 // Abramowitz and Stegun 7.1.26. Matches BoxShadow::coverage in cappy-style.
@@ -88,7 +124,7 @@ fn fill_color(in: VertexOutput) -> vec4<f32> {
         return in.background;
     }
     let size = max(in.half_size * 2.0, vec2<f32>(1e-4));
-    let uv = in.local / size + vec2<f32>(0.5);
+    let uv = surface_local(in) / size + vec2<f32>(0.5);
     let t = clamp(dot(uv - in.gradient.xy, delta) / length_squared, 0.0, 1.0);
     return mix(in.background, in.color_to, t);
 }
@@ -100,18 +136,19 @@ fn clip_coverage(pixel: vec2<f32>, clip: vec4<f32>) -> f32 {
 }
 
 fn quad_color(in: VertexOutput) -> vec4<f32> {
+    let local = surface_local(in);
     let radius = min(in.shape.y, min(in.half_size.x, in.half_size.y));
     if in.shape.w > 0.5 {
-        let distance = rounded_box_distance(in.local, in.half_size, radius);
+        let distance = rounded_box_distance(local, in.half_size, radius);
         return in.background * shadow_coverage(distance, in.shape.z) * clip_coverage(in.pixel, in.clip);
     }
-    let coverage = clamp(0.5 - rounded_box_distance(in.local, in.half_size, radius), 0.0, 1.0);
+    let coverage = clamp(0.5 - rounded_box_distance(local, in.half_size, radius), 0.0, 1.0);
     let border_width = in.shape.x;
     var color = fill_color(in);
     if border_width > 0.0 {
         let inner_half = max(in.half_size - vec2<f32>(border_width), vec2<f32>(0.0));
         let inner_radius = max(radius - border_width, 0.0);
-        let inner_distance = rounded_box_distance(in.local, inner_half, inner_radius);
+        let inner_distance = rounded_box_distance(local, inner_half, inner_radius);
         let inside = clamp(0.5 - inner_distance, 0.0, 1.0);
         let border_over_background = in.border_color + color * (1.0 - in.border_color.a);
         color = mix(border_over_background, color, inside);

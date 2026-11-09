@@ -30,13 +30,17 @@ pub use element::{
 pub use event::{ButtonState, ClickEvent, CursorIcon, InputEvent, PointerButton};
 pub use listener::Listener;
 pub use paint::{
-    ImagePlacement, ImagePrimitive, Primitive, QuadPrimitive, RenderFrame, ShadowPrimitive,
-    TextPrimitive, image_placement, paint_bounds, rounded_box_distance,
+    ImagePlacement, ImagePrimitive, Primitive, QuadPrimitive, RenderFrame, ShadowPrimitive, Spin,
+    TextPrimitive, image_placement, paint_bounds, rounded_box_distance, scale_about, spun_aabb,
+    unspin_point,
 };
 pub use prop::{ByHandle, ByValue, PropInput};
 pub use reactive::{IntoReactive, Reactive, RetirePlaceholder, Signal};
 pub use theme_handle::{ThemeCatalog, ThemeHandle, Themes};
-pub use ui::{Ease, FrameInput, Motion, MotionCtx, NodeId, ResourceCensus, Ui, UpdateOutcome};
+pub use ui::{
+    Anim, AnimHandle, Ease, FrameInput, Motion, MotionCtx, NodeId, Repeat, ResourceCensus, Ui,
+    UpdateOutcome,
+};
 
 pub use cappy_layout::{
     ApproximateTextMeasurer, Point, Rect, Size, TextMeasureRequest, TextMeasurer,

@@ -21,7 +21,7 @@ use crate::paint::{Primitive, RenderFrame};
 use crate::reactive::{BindingQueue, Signal};
 use crate::{Context, CursorIcon, Damage, DamageTracker, ThemeHandle};
 use bindings::{Binding, BindingKind};
-pub use motion::{Ease, Motion, MotionCtx};
+pub use motion::{Anim, AnimHandle, Ease, Motion, MotionCtx, Repeat};
 pub use node::NodeId;
 use node::{Node, NodeContent};
 
@@ -131,6 +131,9 @@ pub struct Ui {
     pressed: Option<NodeId>,
     /// Thumb or track drag. The offset follows the pointer until the button is released.
     scrollbar_drag: Option<input::ScrollbarDrag>,
+    /// Sequence and parallel groups still waiting on a step.
+    anims: Vec<motion::Running>,
+    next_anim_owner: u64,
 }
 
 impl Ui {
@@ -172,6 +175,8 @@ impl Ui {
             hovered: Vec::new(),
             pressed: None,
             scrollbar_drag: None,
+            anims: Vec::new(),
+            next_anim_owner: 0,
         };
         ui.root = ui.mount(root.into_element(), None);
         ui.add_binding(ui.root, BindingKind::Theme);
@@ -257,6 +262,7 @@ impl Ui {
         self.drain_motions();
         self.step_scroll(dt);
         self.step_motion(now);
+        self.finish_anims(now);
         self.run_layout();
         self.collect_paint_damage();
         self.rebuild_display_list();

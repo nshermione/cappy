@@ -178,6 +178,7 @@ struct WinitHost {
 
 impl WinitHost {
     fn start(&mut self, event_loop: &ActiveEventLoop, ui: Ui) -> Result<Running, RunError> {
+        cappy_host::set_log_memory(self.options.log_memory);
         #[cfg(debug_assertions)]
         cappy_host::memory_mark("start before window");
         let attributes = window_attributes(&self.options, self.renderer);
@@ -199,6 +200,7 @@ impl WinitHost {
         #[cfg(debug_assertions)]
         cappy_host::memory_mark("start after host");
         host.set_debug_damage(self.options.debug_damage);
+        host.set_log_frames(self.options.log_frames);
         let proxy = self.proxy.clone();
         host.set_waker(move || {
             if proxy.send_event(Wake).is_err() {

@@ -2,11 +2,96 @@
 
 use std::sync::Arc;
 
-use cappy_layout::{Rect, Size};
+use cappy_layout::{Point, Rect, Size};
 use cappy_style::{Background, BoxShadow, Color};
 
 use crate::Damage;
 use crate::bitmap::{ImagePixels, ObjectFit};
+
+/// Rotation of a painted box around [`Spin::pivot`]. Zero leaves the box axis-aligned.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Spin {
+    pub pivot: Point,
+    pub radians: f32,
+}
+
+impl Spin {
+    pub const NONE: Self = Self {
+        pivot: Point::new(0.0, 0.0),
+        radians: 0.0,
+    };
+
+    pub fn is_none(self) -> bool {
+        self.radians.abs() <= 1.0e-4
+    }
+}
+
+impl Default for Spin {
+    fn default() -> Self {
+        Self::NONE
+    }
+}
+
+pub(crate) fn rect_center(rect: Rect) -> Point {
+    Point::new(rect.x + rect.width * 0.5, rect.y + rect.height * 0.5)
+}
+
+/// Scales `rect` around `pivot`. A scale of 1 returns `rect`.
+pub fn scale_about(rect: Rect, pivot: Point, scale: f32) -> Rect {
+    if (scale - 1.0).abs() <= 1.0e-4 || rect.is_empty() {
+        return rect;
+    }
+    Rect::new(
+        pivot.x + (rect.x - pivot.x) * scale,
+        pivot.y + (rect.y - pivot.y) * scale,
+        (rect.width * scale).max(0.0),
+        (rect.height * scale).max(0.0),
+    )
+}
+
+/// Inverse of a scale-then-rotate around `pivot`. `scale` of 0 is treated as 1.
+pub fn unspin_point(point: Point, pivot: Point, scale: f32, radians: f32) -> Point {
+    let mut dx = point.x - pivot.x;
+    let mut dy = point.y - pivot.y;
+    if radians.abs() > 1.0e-4 {
+        let (sin, cos) = (-radians).sin_cos();
+        let x = cos * dx - sin * dy;
+        let y = sin * dx + cos * dy;
+        dx = x;
+        dy = y;
+    }
+    let scale = if scale.abs() <= 1.0e-4 { 1.0 } else { scale };
+    Point::new(pivot.x + dx / scale, pivot.y + dy / scale)
+}
+
+/// Axis-aligned bounds of `rect` after [`Spin`] is applied.
+pub fn spun_aabb(rect: Rect, spin: Spin) -> Rect {
+    if spin.is_none() || rect.is_empty() {
+        return rect;
+    }
+    let (sin, cos) = spin.radians.sin_cos();
+    let corners = [
+        Point::new(rect.x, rect.y),
+        Point::new(rect.right(), rect.y),
+        Point::new(rect.x, rect.bottom()),
+        Point::new(rect.right(), rect.bottom()),
+    ];
+    let mut min_x = f32::MAX;
+    let mut min_y = f32::MAX;
+    let mut max_x = f32::MIN;
+    let mut max_y = f32::MIN;
+    for corner in corners {
+        let dx = corner.x - spin.pivot.x;
+        let dy = corner.y - spin.pivot.y;
+        let x = spin.pivot.x + cos * dx - sin * dy;
+        let y = spin.pivot.y + sin * dx + cos * dy;
+        min_x = min_x.min(x);
+        min_y = min_y.min(y);
+        max_x = max_x.max(x);
+        max_y = max_y.max(y);
+    }
+    Rect::from_edges(min_x, min_y, max_x, max_y)
+}
 
 /// A filled, optionally bordered, optionally rounded rectangle.
 #[derive(Clone, Debug, PartialEq)]
@@ -18,6 +103,8 @@ pub struct QuadPrimitive {
     pub corner_radius: f32,
     /// Ancestor scrollports. `None` means the primitive is not clipped further.
     pub clip: Option<Rect>,
+    /// Rotation around [`Spin::pivot`]. [`Spin::NONE`] draws the rect as stored.
+    pub spin: Spin,
 }
 
 /// A drop shadow drawn behind a box. `rect` is the shadow shape, already offset and spread.
@@ -29,6 +116,8 @@ pub struct ShadowPrimitive {
     pub color: Color,
     /// Ancestor scrollports. `None` means the primitive is not clipped further.
     pub clip: Option<Rect>,
+    /// Rotation around [`Spin::pivot`], shared with the box that casts the shadow.
+    pub spin: Spin,
 }
 
 impl ShadowPrimitive {
@@ -97,8 +186,8 @@ pub enum Primitive {
 impl Primitive {
     pub fn bounds(&self) -> Rect {
         let (rect, clip) = match self {
-            Self::Shadow(shadow) => (shadow.ink_bounds(), shadow.clip),
-            Self::Quad(quad) => (quad.rect, quad.clip),
+            Self::Shadow(shadow) => (spun_aabb(shadow.ink_bounds(), shadow.spin), shadow.clip),
+            Self::Quad(quad) => (spun_aabb(quad.rect, quad.spin), quad.clip),
             Self::Image(image) => (image.rect, image.clip),
             Self::Text(text) => (text.rect, text.clip),
         };

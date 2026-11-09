@@ -3,13 +3,15 @@
 use std::sync::Arc;
 
 use cappy_layout::{Point, Rect, TextLeaf};
-use cappy_style::{Background, Color, Display, Extent, LayoutStyle, TextStyle, VisualStyle};
+use cappy_style::{
+    Background, BoxShadow, Color, Display, Extent, LayoutStyle, TextStyle, VisualStyle,
+};
 
 use super::scroll::{self, axis_clip, horizontal_thumb, nest_clip, scrollport, vertical_thumb};
 use super::{NodeId, Ui};
 use crate::paint::{
-    ImagePrimitive, Primitive, QuadPrimitive, ShadowPrimitive, TextPrimitive, paint_bounds,
-    shadow_shape,
+    ImagePrimitive, Primitive, QuadPrimitive, ShadowPrimitive, Spin, TextPrimitive, paint_bounds,
+    rect_center, scale_about, shadow_shape, spun_aabb,
 };
 
 const LAYOUT_OUT_OF_SYNC: &str = "layout tree is out of sync with the node tree";
@@ -307,6 +309,46 @@ impl Ui {
         }
     }
 
+    pub(super) fn damage_visual_tree(&mut self, id: NodeId) {
+        let mut stack = vec![id];
+        while let Some(current) = stack.pop() {
+            if !self.is_current(current) {
+                continue;
+            }
+            let ink = self.visual_ink(current);
+            let node = &mut self.nodes[current.index()];
+            self.damage.add(node.painted);
+            self.damage.add(ink);
+            node.paint_dirty = true;
+            stack.extend(node.children.clone());
+        }
+        self.paint_dirty = true;
+        self.display_list_stale = true;
+    }
+
+    fn visual_ink(&self, id: NodeId) -> Rect {
+        let node = &self.nodes[id.index()];
+        let space = self.paint_space_of(id);
+        let shadow = scale_shadow(node.style.visual.shadow, space.scale);
+        let (rect, spin) = map_paint_rect(node.rect, space);
+        spun_aabb(paint_bounds(rect, shadow), spin)
+    }
+
+    fn paint_space_of(&self, id: NodeId) -> PaintSpace {
+        let mut chain = vec![id];
+        let mut current = self.nodes[id.index()].parent;
+        while let Some(parent) = current {
+            chain.push(parent);
+            current = self.nodes[parent.index()].parent;
+        }
+        let mut space = PaintSpace::IDENTITY;
+        for node_id in chain.iter().rev() {
+            let node = &self.nodes[node_id.index()];
+            space = space.inherit(node.rect, node.scale, node.rotation);
+        }
+        space
+    }
+
     pub(super) fn rebuild_display_list(&mut self) {
         if !std::mem::take(&mut self.display_list_stale) {
             return;
@@ -317,6 +359,7 @@ impl Ui {
             id: self.root,
             clip: None,
             opacity: 1.0,
+            space: PaintSpace::IDENTITY,
         }];
         while let Some(step) = stack.pop() {
             match step {
@@ -324,39 +367,56 @@ impl Ui {
                     self.push_thumbs(&mut primitives, id, clip, opacity);
                     continue;
                 }
-                Painted::Enter { id, clip, opacity } => {
+                Painted::Enter {
+                    id,
+                    clip,
+                    opacity,
+                    space,
+                } => {
                     let node = &self.nodes[id.index()];
                     if !node.alive || node.suppressed || node.style.layout.display == Display::None
                     {
                         continue;
                     }
                     let opacity = opacity * node.opacity;
-                    let visual = &node.style.visual;
-                    painted[id.index()] = paint_bounds(node.rect, visual.shadow);
-                    push_box(&mut primitives, node.rect, visual, clip, opacity);
+                    let space = space.inherit(node.rect, node.scale, node.rotation);
+                    let mut visual = node.style.visual.clone();
+                    if let Some(color) = node.background {
+                        visual.background = Background::Solid(color);
+                    }
+                    visual.border_width *= space.scale;
+                    visual.corner_radius *= space.scale;
+                    visual.shadow = scale_shadow(visual.shadow, space.scale);
+                    let (rect, spin) = map_paint_rect(node.rect, space);
+                    painted[id.index()] = spun_aabb(paint_bounds(rect, visual.shadow), spin);
+                    push_box(&mut primitives, rect, &visual, clip, opacity, spin);
                     match &node.content {
                         super::NodeContent::Text(text) => {
                             let padding = node.style.layout.padding;
-                            let content = Rect::new(
-                                node.rect.x + padding.left,
-                                node.rect.y + padding.top,
-                                (node.rect.width - padding.horizontal()).max(0.0),
-                                (node.rect.height - padding.vertical()).max(0.0),
+                            let content = scale_about(
+                                Rect::new(
+                                    node.rect.x + padding.left,
+                                    node.rect.y + padding.top,
+                                    (node.rect.width - padding.horizontal()).max(0.0),
+                                    (node.rect.height - padding.vertical()).max(0.0),
+                                ),
+                                space.pivot,
+                                space.scale,
                             );
                             let text_style = &node.style.text;
                             primitives.push(Primitive::Text(TextPrimitive {
                                 rect: content,
                                 text: text.clone(),
                                 color: fade_color(text_style.color, opacity),
-                                font_size: text_style.font_size,
-                                line_height: text_style.line_height_px(),
+                                font_size: text_style.font_size * space.scale,
+                                line_height: text_style.line_height_px() * space.scale,
                                 weight: text_style.weight.0,
                                 clip,
                             }));
                         }
                         super::NodeContent::Image { pixels, fit } => {
                             primitives.push(Primitive::Image(ImagePrimitive {
-                                rect: node.rect,
+                                rect,
                                 pixels: pixels.clone(),
                                 fit: *fit,
                                 corner_radius: visual.corner_radius,
@@ -370,7 +430,7 @@ impl Ui {
                         nest_clip(
                             clip,
                             axis_clip(
-                                scrollport(node.rect, visual.border_width),
+                                scrollport(node.rect, node.style.visual.border_width),
                                 node.style.layout.overflow_x.clips(),
                                 node.style.layout.overflow_y.clips(),
                             ),
@@ -387,6 +447,7 @@ impl Ui {
                         id: *child,
                         clip: child_clip,
                         opacity,
+                        space,
                     }));
                 }
             }
@@ -430,11 +491,74 @@ struct Placed {
     clip: Option<Rect>,
 }
 
+#[derive(Clone, Copy)]
+struct PaintSpace {
+    pivot: Point,
+    scale: f32,
+    rotation: f32,
+}
+
+impl PaintSpace {
+    const IDENTITY: Self = Self {
+        pivot: Point::new(0.0, 0.0),
+        scale: 1.0,
+        rotation: 0.0,
+    };
+
+    fn moves(self) -> bool {
+        (self.scale - 1.0).abs() > 1.0e-4 || self.rotation.abs() > 1.0e-4
+    }
+
+    /// The first transformed node owns the pivot. Descendants multiply into that same pivot.
+    fn inherit(self, rect: Rect, scale: f32, rotation: f32) -> Self {
+        let child_moves = (scale - 1.0).abs() > 1.0e-4 || rotation.abs() > 1.0e-4;
+        if !child_moves {
+            return self;
+        }
+        if !self.moves() {
+            return Self {
+                pivot: rect_center(rect),
+                scale,
+                rotation,
+            };
+        }
+        Self {
+            pivot: self.pivot,
+            scale: self.scale * scale,
+            rotation: self.rotation + rotation,
+        }
+    }
+}
+
+fn map_paint_rect(rect: Rect, space: PaintSpace) -> (Rect, Spin) {
+    let scaled = scale_about(rect, space.pivot, space.scale);
+    let spin = if space.rotation.abs() <= 1.0e-4 {
+        Spin::NONE
+    } else {
+        Spin {
+            pivot: space.pivot,
+            radians: space.rotation,
+        }
+    };
+    (scaled, spin)
+}
+
+fn scale_shadow(shadow: BoxShadow, scale: f32) -> BoxShadow {
+    BoxShadow {
+        offset_x: shadow.offset_x * scale,
+        offset_y: shadow.offset_y * scale,
+        blur: shadow.blur * scale,
+        spread: shadow.spread * scale,
+        color: shadow.color,
+    }
+}
+
 enum Painted {
     Enter {
         id: NodeId,
         clip: Option<Rect>,
         opacity: f32,
+        space: PaintSpace,
     },
     /// Drawn after the node's descendants so the thumb stays above the content.
     Thumb {
@@ -457,6 +581,7 @@ fn push_box(
     visual: &VisualStyle,
     clip: Option<Rect>,
     opacity: f32,
+    spin: Spin,
 ) {
     if let Some(shape) = shadow_shape(rect, visual.shadow) {
         primitives.push(Primitive::Shadow(ShadowPrimitive {
@@ -465,6 +590,7 @@ fn push_box(
             blur: visual.shadow.blur.max(0.0),
             color: fade_color(visual.shadow.color, opacity),
             clip,
+            spin,
         }));
     }
     let background = fade_background(visual.background, opacity);
@@ -478,6 +604,7 @@ fn push_box(
             border_width: visual.border_width,
             corner_radius: visual.corner_radius,
             clip,
+            spin,
         }));
     }
 }
@@ -490,6 +617,7 @@ fn push_thumb(primitives: &mut Vec<Primitive>, rect: Rect, clip: Option<Rect>, o
         border_width: 0.0,
         corner_radius: 2.0,
         clip,
+        spin: Spin::NONE,
     }));
 }
 

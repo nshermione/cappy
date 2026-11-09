@@ -14,4 +14,6 @@ pub use renderer::{
     PresentOutcome, RendererError, RendererKind, UnknownRendererError, WindowRenderer,
 };
 pub use selection::{RENDERER_ENV, RendererSelectionError, select_renderer};
-pub use window_host::{InputResponse, RedrawResult, WindowHost, WindowOptions, memory_mark};
+pub use window_host::{
+    InputResponse, RedrawResult, WindowHost, WindowOptions, memory_mark, set_log_memory,
+};

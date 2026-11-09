@@ -68,13 +68,13 @@ pub use cappy_components as components;
 #[cfg(feature = "basic")]
 pub mod prelude {
     pub use cappy_core::{
-        Align, Application, Color, ColorToken, Component, Container, Context, Display, Dynamic,
-        Ease, Element, FlexDirection, FontSize, FontWeight, FrameInput, HasContext, Image,
-        ImagePixels, IntoElement, IntoReactive, Justify, Motion, ObjectFit, Overflow, Radius,
-        Reactive, Signal, Slot, Space, StyleRefinement, Stylesheet, Text, Theme, ThemeCatalog,
-        ThemeHandle, Themes, Ui, UpdateOutcome, div, for_each, fragment, hex, if_else, image,
-        linear, on, percent, reactive, shadow, show, slot, text, text_dyn, use_local_store,
-        use_store,
+        Align, Anim, AnimHandle, Application, Color, ColorToken, Component, Container, Context,
+        Display, Dynamic, Ease, Element, FlexDirection, FontSize, FontWeight, FrameInput,
+        HasContext, Image, ImagePixels, IntoElement, IntoReactive, Justify, Motion, ObjectFit,
+        Overflow, Radius, Reactive, Repeat, Signal, Slot, Space, StyleRefinement, Stylesheet, Text,
+        Theme, ThemeCatalog, ThemeHandle, Themes, Ui, UpdateOutcome, div, for_each, fragment, hex,
+        if_else, image, linear, on, percent, reactive, shadow, show, slot, text, text_dyn,
+        use_local_store, use_store,
     };
     pub use cappy_dsl::{element, style};
     pub use cappy_macros::{ClassName, Props, Reactive, component, store, style_token, stylesheet};

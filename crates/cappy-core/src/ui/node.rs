@@ -89,8 +89,18 @@ pub(crate) struct Node {
     pub(crate) translation: Point,
     /// Multiplier applied while painting this node and its descendants. Identity is 1.
     pub(crate) opacity: f32,
+    /// Solid fill owned by a background tween. `None` uses the resolved style.
+    pub(crate) background: Option<cappy_style::Color>,
+    /// Visual scale around this node's center. Identity is 1. Layout size stays put.
+    pub(crate) scale: f32,
+    /// Visual rotation in radians, clockwise in y-down space. Identity is 0.
+    pub(crate) rotation: f32,
     pub(crate) translation_tween: Option<crate::ui::motion::Tween<Point>>,
     pub(crate) opacity_tween: Option<crate::ui::motion::Tween<f32>>,
+    pub(crate) background_tween: Option<crate::ui::motion::Tween<cappy_style::Color>>,
+    pub(crate) scale_tween: Option<crate::ui::motion::Tween<f32>>,
+    pub(crate) rotation_tween: Option<crate::ui::motion::Tween<f32>>,
+    pub(crate) shake: Option<crate::ui::motion::Wave>,
     pub(crate) style_dirty: bool,
     pub(crate) paint_dirty: bool,
 }

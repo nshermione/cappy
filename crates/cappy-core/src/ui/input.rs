@@ -104,8 +104,51 @@ impl Ui {
             && node.alive
             && !node.suppressed
             && node.style.layout.display != Display::None
-            && node.rect.contains(point)
+            && node.rect.contains(self.local_point(id, point))
             && self.inside_ancestor_clips(id, point)
+    }
+
+    /// Maps a visual point back into `id`'s layout rect. Identity scale and rotation leave it.
+    fn local_point(&self, id: NodeId, point: Point) -> Point {
+        let Some(owner) = self.transform_owner(id) else {
+            return point;
+        };
+        let (scale, rotation) = self.accumulated_spin(owner, id);
+        crate::paint::unspin_point(
+            point,
+            crate::paint::rect_center(self.nodes[owner.index()].rect),
+            scale,
+            rotation,
+        )
+    }
+
+    fn transform_owner(&self, id: NodeId) -> Option<NodeId> {
+        let mut current = Some(id);
+        let mut owner = None;
+        while let Some(node_id) = current {
+            let node = &self.nodes[node_id.index()];
+            if (node.scale - 1.0).abs() > 1.0e-4 || node.rotation.abs() > 1.0e-4 {
+                owner = Some(node_id);
+            }
+            current = node.parent;
+        }
+        owner
+    }
+
+    fn accumulated_spin(&self, owner: NodeId, id: NodeId) -> (f32, f32) {
+        let mut scale = 1.0;
+        let mut rotation = 0.0;
+        let mut current = Some(id);
+        while let Some(node_id) = current {
+            let node = &self.nodes[node_id.index()];
+            scale *= node.scale;
+            rotation += node.rotation;
+            if node_id == owner {
+                break;
+            }
+            current = node.parent;
+        }
+        (scale, rotation)
     }
 
     fn inside_ancestor_clips(&self, id: NodeId, point: Point) -> bool {
@@ -118,7 +161,7 @@ impl Ui {
                     node.style.layout.overflow_x.clips(),
                     node.style.layout.overflow_y.clips(),
                 );
-                if !clip.contains(point) {
+                if !clip.contains(self.local_point(parent, point)) {
                     return false;
                 }
             }

@@ -62,9 +62,11 @@ stylesheet! {
         /// content, which is what gives a nested scroll column a definite height.
         Grow { flex_grow: 1.0, min_height: 0 }
         /// Fills leftover height and scrolls when its children are taller.
+        /// `min_height: 0` lets the column shrink below its content so `overflow_y` can scroll.
         ScrollList {
             direction: FlexDirection::Column,
             flex_grow: 1.0,
+            min_height: 0,
             gap: Space::Sm,
             overflow_y: Overflow::Auto,
         }
@@ -137,6 +139,21 @@ stylesheet! {
             radius: Radius::Lg,
             background: ColorToken::SurfaceAlt,
         }
+        /// A row of motion specimens. The gap and the boxes' vertical margin keep scale, spin
+        /// and fly from painting over a neighbor.
+        MotionRow {
+            direction: FlexDirection::Row,
+            align: Align::Center,
+            gap: 64,
+            padding_x: 24,
+            flex_shrink: 0.0,
+        }
+        /// Ease tracks stacked so the motion scroll list can move down through them.
+        MotionEases {
+            direction: FlexDirection::Column,
+            gap: Space::Md,
+            flex_shrink: 0.0,
+        }
         /// Colored box the motion tab fades with [`cappy::Motion::opacity`].
         MotionOpacity {
             width: 120,
@@ -146,6 +163,7 @@ stylesheet! {
             text_color: ColorToken::OnPrimary,
             align: Align::Center,
             justify: Justify::Center,
+            margin_y: 36,
         }
         /// Box the motion tab slides with [`cappy::Motion::translation`].
         MotionSlide {
@@ -157,6 +175,56 @@ stylesheet! {
             border_width: 1,
             align: Align::Center,
             justify: Justify::Center,
+            margin_y: 36,
+        }
+        /// Fill the motion tab crossfades with [`cappy::Motion::background`].
+        MotionColor {
+            @include MotionOpacity,
+        }
+        /// Box the motion tab scales with [`cappy::Motion::scale`].
+        MotionScale {
+            @include MotionSlide,
+            background: ColorToken::Success,
+            border_width: 0,
+            text_color: ColorToken::OnPrimary,
+        }
+        /// Wide bar the motion tab spins. A pip sits on the left so the turn is visible.
+        MotionSpin {
+            width: 104,
+            height: 52,
+            radius: Radius::Lg,
+            background: ColorToken::Surface,
+            border_color: ColorToken::Border,
+            border_width: 1,
+            direction: FlexDirection::Row,
+            align: Align::Center,
+            padding: Space::Sm,
+            margin_y: 40,
+        }
+        MotionPip {
+            width: 16,
+            height: 16,
+            radius: Radius::Sm,
+            background: ColorToken::Primary,
+        }
+        /// Box the motion tab shakes or flies.
+        MotionTravel {
+            @include MotionSlide,
+        }
+        EaseName { width: 108 }
+        EaseTrack {
+            width: 188,
+            height: 28,
+            radius: Radius::Md,
+            background: ColorToken::SurfaceAlt,
+            direction: FlexDirection::Row,
+            align: Align::Center,
+        }
+        EaseDot {
+            width: 18,
+            height: 18,
+            radius: Radius::Md,
+            background: ColorToken::Primary,
         }
     }
 }

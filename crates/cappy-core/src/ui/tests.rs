@@ -1811,6 +1811,264 @@ fn context_animate_wakes_the_host_once_per_batch() {
 }
 
 #[test]
+fn a_loop_wraps_and_a_ping_pong_comes_back() {
+    let start = Instant::now();
+    {
+        let cx = context();
+        let mut ui = settled(&cx, sized_box("box", Color::BLACK));
+        let id = ui.find_by_key("box").unwrap();
+        let start_y = ui.node_rect(id).unwrap().y;
+        ui.animate(
+            id,
+            Motion::translation(0.0, 100.0)
+                .duration(Duration::from_millis(100))
+                .ease(Ease::Linear)
+                .looped(),
+        );
+        ui.update_at(VIEWPORT, start);
+        ui.update_at(VIEWPORT, start + Duration::from_millis(150));
+        assert!((ui.node_rect(id).unwrap().y - (start_y + 50.0)).abs() < 0.01);
+        assert!(ui.motion_animating());
+    }
+
+    let cx = context();
+    let mut ui = settled(&cx, sized_box("pong", Color::BLACK));
+    let id = ui.find_by_key("pong").unwrap();
+    let start_y = ui.node_rect(id).unwrap().y;
+    ui.animate(
+        id,
+        Motion::translation(0.0, 100.0)
+            .duration(Duration::from_millis(100))
+            .ease(Ease::Linear)
+            .ping_pong(),
+    );
+    ui.update_at(VIEWPORT, start);
+    ui.update_at(VIEWPORT, start + Duration::from_millis(100));
+    assert!((ui.node_rect(id).unwrap().y - (start_y + 100.0)).abs() < 0.01);
+    ui.update_at(VIEWPORT, start + Duration::from_millis(150));
+    assert!((ui.node_rect(id).unwrap().y - (start_y + 50.0)).abs() < 0.01);
+    assert!(ui.motion_animating());
+
+    let cx = context();
+    let mut ui = settled(&cx, sized_box("pong-ease", Color::BLACK));
+    let id = ui.find_by_key("pong-ease").unwrap();
+    let start_y = ui.node_rect(id).unwrap().y;
+    ui.animate(
+        id,
+        Motion::translation(0.0, 100.0)
+            .duration(Duration::from_millis(100))
+            .ease(Ease::OutQuad)
+            .ping_pong(),
+    );
+    ui.update_at(VIEWPORT, start);
+    // Halfway back is a new OutQuad from the destination, not the outward curve reversed.
+    // OutQuad(0.5) = 0.75, so three quarters of the way home.
+    ui.update_at(VIEWPORT, start + Duration::from_millis(150));
+    assert!((ui.node_rect(id).unwrap().y - (start_y + 25.0)).abs() < 0.01);
+}
+
+#[test]
+fn delay_holds_the_start_until_it_elapses() {
+    let cx = context();
+    let mut ui = settled(&cx, sized_box("box", Color::BLACK));
+    let id = ui.find_by_key("box").unwrap();
+    let start_y = ui.node_rect(id).unwrap().y;
+    let start = Instant::now();
+    ui.animate(
+        id,
+        Motion::translation(0.0, 100.0)
+            .duration(Duration::from_millis(100))
+            .delay(Duration::from_millis(100))
+            .ease(Ease::Linear),
+    );
+    ui.update_at(VIEWPORT, start);
+    ui.update_at(VIEWPORT, start + Duration::from_millis(100));
+    assert!((ui.node_rect(id).unwrap().y - start_y).abs() < 0.01);
+    ui.update_at(VIEWPORT, start + Duration::from_millis(150));
+    assert!((ui.node_rect(id).unwrap().y - (start_y + 50.0)).abs() < 0.01);
+}
+
+#[test]
+fn sequence_waits_and_together_starts_at_once() {
+    let start = Instant::now();
+    {
+        let cx = context();
+        let mut ui = settled(&cx, div().children([sized_box("box", Color::BLACK)]));
+        let id = ui.find_by_key("box").unwrap();
+        let start_y = ui.node_rect(id).unwrap().y;
+        ui.play(Anim::sequence([
+            Anim::play(
+                id,
+                Motion::translation(0.0, 100.0)
+                    .duration(Duration::from_millis(100))
+                    .ease(Ease::Linear),
+            ),
+            Anim::play(
+                id,
+                Motion::translation(0.0, 0.0)
+                    .duration(Duration::from_millis(100))
+                    .ease(Ease::Linear),
+            ),
+        ]));
+        ui.update_at(VIEWPORT, start);
+        ui.update_at(VIEWPORT, start + Duration::from_millis(50));
+        assert!((ui.node_rect(id).unwrap().y - (start_y + 50.0)).abs() < 0.01);
+        ui.update_at(VIEWPORT, start + Duration::from_millis(100));
+        assert!((ui.node_rect(id).unwrap().y - (start_y + 100.0)).abs() < 0.01);
+        ui.update_at(VIEWPORT, start + Duration::from_millis(150));
+        assert!((ui.node_rect(id).unwrap().y - (start_y + 50.0)).abs() < 0.01);
+    }
+
+    let cx = context();
+    let mut ui = settled(
+        &cx,
+        div().children([
+            sized_box("left", Color::BLACK),
+            sized_box("right", Color::BLACK),
+        ]),
+    );
+    let left = ui.find_by_key("left").unwrap();
+    let right = ui.find_by_key("right").unwrap();
+    let left_y = ui.node_rect(left).unwrap().y;
+    ui.play(Anim::together([
+        Anim::play(
+            left,
+            Motion::translation(0.0, 100.0)
+                .duration(Duration::from_millis(100))
+                .ease(Ease::Linear),
+        ),
+        Anim::play(
+            right,
+            Motion::opacity(0.0)
+                .duration(Duration::from_millis(100))
+                .ease(Ease::Linear),
+        ),
+    ]));
+    ui.update_at(VIEWPORT, start);
+    ui.update_at(VIEWPORT, start + Duration::from_millis(50));
+    assert!((ui.node_rect(left).unwrap().y - (left_y + 50.0)).abs() < 0.01);
+    assert!((ui.nodes[right.index()].opacity - 0.5).abs() < 0.01);
+}
+
+#[test]
+fn stopping_a_play_handle_holds_the_value_and_skips_the_rest() {
+    let cx = context();
+    let mut ui = settled(&cx, sized_box("box", Color::BLACK));
+    let id = ui.find_by_key("box").unwrap();
+    let start_y = ui.node_rect(id).unwrap().y;
+    let start = Instant::now();
+    let handle = ui.play(Anim::sequence([
+        Anim::play(
+            id,
+            Motion::translation(0.0, 100.0)
+                .duration(Duration::from_millis(100))
+                .ease(Ease::Linear),
+        ),
+        Anim::play(
+            id,
+            Motion::translation(0.0, 0.0)
+                .duration(Duration::from_millis(100))
+                .ease(Ease::Linear),
+        ),
+    ]));
+    ui.update_at(VIEWPORT, start);
+    ui.update_at(VIEWPORT, start + Duration::from_millis(50));
+    assert!((ui.node_rect(id).unwrap().y - (start_y + 50.0)).abs() < 0.01);
+    handle.stop();
+    handle.stop();
+    ui.update_at(VIEWPORT, start + Duration::from_millis(200));
+    assert!((ui.node_rect(id).unwrap().y - (start_y + 50.0)).abs() < 0.01);
+    assert!(!ui.motion_animating());
+}
+
+#[test]
+fn scale_grows_the_painted_box_and_the_hit_target() {
+    let cx = context();
+    let mut ui = settled(&cx, sized_box("box", Color::BLACK));
+    let id = ui.find_by_key("box").unwrap();
+    let layout = ui.node_rect(id).unwrap();
+    let start = Instant::now();
+    ui.animate(
+        id,
+        Motion::scale(2.0)
+            .duration(Duration::from_millis(100))
+            .ease(Ease::Linear),
+    );
+    ui.update_at(VIEWPORT, start);
+    ui.update_at(VIEWPORT, start + Duration::from_millis(50));
+    assert!((ui.node_rect(id).unwrap().width - layout.width).abs() < 0.01);
+    let painted = painted_quad(&ui, "box");
+    assert!((painted.rect.width - layout.width * 1.5).abs() < 0.01);
+    let inside = Point::new(layout.x - 4.0, layout.y + 1.0);
+    assert!(ui.hit_path(inside).contains(&id));
+    let outside = Point::new(layout.x - layout.width, layout.y + 1.0);
+    assert!(!ui.hit_path(outside).contains(&id));
+}
+
+#[test]
+fn background_lerps_and_rotation_spins_the_quad() {
+    let cx = context();
+    let mut ui = settled(&cx, sized_box("box", Color::BLACK));
+    let id = ui.find_by_key("box").unwrap();
+    let start = Instant::now();
+    ui.animate(
+        id,
+        Motion::background(Color::WHITE)
+            .duration(Duration::from_millis(100))
+            .ease(Ease::Linear),
+    );
+    ui.animate(
+        id,
+        Motion::rotation(180.0)
+            .duration(Duration::from_millis(100))
+            .ease(Ease::Linear),
+    );
+    ui.update_at(VIEWPORT, start);
+    ui.update_at(VIEWPORT, start + Duration::from_millis(50));
+    let color = solid_fill(&ui, "box");
+    assert!((color.r - 0.5).abs() < 0.02, "red channel {}", color.r);
+    let spin = painted_quad(&ui, "box").spin.radians;
+    assert!((spin - std::f32::consts::FRAC_PI_2).abs() < 0.02);
+}
+
+#[test]
+fn shake_offsets_sideways_for_one_cycle() {
+    let cx = context();
+    let mut ui = settled(&cx, sized_box("box", Color::BLACK));
+    let id = ui.find_by_key("box").unwrap();
+    let start_x = ui.node_rect(id).unwrap().x;
+    let start = Instant::now();
+    ui.animate(
+        id,
+        Motion::shake(10.0)
+            .duration(Duration::from_millis(100))
+            .looped(),
+    );
+    ui.update_at(VIEWPORT, start);
+    assert!((ui.node_rect(id).unwrap().x - start_x).abs() < 0.01);
+    ui.update_at(VIEWPORT, start + Duration::from_millis(25));
+    assert!((ui.node_rect(id).unwrap().x - (start_x + 10.0)).abs() < 0.01);
+    assert!(ui.motion_animating());
+}
+
+fn painted_quad<'a>(ui: &'a Ui, key: &str) -> &'a crate::paint::QuadPrimitive {
+    let layout = ui.node_rect(ui.find_by_key(key).unwrap()).unwrap();
+    let center_x = layout.x + layout.width * 0.5;
+    let center_y = layout.y + layout.height * 0.5;
+    ui.display_list()
+        .iter()
+        .find_map(|primitive| {
+            let Primitive::Quad(quad) = primitive else {
+                return None;
+            };
+            let x = quad.rect.x + quad.rect.width * 0.5;
+            let y = quad.rect.y + quad.rect.height * 0.5;
+            ((x - center_x).abs() < 0.5 && (y - center_y).abs() < 0.5).then_some(quad)
+        })
+        .expect("painted quad")
+}
+
+#[test]
 #[should_panic(expected = "a context drives one Ui")]
 fn a_context_has_one_ui() {
     let cx = context();

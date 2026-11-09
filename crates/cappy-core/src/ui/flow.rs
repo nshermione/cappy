@@ -235,8 +235,15 @@ impl Ui {
             painted: cappy_layout::Rect::ZERO,
             translation: cappy_layout::Point::default(),
             opacity: 1.0,
+            background: None,
+            scale: 1.0,
+            rotation: 0.0,
             translation_tween: None,
             opacity_tween: None,
+            background_tween: None,
+            scale_tween: None,
+            rotation_tween: None,
+            shake: None,
             style_dirty: true,
             paint_dirty: true,
         };
@@ -568,8 +575,15 @@ impl Ui {
         node.style_dirty = false;
         node.translation = cappy_layout::Point::default();
         node.opacity = 1.0;
+        node.background = None;
+        node.scale = 1.0;
+        node.rotation = 0.0;
         node.translation_tween = None;
         node.opacity_tween = None;
+        node.background_tween = None;
+        node.scale_tween = None;
+        node.rotation_tween = None;
+        node.shake = None;
         node.parent = None;
         if self.pressed == Some(id) {
             self.pressed = None;

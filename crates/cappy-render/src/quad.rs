@@ -29,17 +29,20 @@ pub(crate) struct QuadInstance {
     gradient: [f32; 4],
     /// Physical-pixel clip. A huge rectangle means the primitive is unclipped.
     clip: [f32; 4],
+    /// Pivot in physical pixels, clockwise radians, unused.
+    spin: [f32; 4],
 }
 
 impl QuadInstance {
-    const ATTRIBUTES: [wgpu::VertexAttribute; 7] = wgpu::vertex_attr_array![
+    const ATTRIBUTES: [wgpu::VertexAttribute; 8] = wgpu::vertex_attr_array![
         0 => Float32x4,
         1 => Float32x4,
         2 => Float32x4,
         3 => Float32x4,
         4 => Float32x4,
         5 => Float32x4,
-        6 => Float32x4
+        6 => Float32x4,
+        7 => Float32x4
     ];
 
     /// The instance for a display-list quad or shadow, scaled to physical pixels.
@@ -67,6 +70,7 @@ impl QuadInstance {
             ],
             gradient,
             clip: physical_clip(quad.clip, scale_factor),
+            spin: physical_spin(quad.spin, scale_factor),
         }
     }
 
@@ -85,6 +89,7 @@ impl QuadInstance {
             ],
             gradient: [0.0; 4],
             clip: physical_clip(shadow.clip, scale_factor),
+            spin: physical_spin(shadow.spin, scale_factor),
         }
     }
 
@@ -109,6 +114,7 @@ impl QuadInstance {
             shape: [border_width, radius, 0.0, 0.0],
             gradient: [0.0; 4],
             clip: UNCLIPPED,
+            spin: [0.0; 4],
         }
     }
 
@@ -123,6 +129,15 @@ impl QuadInstance {
 
 /// Clip that keeps every fragment. Used by erasers and the damage overlay.
 const UNCLIPPED: [f32; 4] = [-1.0e8, -1.0e8, 1.0e9, 1.0e9];
+
+fn physical_spin(spin: cappy_core::Spin, scale_factor: f32) -> [f32; 4] {
+    [
+        spin.pivot.x * scale_factor,
+        spin.pivot.y * scale_factor,
+        spin.radians,
+        0.0,
+    ]
+}
 
 pub(crate) fn physical_clip(clip: Option<Rect>, scale_factor: f32) -> [f32; 4] {
     let Some(clip) = clip else {

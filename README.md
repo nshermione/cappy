@@ -512,7 +512,7 @@ Snapshots live in `crates/cappy-testing/tests/snapshots` (GPU) and `crates/cappy
 | `CAPPY_DEBUG_DAMAGE` | `1` outlines repainted regions in the playground. `--debug-damage` does the same |
 | `CAPPY_UPDATE_SNAPSHOTS` | `1` rewrites pixel-test snapshots |
 | `WGPU_BACKEND` | Forces a wgpu backend such as `dx12` or `vulkan`. GPU renderer only |
-| `RUST_LOG` | Log filter. The playground defaults to `info,cappy_host=debug`, which logs per-frame repaints |
+| `RUST_LOG` | Log filter. The playground defaults to `info`. Per-frame repaint lines stay off until `WindowOptions::with_log_frames(true)`. Process-memory samples stay off until `WindowOptions::with_log_memory(true)` |
 
 ## Continuous integration
 
