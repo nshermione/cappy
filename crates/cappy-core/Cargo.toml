@@ -6,6 +6,11 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
+[features]
+# Software-renderer builds. Motion is crate-private: other crates cannot name `Motion` or call
+# `Context::animate`, so a use is a compile error.
+cpu = []
+
 [dependencies]
 cappy-style.workspace = true
 cappy-layout.workspace = true

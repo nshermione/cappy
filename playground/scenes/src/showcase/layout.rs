@@ -6,6 +6,7 @@ use cappy::prelude::*;
 
 use super::checklist::ChecklistTab;
 use super::counter::CounterTab;
+#[cfg(not(feature = "cpu"))]
 use super::motion::MotionTab;
 use super::paint::PaintTab;
 use super::store::{App, Tab};
@@ -30,9 +31,7 @@ pub fn root() -> Element {
             show (:app.tab.get() == Tab::Paint) {
                 PaintTab()
             }
-            show (:app.tab.get() == Tab::Motion) {
-                MotionTab()
-            }
+            { motion_panel(app) }
             Text("F12 toggles the repaint overlay. Idle frames repaint nothing.", class = ThemeClass::Muted)
         }
     }
@@ -45,9 +44,33 @@ fn tab_bar(app: App) -> Element {
             { tab(app, Tab::Tiles, "Tiles", "tab-tiles") }
             { tab(app, Tab::Checklist, "Checklist", "tab-checklist") }
             { tab(app, Tab::Paint, "Paint", "tab-paint") }
-            { tab(app, Tab::Motion, "Motion", "tab-motion") }
+            { motion_tab(app) }
         }
     }
+}
+
+#[cfg(not(feature = "cpu"))]
+fn motion_tab(app: App) -> Element {
+    tab(app, Tab::Motion, "Motion", "tab-motion")
+}
+
+#[cfg(feature = "cpu")]
+fn motion_tab(_app: App) -> Element {
+    fragment(std::iter::empty::<Element>())
+}
+
+#[cfg(not(feature = "cpu"))]
+fn motion_panel(app: App) -> Element {
+    element! {
+        show (:app.tab.get() == Tab::Motion) {
+            MotionTab()
+        }
+    }
+}
+
+#[cfg(feature = "cpu")]
+fn motion_panel(_app: App) -> Element {
+    fragment(std::iter::empty::<Element>())
 }
 
 fn tab(app: App, tab: Tab, title: &'static str, key: &'static str) -> Element {
@@ -59,15 +82,23 @@ fn tab(app: App, tab: Tab, title: &'static str, key: &'static str) -> Element {
             key = key,
             on_click = move |_| {
                 app.select(tab);
-                if tab == Tab::Motion {
-                    cx.animate(super::motion::spawn_loops);
-                }
+                start_motion_loops(&cx, tab);
             },
         ) {
             Text(title)
         }
     }
 }
+
+#[cfg(not(feature = "cpu"))]
+fn start_motion_loops(cx: &Context, tab: Tab) {
+    if tab == Tab::Motion {
+        cx.animate(super::motion::spawn_loops);
+    }
+}
+
+#[cfg(feature = "cpu")]
+fn start_motion_loops(_cx: &Context, _tab: Tab) {}
 
 fn header() -> Element {
     let themes = Context::current().themes();

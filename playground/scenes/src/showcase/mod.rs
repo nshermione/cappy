@@ -11,15 +11,18 @@
 //! - [`tiles`]: the tiles tab;
 //! - [`checklist`]: the checklist tab;
 //! - [`paint`]: the paint tab (linear gradients, drop shadows and a fitted image);
-//! - [`motion`]: the motion tab. Loops run on their own; Fade and Slide call [`Context::animate`].
+//! - motion: the motion tab, when the `cpu` feature is off. That feature does not export motion
+//!   from cappy, so this module is not compiled and a call to `animate` does not build.
 
 mod badge;
 mod checklist;
 mod counter;
 mod layout;
+#[cfg(not(feature = "cpu"))]
 mod motion;
 mod paint;
 mod store;
+#[cfg_attr(feature = "cpu", allow(dead_code))]
 mod style;
 mod tiles;
 

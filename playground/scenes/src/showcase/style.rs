@@ -154,7 +154,7 @@ stylesheet! {
             gap: Space::Md,
             flex_shrink: 0.0,
         }
-        /// Colored box the motion tab fades with [`cappy::Motion::opacity`].
+        /// Colored box the motion tab fades with opacity.
         MotionOpacity {
             width: 120,
             height: 72,
@@ -165,7 +165,7 @@ stylesheet! {
             justify: Justify::Center,
             margin_y: 36,
         }
-        /// Box the motion tab slides with [`cappy::Motion::translation`].
+        /// Box the motion tab slides with a translation.
         MotionSlide {
             width: 120,
             height: 72,
@@ -177,11 +177,11 @@ stylesheet! {
             justify: Justify::Center,
             margin_y: 36,
         }
-        /// Fill the motion tab crossfades with [`cappy::Motion::background`].
+        /// Fill the motion tab crossfades with a background.
         MotionColor {
             @include MotionOpacity,
         }
-        /// Box the motion tab scales with [`cappy::Motion::scale`].
+        /// Box the motion tab scales.
         MotionScale {
             @include MotionSlide,
             background: ColorToken::Success,

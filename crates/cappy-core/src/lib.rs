@@ -38,10 +38,9 @@ pub use paint::{
 pub use prop::{ByHandle, ByValue, PropInput};
 pub use reactive::{IntoReactive, Reactive, RetirePlaceholder, Signal};
 pub use theme_handle::{ThemeCatalog, ThemeHandle, Themes};
-pub use ui::{
-    Anim, AnimHandle, Ease, FrameInput, Motion, MotionCtx, NodeId, Repeat, ResourceCensus, Ui,
-    UpdateOutcome,
-};
+#[cfg(not(feature = "cpu"))]
+pub use ui::{Anim, AnimHandle, Ease, Motion, MotionCtx, Repeat};
+pub use ui::{FrameInput, NodeId, ResourceCensus, Ui, UpdateOutcome};
 
 pub use cappy_layout::{
     ApproximateTextMeasurer, Point, Rect, Size, TextMeasureRequest, TextMeasurer,

@@ -18,7 +18,7 @@ basic = [
     "dep:cappy-macros",
 ]
 gpu = ["basic", "dep:cappy-render"]
-cpu = ["basic", "dep:cappy-render-cpu"]
+cpu = ["basic", "dep:cappy-render-cpu", "cappy-core/cpu"]
 full = ["basic", "gpu", "dep:cappy-components"]
 
 [dependencies]

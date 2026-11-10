@@ -10,7 +10,7 @@ publish = false
 [features]
 default = []
 gpu = ["dep:cappy-winit", "cappy-winit/gpu"]
-cpu = ["dep:cappy-winit", "cappy-winit/cpu"]
+cpu = ["dep:cappy-winit", "cappy-winit/cpu", "cappy/cpu"]
 
 [dependencies]
 cappy = { workspace = true, features = ["basic"] }

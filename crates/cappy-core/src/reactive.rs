@@ -278,6 +278,7 @@ impl Runtime {
         self.ui_attached.set(false);
     }
 
+    #[cfg_attr(feature = "cpu", allow(dead_code))]
     pub(crate) fn push_motion(&self, job: MotionJob) {
         let wake = {
             let mut jobs = self.motion_jobs.borrow_mut();
