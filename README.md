@@ -365,6 +365,8 @@ impl Badge {
 
 `on(Self::press)` adapts a method to a listener. The method receives `&self` and the event.
 
+`on_before_mount`, `on_mounted`, `on_before_unmount`, `on_unmounted` and `on_updated` register during `render`. A parent `before_mount` runs before its children mount, and its `mounted` runs after them. Unmount follows the same order, parent `before_unmount` first. `show` hides the component and leaves it mounted. `if` and `for` unmount a branch they drop. `on_updated` runs on every `Ui::update` for that component only, and the host keeps scheduling frames while it is mounted. The mounted tree stays; the hook writes signals and those bindings flush in the same update. A call outside `render` panics.
+
 ### Themes
 
 ```rust

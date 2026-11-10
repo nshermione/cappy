@@ -89,6 +89,8 @@ pub struct Element {
     pub(crate) slot_owner: u32,
     /// The rendered tree contains slot holes, so unnamed children fill the first slot.
     pub(crate) accepts_slots: bool,
+    /// Hooks from the component that rendered this element. Mount moves them onto the runtime.
+    pub(crate) lifecycle: Option<crate::lifecycle::Lifecycle>,
 }
 
 /// A container element.
@@ -216,6 +218,7 @@ impl Element {
             children: Vec::new(),
             slot_owner: 0,
             accepts_slots: false,
+            lifecycle: None,
         }
     }
 
@@ -474,7 +477,12 @@ impl<C: Component + 'static> IntoElement for C {
         let context = self.context().clone();
         context.enter(|| {
             context.with(&self, || {
+                let guard = context.runtime.begin_hooks();
                 let mut element = self.render();
+                if let Some(mut hooks) = guard.finish() {
+                    hooks.inner = element.lifecycle.take().map(Box::new);
+                    element.lifecycle = Some(hooks);
+                }
                 element.slot_owner = COMPONENT_SLOT_OWNER;
                 if let Some(sheet) = C::stylesheet() {
                     stamp_stylesheet(&mut element, &sheet);

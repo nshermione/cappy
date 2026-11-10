@@ -9,8 +9,9 @@ use cappy_style::{Style, TextStyle};
 
 use super::Ui;
 use super::bindings::BindingKind;
-use super::node::{ChildPart, Node, NodeContent, NodeId};
+use super::node::{ChildPart, ComponentId, Node, NodeContent, NodeId};
 use crate::element::{Element, ElementContent, div};
+use crate::lifecycle::{Lifecycle, run_hooks};
 use crate::reactive::{BindingId, Observer, Signal, dispose_owner, enter_owner, track};
 
 /// What an [`Element`](Element) stores until mount moves it into a [`FlowState`].
@@ -158,8 +159,35 @@ impl FlowSpec {
     }
 }
 
+/// A component that registered hooks. Not a layout node: [`ChildPart::Component`] splices
+/// [`ComponentRecord::parts`] into the parent.
+pub(super) struct ComponentRecord {
+    pub(super) generation: u32,
+    hooks: Lifecycle,
+    parts: Vec<ChildPart>,
+    pub(super) disposed: bool,
+}
+
 impl Ui {
     pub(super) fn mount(&mut self, element: Element, parent: Option<NodeId>) -> NodeId {
+        let (hooks, element) = self.open_component(element);
+        let id = if element.lifecycle.is_some() {
+            self.mount(element, parent)
+        } else {
+            self.mount_root_element(element, parent)
+        };
+        if let Some(hooks) = hooks {
+            let part = self
+                .root_component
+                .take()
+                .map(ComponentId::part)
+                .unwrap_or(ChildPart::Node(id));
+            self.root_component = Some(self.close_component(hooks, vec![part]));
+        }
+        id
+    }
+
+    fn mount_root_element(&mut self, element: Element, parent: Option<NodeId>) -> NodeId {
         if parent.is_none()
             && matches!(
                 element.content,
@@ -169,6 +197,102 @@ impl Ui {
             return self.mount_node(div().child(element), None, false);
         }
         self.mount_node(element, parent, false)
+    }
+
+    /// Runs `before_mount` and leaves a nested lifecycle on `element` when this component returned
+    /// that child directly. `None` when the element has no hooks.
+    fn open_component(&mut self, mut element: Element) -> (Option<Lifecycle>, Element) {
+        let Some(mut hooks) = element.lifecycle.take() else {
+            return (None, element);
+        };
+        if let Some(inner) = hooks.inner.take() {
+            element.lifecycle = Some(*inner);
+        }
+        self.fire_hooks(&mut hooks.before_mount);
+        (Some(hooks), element)
+    }
+
+    fn close_component(&mut self, mut hooks: Lifecycle, parts: Vec<ChildPart>) -> ComponentId {
+        self.fire_hooks(&mut hooks.mounted);
+        self.insert_component(hooks, parts)
+    }
+
+    fn fire_hooks(&self, hooks: &mut [crate::lifecycle::Hook]) {
+        run_hooks(&self.queue.runtime, hooks);
+    }
+
+    fn insert_component(&mut self, hooks: Lifecycle, parts: Vec<ChildPart>) -> ComponentId {
+        let ticks = !hooks.updated.is_empty();
+        let id = if let Some(index) = self.free_components.pop() {
+            let generation = self.components[index as usize].generation.wrapping_add(1);
+            self.components[index as usize] = ComponentRecord {
+                generation,
+                hooks,
+                parts,
+                disposed: false,
+            };
+            ComponentId::new(index, generation)
+        } else {
+            let index = u32::try_from(self.components.len()).expect("too many components");
+            self.components.push(ComponentRecord {
+                generation: 0,
+                hooks,
+                parts,
+                disposed: false,
+            });
+            ComponentId::new(index, 0)
+        };
+        if ticks {
+            self.ticking.push(id);
+        }
+        id
+    }
+
+    fn component_record(&self, id: ComponentId) -> Option<&ComponentRecord> {
+        let record = self.components.get(id.index())?;
+        if record.disposed || record.generation != id.generation() {
+            None
+        } else {
+            Some(record)
+        }
+    }
+
+    pub(super) fn tick_components(&mut self) {
+        let ticking = self.ticking.clone();
+        for id in ticking {
+            let mut updated = {
+                let Some(record) = self.components.get_mut(id.index()) else {
+                    continue;
+                };
+                if record.disposed || record.generation != id.generation() {
+                    continue;
+                }
+                std::mem::take(&mut record.hooks.updated)
+            };
+            self.fire_hooks(&mut updated);
+            if let Some(record) = self.components.get_mut(id.index())
+                && !record.disposed
+                && record.generation == id.generation()
+            {
+                record.hooks.updated = updated;
+            }
+        }
+    }
+
+    pub(super) fn reclaim_disposed_components(&mut self) {
+        while self.components.last().is_some_and(|record| record.disposed) {
+            self.components.pop();
+        }
+        let len = self.components.len() as u32;
+        self.free_components.retain(|index| *index < len);
+        self.components.shrink_to_fit();
+        self.free_components.shrink_to_fit();
+        let ticking: Vec<ComponentId> = self.ticking.clone();
+        self.ticking = ticking
+            .into_iter()
+            .filter(|id| self.component_record(*id).is_some())
+            .collect();
+        self.ticking.shrink_to_fit();
     }
 
     fn insert_node(&mut self, mut node: Node) -> NodeId {
@@ -199,7 +323,12 @@ impl Ui {
             children,
             slot_owner: _,
             accepts_slots: _,
+            lifecycle,
         } = element;
+        assert!(
+            lifecycle.is_none(),
+            "component lifecycle must be taken before the node is mounted"
+        );
         let (content, text_binding) = match content {
             ElementContent::Container
             | ElementContent::Slot { .. }
@@ -283,6 +412,12 @@ impl Ui {
     }
 
     fn adopt(&mut self, parent: NodeId, element: Element, suppressed: bool) -> Vec<ChildPart> {
+        if element.lifecycle.is_some() {
+            let (hooks, element) = self.open_component(element);
+            let hooks = hooks.expect("lifecycle");
+            let parts = self.adopt(parent, element, suppressed);
+            return vec![self.close_component(hooks, parts).part()];
+        }
         if let ElementContent::Fragment(children) = element.content {
             return self.adopt_children(parent, children, suppressed);
         }
@@ -423,6 +558,15 @@ impl Ui {
     fn suppress_part(&mut self, part: ChildPart, suppressed: bool) {
         match part {
             ChildPart::Node(node) => self.suppress_node_tree(node, suppressed),
+            ChildPart::Component(id) => {
+                let Some(parts) = self.component_record(id).map(|record| record.parts.clone())
+                else {
+                    return;
+                };
+                for part in parts {
+                    self.suppress_part(part, suppressed);
+                }
+            }
             ChildPart::Flow(raw) => {
                 let child = FlowId(raw);
                 if self.flows[child.index()].disposed {
@@ -483,6 +627,12 @@ impl Ui {
         for part in parts {
             match *part {
                 ChildPart::Node(id) => out.push(id),
+                ChildPart::Component(id) => {
+                    let nested = self.component_record(id).map(|record| record.parts.clone());
+                    if let Some(nested) = nested {
+                        self.extend_parts(&nested, out);
+                    }
+                }
                 ChildPart::Flow(raw) => {
                     let flow = FlowId(raw);
                     if self
@@ -502,6 +652,11 @@ impl Ui {
         if self.nodes.is_empty() {
             return;
         }
+        if let Some(id) = self.root_component.take() {
+            self.dispose_component(id);
+            self.refresh_pointer();
+            return;
+        }
         let root = self.root;
         if self.nodes[root.index()].alive {
             self.dispose_node(root);
@@ -514,8 +669,33 @@ impl Ui {
             match part {
                 ChildPart::Node(id) => self.dispose_node(id),
                 ChildPart::Flow(raw) => self.dispose_flow(FlowId(raw)),
+                ChildPart::Component(id) => self.dispose_component(id),
             }
         }
+    }
+
+    fn dispose_component(&mut self, id: ComponentId) {
+        let (mut hooks, parts) = {
+            let Some(record) = self.components.get_mut(id.index()) else {
+                return;
+            };
+            if record.disposed || record.generation != id.generation() {
+                return;
+            }
+            record.disposed = true;
+            (
+                std::mem::take(&mut record.hooks),
+                std::mem::take(&mut record.parts),
+            )
+        };
+        self.ticking.retain(|tick| *tick != id);
+        if self.root_component == Some(id) {
+            self.root_component = None;
+        }
+        self.fire_hooks(&mut hooks.before_unmount);
+        self.dispose_parts(parts);
+        self.fire_hooks(&mut hooks.unmounted);
+        self.free_components.push(id.index() as u32);
     }
 
     fn dispose_flow(&mut self, id: FlowId) {

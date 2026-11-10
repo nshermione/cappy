@@ -8,8 +8,10 @@ use super::*;
 use crate::paint::Primitive;
 use crate::reactive::{live_signal_count, signal_is_alive, signal_subscriber_count};
 use crate::{
-    Application, ButtonState, Context, Element, InputEvent, IntoElement, PointerButton, Signal,
-    Slot, div, for_each, fragment, if_else, show, slot, text, text_dyn,
+    Application, ButtonState, Component, Context, Element, HasContext, InputEvent, IntoElement,
+    PointerButton, Signal, Singleton, SingletonOf, Slot, div, for_each, fragment, if_else,
+    on_before_mount, on_before_unmount, on_mounted, on_unmounted, on_updated, show, slot, text,
+    text_dyn, use_store,
 };
 use cappy_style::{Background, Color, FlexDirection, Overflow, StyleRefinement};
 
@@ -2141,4 +2143,534 @@ fn a_context_has_one_ui() {
     let cx = context();
     let _first = Ui::new(&cx, div(), Theme::light());
     let _second = Ui::new(&cx, div(), Theme::light());
+}
+
+fn phase(log: &Rc<RefCell<Vec<String>>>, label: &'static str) -> impl FnMut() + 'static {
+    let log = Rc::clone(log);
+    move || log.borrow_mut().push(label.to_owned())
+}
+
+#[derive(Clone)]
+struct HookChild {
+    context: Context,
+    log: Rc<RefCell<Vec<String>>>,
+}
+
+impl HasContext for HookChild {
+    fn context(&self) -> &Context {
+        &self.context
+    }
+}
+
+impl Component for HookChild {
+    fn render(&self) -> Element {
+        on_before_mount(phase(&self.log, "child:before_mount"));
+        on_mounted(phase(&self.log, "child:mounted"));
+        on_mounted(|| use_store(SingletonOf::<HookNote>::new()).value.set(4));
+        on_before_unmount(phase(&self.log, "child:before_unmount"));
+        on_unmounted(phase(&self.log, "child:unmounted"));
+        div().key("child")
+    }
+}
+
+#[derive(Clone)]
+struct HookNote {
+    value: Signal<i32>,
+}
+
+impl Singleton for HookNote {
+    fn create(cx: &Context) -> Self {
+        Self {
+            value: cx.signal(0),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct HookParent {
+    context: Context,
+    log: Rc<RefCell<Vec<String>>>,
+}
+
+impl HasContext for HookParent {
+    fn context(&self) -> &Context {
+        &self.context
+    }
+}
+
+impl Component for HookParent {
+    fn render(&self) -> Element {
+        on_before_mount(phase(&self.log, "parent:before_mount"));
+        on_before_mount(phase(&self.log, "parent:before_mount_2"));
+        on_mounted(phase(&self.log, "parent:mounted"));
+        on_before_unmount(phase(&self.log, "parent:before_unmount"));
+        on_unmounted(phase(&self.log, "parent:unmounted"));
+        div().key("parent").child(HookChild {
+            context: self.context.clone(),
+            log: Rc::clone(&self.log),
+        })
+    }
+}
+
+#[derive(Clone)]
+struct HookChain {
+    context: Context,
+    log: Rc<RefCell<Vec<String>>>,
+}
+
+impl HasContext for HookChain {
+    fn context(&self) -> &Context {
+        &self.context
+    }
+}
+
+impl Component for HookChain {
+    fn render(&self) -> Element {
+        on_before_mount(phase(&self.log, "chain:before_mount"));
+        on_mounted(phase(&self.log, "chain:mounted"));
+        on_before_unmount(phase(&self.log, "chain:before_unmount"));
+        on_unmounted(phase(&self.log, "chain:unmounted"));
+        HookChild {
+            context: self.context.clone(),
+            log: Rc::clone(&self.log),
+        }
+        .into_element()
+    }
+}
+
+#[derive(Clone)]
+struct HookFragment {
+    context: Context,
+    log: Rc<RefCell<Vec<String>>>,
+}
+
+impl HasContext for HookFragment {
+    fn context(&self) -> &Context {
+        &self.context
+    }
+}
+
+impl Component for HookFragment {
+    fn render(&self) -> Element {
+        on_mounted(phase(&self.log, "fragment:mounted"));
+        on_unmounted(phase(&self.log, "fragment:unmounted"));
+        fragment([text("a").key("a"), text("b").key("b")])
+    }
+}
+
+#[derive(Clone)]
+struct HookTicker {
+    context: Context,
+    ticks: Rc<Cell<u32>>,
+    value: Signal<i32>,
+}
+
+impl HasContext for HookTicker {
+    fn context(&self) -> &Context {
+        &self.context
+    }
+}
+
+impl Component for HookTicker {
+    fn render(&self) -> Element {
+        let ticks = Rc::clone(&self.ticks);
+        on_updated(move || ticks.set(ticks.get() + 1));
+        let value = self.value.clone();
+        on_updated(move || value.set(value.get_untracked() + 1));
+        let value = self.value.clone();
+        text_dyn(move || value.get().to_string()).key("value")
+    }
+}
+
+#[derive(Clone)]
+struct HookQuiet {
+    context: Context,
+    mounts: Rc<Cell<u32>>,
+}
+
+impl HasContext for HookQuiet {
+    fn context(&self) -> &Context {
+        &self.context
+    }
+}
+
+impl Component for HookQuiet {
+    fn render(&self) -> Element {
+        let mounts = Rc::clone(&self.mounts);
+        on_mounted(move || mounts.set(mounts.get() + 1));
+        div().key("quiet")
+    }
+}
+
+#[test]
+fn component_hooks_run_parent_before_child_and_unmount_in_reverse() {
+    let cx = context();
+    let log = Rc::new(RefCell::new(Vec::new()));
+    {
+        let ui = Ui::new(
+            &cx,
+            HookParent {
+                context: cx.clone(),
+                log: Rc::clone(&log),
+            },
+            Theme::light(),
+        );
+        assert_eq!(
+            log.borrow().as_slice(),
+            [
+                "parent:before_mount",
+                "parent:before_mount_2",
+                "child:before_mount",
+                "child:mounted",
+                "parent:mounted",
+            ]
+        );
+        assert_eq!(ui.resources().live_components, 2);
+        let note = cx.enter(|| {
+            use_store(SingletonOf::<HookNote>::new())
+                .value
+                .get_untracked()
+        });
+        assert_eq!(note, 4);
+        assert!(ui.find_by_key("child").is_some());
+    }
+    assert_eq!(
+        log.borrow().as_slice(),
+        [
+            "parent:before_mount",
+            "parent:before_mount_2",
+            "child:before_mount",
+            "child:mounted",
+            "parent:mounted",
+            "parent:before_unmount",
+            "child:before_unmount",
+            "child:unmounted",
+            "parent:unmounted",
+        ]
+    );
+}
+
+#[test]
+fn component_that_returns_a_child_component_keeps_both_lifecycles() {
+    let cx = context();
+    let log = Rc::new(RefCell::new(Vec::new()));
+    {
+        let ui = Ui::new(
+            &cx,
+            HookChain {
+                context: cx.clone(),
+                log: Rc::clone(&log),
+            },
+            Theme::light(),
+        );
+        assert_eq!(
+            log.borrow().as_slice(),
+            [
+                "chain:before_mount",
+                "child:before_mount",
+                "child:mounted",
+                "chain:mounted",
+            ]
+        );
+        assert_eq!(ui.resources().live_components, 2);
+    }
+    assert_eq!(
+        log.borrow().as_slice(),
+        [
+            "chain:before_mount",
+            "child:before_mount",
+            "child:mounted",
+            "chain:mounted",
+            "chain:before_unmount",
+            "child:before_unmount",
+            "child:unmounted",
+            "chain:unmounted",
+        ]
+    );
+}
+
+#[test]
+fn component_fragment_root_still_mounts_its_hooks() {
+    let cx = context();
+    let log = Rc::new(RefCell::new(Vec::new()));
+    {
+        let ui = Ui::new(
+            &cx,
+            HookFragment {
+                context: cx.clone(),
+                log: Rc::clone(&log),
+            },
+            Theme::light(),
+        );
+        assert_eq!(log.borrow().as_slice(), ["fragment:mounted"]);
+        assert_eq!(ui.node_text(ui.find_by_key("a").unwrap()).unwrap(), "a");
+        assert_eq!(ui.node_text(ui.find_by_key("b").unwrap()).unwrap(), "b");
+        assert_eq!(ui.resources().live_components, 1);
+    }
+    assert_eq!(
+        log.borrow().as_slice(),
+        ["fragment:mounted", "fragment:unmounted"]
+    );
+}
+
+#[test]
+fn component_without_hooks_adds_no_boundary() {
+    #[derive(Clone)]
+    struct Plain {
+        context: Context,
+    }
+
+    impl HasContext for Plain {
+        fn context(&self) -> &Context {
+            &self.context
+        }
+    }
+
+    impl Component for Plain {
+        fn render(&self) -> Element {
+            div().key("plain")
+        }
+    }
+
+    let cx = context();
+    let ui = Ui::new(
+        &cx,
+        Plain {
+            context: cx.clone(),
+        },
+        Theme::light(),
+    );
+    assert_eq!(ui.resources().live_components, 0);
+    assert_eq!(ui.resources().components, 0);
+    assert!(ui.find_by_key("plain").is_some());
+}
+
+#[test]
+fn show_hides_a_component_without_unmounting_and_keeps_its_frame_tick() {
+    let cx = context();
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let ticks = Rc::new(Cell::new(0));
+    let shown = cx.signal(true);
+    let flag = shown.clone();
+    let log_view = Rc::clone(&log);
+    let ticks_view = Rc::clone(&ticks);
+    let cx_view = cx.clone();
+    let mut ui = settled(
+        &cx,
+        div().child(show(
+            move || flag.get(),
+            move || {
+                HookShown {
+                    context: cx_view.clone(),
+                    log: Rc::clone(&log_view),
+                    ticks: Rc::clone(&ticks_view),
+                }
+                .into_element()
+            },
+        )),
+    );
+    assert_eq!(log.borrow().as_slice(), ["shown:mounted"]);
+    assert_eq!(ticks.get(), 1);
+    shown.set(false);
+    ui.update(VIEWPORT);
+    assert_eq!(log.borrow().as_slice(), ["shown:mounted"]);
+    assert_eq!(ticks.get(), 2);
+    assert!(ui.frame_deadline(Instant::now()).is_some());
+    shown.set(true);
+    ui.update(VIEWPORT);
+    assert_eq!(log.borrow().as_slice(), ["shown:mounted"]);
+    assert_eq!(ticks.get(), 3);
+
+    #[derive(Clone)]
+    struct HookShown {
+        context: Context,
+        log: Rc<RefCell<Vec<String>>>,
+        ticks: Rc<Cell<u32>>,
+    }
+
+    impl HasContext for HookShown {
+        fn context(&self) -> &Context {
+            &self.context
+        }
+    }
+
+    impl Component for HookShown {
+        fn render(&self) -> Element {
+            on_mounted(phase(&self.log, "shown:mounted"));
+            on_unmounted(phase(&self.log, "shown:unmounted"));
+            let ticks = Rc::clone(&self.ticks);
+            on_updated(move || ticks.set(ticks.get() + 1));
+            div().key("shown")
+        }
+    }
+}
+
+#[test]
+fn if_branch_unmounts_the_component_it_drops_and_releases_its_slot() {
+    let cx = context();
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let on = cx.signal(false);
+    let flag = on.clone();
+    let log_then = Rc::clone(&log);
+    let log_else = Rc::clone(&log);
+    let cx_then = cx.clone();
+    let cx_else = cx.clone();
+    let mut ui = settled(
+        &cx,
+        div().child(if_else(
+            move || flag.get(),
+            move || {
+                HookBranch {
+                    context: cx_then.clone(),
+                    log: Rc::clone(&log_then),
+                    name: "then",
+                }
+                .into_element()
+            },
+            move || {
+                HookBranch {
+                    context: cx_else.clone(),
+                    log: Rc::clone(&log_else),
+                    name: "else",
+                }
+                .into_element()
+            },
+        )),
+    );
+    let baseline = ui.resources();
+    assert_eq!(log.borrow().as_slice(), ["else:mounted"]);
+    assert_eq!(baseline.live_components, 1);
+    on.set(true);
+    ui.update(VIEWPORT);
+    assert_eq!(
+        log.borrow().as_slice(),
+        ["else:mounted", "else:unmounted", "then:mounted"]
+    );
+    on.set(false);
+    ui.update(VIEWPORT);
+    assert_eq!(ui.resources(), baseline);
+    assert_eq!(
+        log.borrow().as_slice(),
+        [
+            "else:mounted",
+            "else:unmounted",
+            "then:mounted",
+            "then:unmounted",
+            "else:mounted",
+        ]
+    );
+
+    #[derive(Clone)]
+    struct HookBranch {
+        context: Context,
+        log: Rc<RefCell<Vec<String>>>,
+        name: &'static str,
+    }
+
+    impl HasContext for HookBranch {
+        fn context(&self) -> &Context {
+            &self.context
+        }
+    }
+
+    impl Component for HookBranch {
+        fn render(&self) -> Element {
+            let name = self.name;
+            on_mounted(phase(
+                &self.log,
+                match name {
+                    "then" => "then:mounted",
+                    _ => "else:mounted",
+                },
+            ));
+            on_unmounted(phase(
+                &self.log,
+                match name {
+                    "then" => "then:unmounted",
+                    _ => "else:unmounted",
+                },
+            ));
+            div().key(name)
+        }
+    }
+}
+
+#[test]
+fn on_updated_reruns_every_frame_and_flushes_a_signal_in_that_update() {
+    let cx = context();
+    let ticks = Rc::new(Cell::new(0));
+    let mounts = Rc::new(Cell::new(0));
+    let value = cx.signal(0);
+    let mut ui = Ui::new(
+        &cx,
+        div().children([
+            HookTicker {
+                context: cx.clone(),
+                ticks: Rc::clone(&ticks),
+                value: value.clone(),
+            }
+            .into_element(),
+            HookQuiet {
+                context: cx.clone(),
+                mounts: Rc::clone(&mounts),
+            }
+            .into_element(),
+        ]),
+        Theme::light(),
+    );
+    assert_eq!(ticks.get(), 0);
+    assert_eq!(mounts.get(), 1);
+    assert_eq!(ui.node_text(ui.find_by_key("value").unwrap()).unwrap(), "0");
+    ui.update(VIEWPORT);
+    assert_eq!(ticks.get(), 1);
+    assert_eq!(mounts.get(), 1);
+    assert_eq!(ui.node_text(ui.find_by_key("value").unwrap()).unwrap(), "1");
+    assert!(ui.frame_deadline(Instant::now()).is_some());
+    ui.update(VIEWPORT);
+    assert_eq!(ticks.get(), 2);
+    assert_eq!(ui.node_text(ui.find_by_key("value").unwrap()).unwrap(), "2");
+
+    let on = cx.signal(true);
+    let flag = on.clone();
+    let ticks_branch = Rc::clone(&ticks);
+    let value_branch = value.clone();
+    let cx_branch = cx.clone();
+    drop(ui);
+    let mut ui = settled(
+        &cx,
+        div().child(if_else(
+            move || flag.get(),
+            {
+                let ticks_branch = Rc::clone(&ticks_branch);
+                let value_branch = value_branch.clone();
+                let cx_branch = cx_branch.clone();
+                move || {
+                    HookTicker {
+                        context: cx_branch.clone(),
+                        ticks: Rc::clone(&ticks_branch),
+                        value: value_branch.clone(),
+                    }
+                    .into_element()
+                }
+            },
+            || div().key("gone"),
+        )),
+    );
+    let after_mount = ticks.get();
+    assert!(ui.frame_deadline(Instant::now()).is_some());
+    assert!(ui.find_by_key("value").is_some());
+    on.set(false);
+    ui.update(VIEWPORT);
+    assert_eq!(ticks.get(), after_mount);
+    assert!(ui.frame_deadline(Instant::now()).is_none());
+    ui.update(VIEWPORT);
+    assert_eq!(ticks.get(), after_mount);
+    assert!(ui.find_by_key("gone").is_some());
+}
+
+#[test]
+#[should_panic(expected = "on_mounted called outside a component render")]
+fn on_mounted_outside_render_panics() {
+    let cx = context();
+    cx.enter(|| on_mounted(|| {}));
 }

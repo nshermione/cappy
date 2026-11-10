@@ -9,11 +9,42 @@ use crate::bitmap::{ImagePixels, ObjectFit};
 
 use crate::element::{ClickHandler, HoverHandler};
 
-/// One direct child of a node: a mounted element, or a control-flow block.
+/// One direct child of a node: a mounted element, a control-flow block, or a component boundary.
+///
+/// A component boundary is not a layout node. Flattening splices the nodes it owns into the parent.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum ChildPart {
     Node(NodeId),
     Flow(u32),
+    Component(ComponentId),
+}
+
+/// Handle to a mounted component boundary.
+///
+/// `generation` changes when the slot is recycled, so a handle from a disposed component does not
+/// refer to whatever is mounted there later.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ComponentId {
+    index: u32,
+    generation: u32,
+}
+
+impl ComponentId {
+    pub(crate) fn new(index: u32, generation: u32) -> Self {
+        Self { index, generation }
+    }
+
+    pub(crate) fn index(self) -> usize {
+        self.index as usize
+    }
+
+    pub(crate) fn generation(self) -> u32 {
+        self.generation
+    }
+
+    pub(crate) fn part(self) -> ChildPart {
+        ChildPart::Component(self)
+    }
 }
 
 /// Handle to a mounted node.

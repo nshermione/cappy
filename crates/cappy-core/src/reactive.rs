@@ -250,6 +250,8 @@ pub(crate) struct Runtime {
     next_owner_generation: Cell<u32>,
     singletons: RefCell<HashMap<TypeId, Box<dyn Any>>>,
     pub(crate) components: RefCell<Vec<Rc<dyn Any>>>,
+    /// One frame per component `render` currently on the stack. Hooks register into the top frame.
+    pub(crate) hook_frames: RefCell<Vec<crate::lifecycle::HookFrame>>,
     themes: RefCell<Option<ThemeSlot>>,
     /// Closures from [`crate::Context::animate`], run by the one [`crate::Ui`] on this runtime.
     motion_jobs: RefCell<Vec<MotionJob>>,

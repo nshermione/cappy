@@ -8,6 +8,7 @@ mod context;
 mod damage;
 mod element;
 mod event;
+mod lifecycle;
 mod listener;
 mod paint;
 mod prop;
@@ -20,6 +21,7 @@ pub use context::{
     Application, Context, FieldInit, Singleton, SingletonOf, on, reactive, use_local_store,
     use_store,
 };
+pub use lifecycle::{on_before_mount, on_before_unmount, on_mounted, on_unmounted, on_updated};
 
 pub use binding::{Dynamic, IntoClasses, IntoStyle, IntoText};
 pub use bitmap::{ImagePixels, ImagePixelsError, ObjectFit};

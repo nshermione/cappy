@@ -41,6 +41,11 @@ pub struct ResourceCensus {
     pub binding_capacity: usize,
     pub flows: usize,
     pub flow_capacity: usize,
+    /// Component boundaries in the arena, including disposed slots not yet released.
+    pub components: usize,
+    pub component_capacity: usize,
+    /// Boundaries that have not been disposed.
+    pub live_components: usize,
     pub layout_nodes: usize,
     pub layout_capacity: usize,
     /// Taffy slots reserved, including ones `remove` has not given back yet.
@@ -113,6 +118,13 @@ pub struct Ui {
     /// Indexes of disposed bindings, reused by the next allocation.
     free_bindings: Vec<u32>,
     flows: Vec<flow::FlowState>,
+    components: Vec<flow::ComponentRecord>,
+    /// Indexes of disposed component boundaries, reused by the next mount.
+    free_components: Vec<u32>,
+    /// Components that registered [`on_updated`](crate::on_updated).
+    ticking: Vec<node::ComponentId>,
+    /// Set when the root element is a component that registered hooks.
+    root_component: Option<node::ComponentId>,
     queue: Rc<BindingQueue>,
     theme_signal: Signal<ThemeHandle>,
     theme: ThemeHandle,
@@ -161,6 +173,10 @@ impl Ui {
             bindings: Vec::new(),
             free_bindings: Vec::new(),
             flows: Vec::new(),
+            components: Vec::new(),
+            free_components: Vec::new(),
+            ticking: Vec::new(),
+            root_component: None,
             queue: Rc::new(BindingQueue::new(Rc::clone(&context.runtime))),
             theme_signal,
             theme: initial_theme,
@@ -238,7 +254,8 @@ impl Ui {
 
     /// When the host should draw the next animation frame. `None` once scroll and tweens rest.
     pub fn frame_deadline(&self, now: Instant) -> Option<Instant> {
-        (self.scroll_animating() || self.motion_animating()).then_some(now + scroll::SCROLL_FRAME)
+        (self.scroll_animating() || self.motion_animating() || !self.ticking.is_empty())
+            .then_some(now + scroll::SCROLL_FRAME)
     }
 
     fn scroll_animating(&self) -> bool {
@@ -257,6 +274,8 @@ impl Ui {
         let dt = scroll::scroll_dt(self.updated_at, now);
         self.updated_at = Some(now);
         self.apply_viewport(input);
+        self.process_bindings();
+        self.tick_components();
         self.process_bindings();
         self.resolve_styles();
         self.run_layout();
@@ -394,6 +413,7 @@ impl Ui {
         self.queue.shrink_sources(self.bindings.len());
 
         self.reclaim_disposed_flows();
+        self.reclaim_disposed_components();
         self.layout.compact();
         self.layout.shrink_to_fit();
         let hovered = std::mem::take(&mut self.hovered);
@@ -428,6 +448,13 @@ impl Ui {
             binding_capacity: self.bindings.capacity(),
             flows: self.flows.len(),
             flow_capacity: self.flows.capacity(),
+            components: self.components.len(),
+            component_capacity: self.components.capacity(),
+            live_components: self
+                .components
+                .iter()
+                .filter(|record| !record.disposed)
+                .count(),
             layout_nodes: self.layout.node_count(),
             layout_capacity: self.layout.node_capacity(),
             layout_retained: self.layout.retained_slots(),
