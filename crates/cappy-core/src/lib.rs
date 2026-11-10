@@ -9,6 +9,7 @@ mod context;
 mod damage;
 mod element;
 mod event;
+mod geometry;
 mod image_decode;
 mod image_load;
 mod image_source;

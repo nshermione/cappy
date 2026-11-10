@@ -20,6 +20,7 @@ use std::rc::{Rc, Weak};
 
 use cappy_style::Theme;
 
+use crate::geometry::GeometryBoard;
 use crate::theme_handle::{ThemeCatalog, ThemeHandle, Themes};
 
 /// Identifies one reactive binding inside a [`BindingQueue`].
@@ -200,15 +201,24 @@ impl Observer {
         }
     }
 
-    fn same_as(&self, other: &Observer) -> bool {
+    pub(crate) fn same_as(&self, other: &Observer) -> bool {
         self.binding == other.binding && Weak::ptr_eq(&self.queue, &other.queue)
+    }
+
+    pub(crate) fn binding_id(&self) -> BindingId {
+        self.binding
+    }
+
+    /// True when this subscriber is `binding` on `queue`.
+    pub(crate) fn belongs_to(&self, binding: BindingId, queue: *const BindingQueue) -> bool {
+        self.binding == binding && self.queue.as_ptr() == queue
     }
 
     fn is_alive(&self) -> bool {
         self.queue.strong_count() > 0
     }
 
-    fn notify(&self) {
+    pub(crate) fn notify(&self) {
         if let Some(queue) = self.queue.upgrade() {
             queue.push(self.binding);
         }
@@ -234,6 +244,17 @@ pub(crate) struct ListenerSlot {
 struct MountOwner {
     generation: u32,
     signals: Vec<SignalKey>,
+}
+
+/// Pops the geometry board [`Runtime::enter_board`] pushed, including when the update panics.
+pub(crate) struct BoardGuard {
+    runtime: Rc<Runtime>,
+}
+
+impl Drop for BoardGuard {
+    fn drop(&mut self) {
+        self.runtime.geometry_boards.borrow_mut().pop();
+    }
 }
 
 /// One [`crate::Context::animate`] closure, waiting for the runtime's [`crate::Ui`] to drain it.
@@ -268,6 +289,10 @@ pub(crate) struct Runtime {
     /// Popup windows requested by UI code. The host takes them with [`crate::Context::drain_surfaces`].
     pub(crate) surfaces: RefCell<Vec<crate::surface::SurfaceCommand>>,
     pub(crate) next_surface: Cell<u64>,
+    /// Geometry boards of the UIs whose update or event handler is running. The last one is current.
+    geometry_boards: RefCell<Vec<Rc<GeometryBoard>>>,
+    /// Board of the first UI. Writes from outside an update land here.
+    primary_board: RefCell<Option<Weak<GeometryBoard>>>,
 }
 
 struct ThemeSlot {
@@ -291,7 +316,30 @@ impl Runtime {
         self.ui_count.set(self.ui_count.get().saturating_sub(1));
         if primary {
             *self.waker.borrow_mut() = None;
+            *self.primary_board.borrow_mut() = None;
         }
+    }
+
+    /// Makes `board` the geometry [`crate::Context::node_rect`] and [`crate::Context::scroll_offset`] read.
+    pub(crate) fn enter_board(self: &Rc<Self>, board: &Rc<GeometryBoard>) -> BoardGuard {
+        self.geometry_boards.borrow_mut().push(Rc::clone(board));
+        BoardGuard {
+            runtime: Rc::clone(self),
+        }
+    }
+
+    pub(crate) fn current_board(&self) -> Option<Rc<GeometryBoard>> {
+        self.geometry_boards.borrow().last().cloned()
+    }
+
+    pub(crate) fn set_primary_board(&self, board: &Rc<GeometryBoard>) {
+        *self.primary_board.borrow_mut() = Some(Rc::downgrade(board));
+    }
+
+    /// The board of the UI that is updating, or the first UI's board when nothing is current.
+    pub(crate) fn board_for_write(&self) -> Option<Rc<GeometryBoard>> {
+        self.current_board()
+            .or_else(|| self.primary_board.borrow().as_ref().and_then(Weak::upgrade))
     }
 
     pub(crate) fn wake_host(&self) {
@@ -709,6 +757,9 @@ pub(crate) fn track<R>(observer: Observer, scope: impl FnOnce() -> R) -> R {
         .expect("binding queue dropped before its binding ran");
     detach_binding(queue.as_ref(), observer.binding);
     let runtime = Rc::clone(&queue.runtime);
+    if let Some(board) = runtime.current_board() {
+        board.detach(queue.as_ref(), observer.binding);
+    }
     drop(queue);
     let previous = runtime.current_observer.borrow_mut().replace(observer);
     let _restore = RestoreObserver { runtime, previous };

@@ -21,6 +21,7 @@ use cappy_style::{Style, Theme};
 use crate::clipboard::{Clipboard, MemoryClipboard};
 use crate::element::IntoElement;
 use crate::event::Modifiers;
+use crate::geometry::GeometryBoard;
 use crate::paint::{Primitive, RenderFrame};
 use crate::reactive::{BindingQueue, Signal};
 use crate::{Context, CursorIcon, Damage, DamageTracker, ThemeHandle};
@@ -160,6 +161,8 @@ pub struct Ui {
     caret_on: bool,
     caret_deadline: Option<Instant>,
     clipboard: Box<dyn Clipboard>,
+    /// Keyed rects and scroll offsets bindings can read, and scroll writes they queue.
+    board: Rc<GeometryBoard>,
     /// Sequence and parallel groups still waiting on a step.
     anims: Vec<motion::Running>,
     next_anim_owner: u64,
@@ -181,6 +184,9 @@ impl Ui {
         }
         let theme_signal = context.current_theme().as_signal();
         let initial_theme = theme_signal.get_untracked();
+        let board = Rc::new(GeometryBoard::default());
+        // Mount evaluates bindings. They subscribe to geometry only while this board is current.
+        let _entered = context.runtime.enter_board(&board);
         let mut ui = Self {
             nodes: Vec::new(),
             free_nodes: Vec::new(),
@@ -217,6 +223,7 @@ impl Ui {
             caret_on: true,
             caret_deadline: None,
             clipboard: Box::new(MemoryClipboard::new()),
+            board,
             anims: Vec::new(),
             next_anim_owner: 0,
             primary: false,
@@ -224,6 +231,9 @@ impl Ui {
         ui.root = ui.mount(root.into_element(), None);
         ui.add_binding(ui.root, BindingKind::Theme);
         ui.primary = ui.queue.runtime.attach_ui();
+        if ui.primary {
+            ui.queue.runtime.set_primary_board(&ui.board);
+        }
         ui
     }
 
@@ -243,6 +253,7 @@ impl Ui {
     pub fn set_waker(&mut self, waker: impl Fn() + 'static) {
         let waker: Rc<dyn Fn()> = Rc::new(waker);
         self.queue.set_waker(Some(Rc::clone(&waker)));
+        self.board.set_waker(Some(Rc::clone(&waker)));
         if self.primary {
             self.queue.set_runtime_waker(Some(waker));
         }
@@ -277,6 +288,7 @@ impl Ui {
             || self.scroll_animating()
             || self.motion_animating()
             || self.queue.runtime.has_motions()
+            || self.board.has_writes()
     }
 
     /// When the host should draw the next animation frame. `None` once scroll and tweens rest.
@@ -311,12 +323,15 @@ impl Ui {
 
     /// [`Ui::update`] at `now`, so tests can step the scroll ease without waiting.
     pub(crate) fn update_at(&mut self, input: FrameInput, now: Instant) -> UpdateOutcome {
+        let _entered = self.queue.runtime.enter_board(&self.board);
         let dt = scroll::scroll_dt(self.updated_at, now);
         self.updated_at = Some(now);
         self.apply_viewport(input);
+        self.drain_scroll_writes();
         self.process_bindings();
         self.tick_components();
         self.process_bindings();
+        self.drain_scroll_writes();
         self.resolve_styles();
         self.run_layout();
         // Hover changes caused by layout can restyle nodes again.
@@ -330,6 +345,7 @@ impl Ui {
         self.step_caret(now);
         self.finish_anims(now);
         self.run_layout();
+        self.flush_geometry_bindings();
         self.collect_paint_damage();
         self.rebuild_display_list();
         self.reclaim_unused();
@@ -532,6 +548,29 @@ impl Ui {
             live_listeners: runtime.live_listeners,
             singletons: runtime.singletons,
         }
+    }
+
+    /// Applies scroll offsets a component queued with [`Context::set_scroll_offset`].
+    fn drain_scroll_writes(&mut self) {
+        for (key, offset) in self.board.take_writes() {
+            let Some(id) = self.find_by_key(&key) else {
+                continue;
+            };
+            self.jump_scroll(id, false, offset.x);
+            self.jump_scroll(id, true, offset.y);
+        }
+    }
+
+    /// Runs bindings that read a rect or scroll offset which layout just changed, then lays out
+    /// once more if those bindings dirtied style. A further geometry change waits for the next update.
+    fn flush_geometry_bindings(&mut self) {
+        if !self.board.take_notified() {
+            return;
+        }
+        self.drain_scroll_writes();
+        self.process_bindings();
+        self.resolve_styles();
+        self.run_layout();
     }
 }
 

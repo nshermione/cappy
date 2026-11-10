@@ -31,6 +31,7 @@ pub(super) struct ScrollbarDrag {
 impl Ui {
     /// Feeds one input event. Call [`Ui::update`] afterwards if [`Ui::needs_update`] is true.
     pub fn handle_event(&mut self, event: InputEvent) {
+        let _entered = self.queue.runtime.enter_board(&self.board);
         match event {
             InputEvent::PointerMoved { position } => {
                 self.pointer = Some(position);

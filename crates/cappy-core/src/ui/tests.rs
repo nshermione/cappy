@@ -253,10 +253,7 @@ fn a_disabled_node_ignores_hover_click_and_the_pointer() {
         position: center_of(&ui, "gate"),
     });
     ui.update(VIEWPORT);
-    assert_eq!(
-        ui.node_style(gate).unwrap().visual.background,
-        Color::BLACK
-    );
+    assert_eq!(ui.node_style(gate).unwrap().visual.background, Color::BLACK);
     assert_eq!(ui.cursor(), CursorIcon::Default);
     let point = center_of(&ui, "gate");
     click_at(&mut ui, point.x, point.y);
@@ -270,10 +267,7 @@ fn a_disabled_node_ignores_hover_click_and_the_pointer() {
         position: center_of(&ui, "gate"),
     });
     ui.update(VIEWPORT);
-    assert_eq!(
-        ui.node_style(gate).unwrap().visual.background,
-        Color::WHITE
-    );
+    assert_eq!(ui.node_style(gate).unwrap().visual.background, Color::WHITE);
     assert_eq!(ui.cursor(), CursorIcon::Pointer);
     let point = center_of(&ui, "gate");
     click_at(&mut ui, point.x, point.y);
@@ -3102,4 +3096,247 @@ fn external_signal_writes_replace_the_buffer_and_keep_a_caret_inside_it() {
     ui.handle_event(InputEvent::Text("!".into()));
     ui.update(VIEWPORT);
     assert_eq!(name.get(), "yo!");
+}
+
+fn rect_label(cx: &Context, key: &'static str) -> Element {
+    let read = cx.clone();
+    text_dyn(move || {
+        read.node_rect(key)
+            .map(|rect| format!("{}", rect.width as i32))
+            .unwrap_or_else(|| "none".into())
+    })
+}
+
+#[test]
+fn a_binding_reads_the_laid_out_rect_and_updates_when_it_changes() {
+    let cx = context();
+    let width = cx.signal(100);
+    let width_style = width.clone();
+    let mut ui = settled(
+        &cx,
+        div()
+            .key("box")
+            .style_dyn(move || {
+                StyleRefinement::default()
+                    .width(width_style.get())
+                    .height(40)
+                    .flex_shrink(0.0)
+            })
+            .child(rect_label(&cx, "box").key("label")),
+    );
+    assert_eq!(ui.node_text(ui.find_by_key("label").unwrap()), Some("100"));
+    assert_eq!(
+        ui.node_rect(ui.find_by_key("box").unwrap()).unwrap().width,
+        100.0
+    );
+
+    width.set(180);
+    ui.update(VIEWPORT);
+    assert_eq!(ui.node_text(ui.find_by_key("label").unwrap()), Some("180"));
+    assert!(!ui.needs_update());
+}
+
+#[test]
+fn a_missing_key_reads_none_and_does_not_keep_the_ui_awake() {
+    let cx = context();
+    let ui = settled(&cx, rect_label(&cx, "missing").key("label"));
+    assert_eq!(ui.node_text(ui.find_by_key("label").unwrap()), Some("none"));
+    assert!(!ui.needs_update());
+}
+
+#[test]
+fn disposing_a_keyed_node_clears_the_rect_a_binding_reads() {
+    let cx = context();
+    let show_box = cx.signal(true);
+    let visible = show_box.clone();
+    let mut ui = settled(
+        &cx,
+        div().children([
+            if_else(
+                move || visible.get(),
+                || {
+                    div().key("box").style(
+                        StyleRefinement::default()
+                            .width(70)
+                            .height(20)
+                            .flex_shrink(0.0),
+                    )
+                },
+                || div(),
+            ),
+            rect_label(&cx, "box").key("label"),
+        ]),
+    );
+    assert_eq!(ui.node_text(ui.find_by_key("label").unwrap()), Some("70"));
+    show_box.set(false);
+    ui.update(VIEWPORT);
+    assert_eq!(ui.node_text(ui.find_by_key("label").unwrap()), Some("none"));
+    assert!(ui.find_by_key("box").is_none());
+}
+
+#[test]
+fn set_scroll_offset_jumps_wakes_the_host_and_a_binding_reads_it() {
+    let cx = context();
+    let read = cx.clone();
+    let mut ui = settled(
+        &cx,
+        div().children([
+            scroll_column(Overflow::Auto),
+            text_dyn(move || {
+                read.scroll_offset("scroller")
+                    .map(|offset| format!("{}", offset.y as i32))
+                    .unwrap_or_else(|| "none".into())
+            })
+            .key("offset"),
+        ]),
+    );
+    assert_eq!(ui.node_text(ui.find_by_key("offset").unwrap()), Some("0"));
+    let before = ui.node_rect(ui.find_by_key("tall").unwrap()).unwrap().y;
+
+    let wakes = Rc::new(Cell::new(0));
+    let flag = Rc::clone(&wakes);
+    ui.set_waker(move || flag.set(flag.get() + 1));
+    cx.set_scroll_offset("scroller", Point::new(0.0, 30.0));
+    assert_eq!(wakes.get(), 1);
+    assert!(ui.needs_update());
+
+    ui.update(VIEWPORT);
+    let after = ui.node_rect(ui.find_by_key("tall").unwrap()).unwrap().y;
+    assert!((before - after - 30.0).abs() < 0.5);
+    assert_eq!(ui.node_text(ui.find_by_key("offset").unwrap()), Some("30"));
+    assert!(!ui.scroll_animating());
+}
+
+#[test]
+fn a_rect_binding_does_not_rerun_when_only_scroll_changes() {
+    let cx = context();
+    let hits = Rc::new(Cell::new(0));
+    let count = Rc::clone(&hits);
+    let read = cx.clone();
+    let mut ui = settled(
+        &cx,
+        div().children([
+            scroll_column(Overflow::Auto),
+            text_dyn(move || {
+                count.set(count.get() + 1);
+                read.node_rect("scroller")
+                    .map(|rect| format!("{}", rect.height as i32))
+                    .unwrap_or_else(|| "none".into())
+            })
+            .key("height"),
+        ]),
+    );
+    let after_layout = hits.get();
+    assert!(after_layout >= 1);
+    assert_eq!(ui.node_text(ui.find_by_key("height").unwrap()), Some("80"));
+    cx.set_scroll_offset("scroller", Point::new(0.0, 25.0));
+    ui.update(VIEWPORT);
+    assert_eq!(hits.get(), after_layout);
+}
+
+#[test]
+fn a_click_reads_the_node_rect_and_writes_its_scroll_offset() {
+    let cx = context();
+    let seen = Rc::new(Cell::new(None));
+    let seen_click = Rc::clone(&seen);
+    let read = cx.clone();
+    let write = cx.clone();
+    let mut ui = settled(
+        &cx,
+        div().children([
+            scroll_column(Overflow::Auto),
+            div()
+                .key("back")
+                .style(
+                    StyleRefinement::default()
+                        .width(40)
+                        .height(20)
+                        .flex_shrink(0.0),
+                )
+                .on_click(move |_| {
+                    seen_click.set(read.node_rect("back"));
+                    write.set_scroll_offset("scroller", Point::new(0.0, 40.0));
+                })
+                .child(text("top")),
+        ]),
+    );
+    let before = ui.node_rect(ui.find_by_key("tall").unwrap()).unwrap().y;
+    click(&mut ui, "back");
+    let reported = seen.get().expect("click saw the button rect");
+    assert_eq!(
+        reported,
+        ui.node_rect(ui.find_by_key("back").unwrap()).unwrap()
+    );
+    assert!(ui.needs_update());
+    ui.update(VIEWPORT);
+    let after = ui.node_rect(ui.find_by_key("tall").unwrap()).unwrap().y;
+    assert!((before - after - 40.0).abs() < 0.5);
+}
+
+#[test]
+fn two_uis_keep_separate_geometry() {
+    let cx = context();
+    let mut first = settled(&cx, sized_geometry(&cx, 40));
+    let mut second = settled(&cx, sized_geometry(&cx, 90));
+    second.update(VIEWPORT);
+    first.update(VIEWPORT);
+    assert_eq!(
+        first.node_text(first.find_by_key("label").unwrap()),
+        Some("40")
+    );
+    assert_eq!(
+        second.node_text(second.find_by_key("label").unwrap()),
+        Some("90")
+    );
+
+    let primary_wakes = Rc::new(Cell::new(0));
+    let primary_flag = Rc::clone(&primary_wakes);
+    first.set_waker(move || primary_flag.set(primary_flag.get() + 1));
+
+    let seen = Rc::new(Cell::new(None));
+    let seen_click = Rc::clone(&seen);
+    let read = cx.clone();
+    let secondary_wakes = Rc::new(Cell::new(0));
+    let secondary_flag = Rc::clone(&secondary_wakes);
+    let mut second = settled(
+        &cx,
+        div()
+            .key("box")
+            .style(
+                StyleRefinement::default()
+                    .width(90)
+                    .height(20)
+                    .flex_shrink(0.0),
+            )
+            .child(
+                div()
+                    .key("hit")
+                    .style(StyleRefinement::default().width(20).height(20))
+                    .on_click(move |_| {
+                        seen_click.set(read.node_rect("box"));
+                    })
+                    .child(text("go")),
+            ),
+    );
+    second.set_waker(move || secondary_flag.set(secondary_flag.get() + 1));
+    click(&mut second, "hit");
+    assert_eq!(seen.get().expect("click saw a rect").width, 90.0);
+    assert_eq!(secondary_wakes.get(), 0);
+    assert_eq!(primary_wakes.get(), 0);
+
+    cx.set_scroll_offset("nowhere", Point::new(1.0, 1.0));
+    assert_eq!(primary_wakes.get(), 1);
+    assert_eq!(secondary_wakes.get(), 0);
+}
+
+fn sized_geometry(cx: &Context, width: i32) -> Element {
+    div().children([
+        div().key("box").style(
+            StyleRefinement::default()
+                .width(width)
+                .height(20)
+                .flex_shrink(0.0),
+        ),
+        rect_label(cx, "box").key("label"),
+    ])
 }

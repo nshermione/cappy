@@ -72,6 +72,7 @@ impl Ui {
         binding.disposed = true;
         binding.kind = BindingKind::Disposed;
         detach_binding(&self.queue, id);
+        self.board.detach(&self.queue, id);
         self.free_bindings.push(id.slot() as u32);
     }
 

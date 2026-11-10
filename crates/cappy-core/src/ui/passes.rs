@@ -259,6 +259,15 @@ impl Ui {
         max
     }
 
+    /// Copies this node's rect and scroll into the geometry board when it has a key.
+    fn publish_geometry(&self, id: NodeId, rect: Rect) {
+        let Some(key) = self.nodes[id.index()].key.as_deref() else {
+            return;
+        };
+        let scroll = self.nodes[id.index()].scroll;
+        self.board.publish(key, id, rect, scroll);
+    }
+
     fn place_nodes(&mut self) {
         let mut stack = vec![Placed {
             id: self.root,
@@ -289,6 +298,7 @@ impl Ui {
                 self.damage_clipped(paint_bounds(rect, shadow), clip);
                 self.display_list_stale = true;
             }
+            self.publish_geometry(id, rect);
             let node = &self.nodes[id.index()];
             let child_origin = Point::new(rect.x - node.scroll.x, rect.y - node.scroll.y);
             let child_clip = if node.style.layout.clips() {

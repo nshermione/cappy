@@ -828,6 +828,7 @@ impl Ui {
         self.damage_clipped(painted, clip);
         self.damage_clipped(rect, clip);
         let _ = self.layout.remove(id);
+        let geometry_key = self.nodes[id.index()].key.clone();
         let node = &mut self.nodes[id.index()];
         node.alive = false;
         node.children.clear();
@@ -877,6 +878,9 @@ impl Ui {
             self.scrollbar_drag = None;
         }
         self.display_list_stale = true;
+        if let Some(key) = geometry_key {
+            self.board.forget(&key, id);
+        }
         self.free_nodes.push(id.index() as u32);
     }
 
