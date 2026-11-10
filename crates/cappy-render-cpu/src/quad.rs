@@ -208,16 +208,17 @@ fn fill_background(
             start,
             end,
         } => {
-            let mut start = tiny_skia::Point::from_xy(
+            // Leave the stops in the same space as `path`. `fill_path` applies `transform` to
+            // the shader as well as the path. Mapping the points here shifts the gradient a
+            // second time, so a scratch that does not start at (0, 0) paints one solid stop.
+            let start = tiny_skia::Point::from_xy(
                 rect.x + start.x * rect.width,
                 rect.y + start.y * rect.height,
             );
-            let mut end = tiny_skia::Point::from_xy(
+            let end = tiny_skia::Point::from_xy(
                 rect.x + end.x * rect.width,
                 rect.y + end.y * rect.height,
             );
-            transform.map_point(&mut start);
-            transform.map_point(&mut end);
             let stops = vec![
                 GradientStop::new(0.0, skia_color(from)),
                 GradientStop::new(1.0, skia_color(to)),
@@ -408,6 +409,27 @@ mod tests {
         let pixmap = render(&quad);
         let left = pixel(&pixmap, 8, 20);
         let right = pixel(&pixmap, 32, 20);
+        assert!(left[0] > left[2], "left side is red: {left:?}");
+        assert!(right[2] > right[0], "right side is blue: {right:?}");
+    }
+
+    #[test]
+    fn a_gradient_in_an_offset_scratch_keeps_both_stops() {
+        use cappy_core::UnitPoint;
+
+        let mut quad = bordered(0.0);
+        quad.border_width = 0.0;
+        quad.rect = Rect::new(40.0, 20.0, 30.0, 10.0);
+        quad.background = Background::Linear {
+            from: Color::rgb(255, 0, 0),
+            to: Color::rgb(0, 0, 255),
+            start: UnitPoint::new(0.0, 0.5),
+            end: UnitPoint::new(1.0, 0.5),
+        };
+        let mut scratch = Pixmap::new(30, 10).expect("scratch");
+        paint_quad(&mut scratch.as_mut(), &quad, 1.0, (40.0, 20.0));
+        let left = pixel(&scratch, 2, 5);
+        let right = pixel(&scratch, 27, 5);
         assert!(left[0] > left[2], "left side is red: {left:?}");
         assert!(right[2] > right[0], "right side is blue: {right:?}");
     }

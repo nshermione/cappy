@@ -45,15 +45,18 @@ pub(crate) fn paint_image(
         }
     }
 
+    // Map bitmap pixels onto `dest` in the same space as `dest_path`. `fill_path` applies
+    // `transform`, which already moves that path into the scratch. Subtracting `origin` here
+    // would sample past the bitmap and pad to one edge color.
     let (scale_x, translate_x) = image_axis(
-        dest.x - origin.0,
+        dest.x,
         dest.width,
         placement.uv_min_x,
         placement.uv_max_x,
         raster.width() as f32,
     );
     let (scale_y, translate_y) = image_axis(
-        dest.y - origin.1,
+        dest.y,
         dest.height,
         placement.uv_min_y,
         placement.uv_max_y,
@@ -135,5 +138,31 @@ mod tests {
         );
         let outside = pixmap.pixel(6, 12).expect("outside the fitted image");
         assert_eq!(outside.alpha(), 0);
+    }
+
+    #[test]
+    fn an_offset_scratch_samples_the_bitmap_instead_of_padding_an_edge() {
+        let pixels =
+            Arc::new(ImagePixels::from_rgba(2, 1, [255, 0, 0, 255, 0, 0, 255, 255]).expect("rgba"));
+        let image = ImagePrimitive {
+            rect: Rect::new(40.0, 20.0, 20.0, 8.0),
+            pixels,
+            fit: ObjectFit::Fill,
+            corner_radius: 0.0,
+            clip: None,
+            opacity: 1.0,
+        };
+        let mut pixmap = Pixmap::new(20, 8).expect("scratch");
+        paint_image(&mut pixmap.as_mut(), &image, 1.0, (40.0, 20.0));
+        let left = pixmap.pixel(1, 4).expect("left");
+        let right = pixmap.pixel(18, 4).expect("right");
+        assert!(
+            left.red() > left.blue(),
+            "left side samples the red texel: {left:?}"
+        );
+        assert!(
+            right.blue() > right.red(),
+            "right side samples the blue texel: {right:?}"
+        );
     }
 }
