@@ -40,12 +40,13 @@ impl From<String> for ClassName {
     }
 }
 
-/// Interaction state used to pick `:hover`, `:focus` and `:active` class variants.
+/// Interaction state used to pick `:hover`, `:focus`, `:active` and `:disabled` class variants.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct InteractionState {
     pub hovered: bool,
     pub pressed: bool,
     pub focused: bool,
+    pub disabled: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,11 +55,13 @@ enum ClassVariant {
     Hover,
     Focus,
     Active,
+    Disabled,
 }
 
 const HOVER_SUFFIX: &str = ":hover";
 const FOCUS_SUFFIX: &str = ":focus";
 const ACTIVE_SUFFIX: &str = ":active";
+const DISABLED_SUFFIX: &str = ":disabled";
 
 impl ClassVariant {
     fn split(selector: &str) -> (&str, Self) {
@@ -68,6 +71,8 @@ impl ClassVariant {
             (name, Self::Focus)
         } else if let Some(name) = selector.strip_suffix(ACTIVE_SUFFIX) {
             (name, Self::Active)
+        } else if let Some(name) = selector.strip_suffix(DISABLED_SUFFIX) {
+            (name, Self::Disabled)
         } else {
             (selector, Self::Base)
         }
@@ -80,6 +85,7 @@ struct ClassRule {
     hover: Option<StyleRefinement>,
     focus: Option<StyleRefinement>,
     active: Option<StyleRefinement>,
+    disabled: Option<StyleRefinement>,
 }
 
 impl ClassRule {
@@ -89,11 +95,12 @@ impl ClassRule {
             ClassVariant::Hover => &mut self.hover,
             ClassVariant::Focus => &mut self.focus,
             ClassVariant::Active => &mut self.active,
+            ClassVariant::Disabled => &mut self.disabled,
         }
     }
 }
 
-/// Named classes with `:hover`, `:focus` and `:active` variants. A [`Theme`] shares one of these with every
+/// Named classes with `:hover`, `:focus`, `:active` and `:disabled` variants. A [`Theme`] shares one of these with every
 /// node. A component may carry its own. That sheet is stamped onto the rendered tree. A class it
 /// does not define falls through to the theme.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -102,7 +109,7 @@ pub struct Stylesheet {
 }
 
 impl Stylesheet {
-    /// Defines or replaces a class. `selector` may end in `:hover`, `:focus` or `:active`.
+    /// Defines or replaces a class. `selector` may end in `:hover`, `:focus`, `:active` or `:disabled`.
     pub fn set_class(&mut self, selector: impl AsRef<str>, refinement: StyleRefinement) {
         let (name, variant) = ClassVariant::split(selector.as_ref());
         *self
@@ -137,6 +144,9 @@ impl Stylesheet {
             }
             if rule.active.is_some() {
                 slot.active = rule.active.clone();
+            }
+            if rule.disabled.is_some() {
+                slot.disabled = rule.disabled.clone();
             }
         }
     }
@@ -179,7 +189,7 @@ impl Theme {
         self.name = name.into();
     }
 
-    /// Defines or replaces a class. `selector` may end in `:hover`, `:focus` or `:active`.
+    /// Defines or replaces a class. `selector` may end in `:hover`, `:focus`, `:active` or `:disabled`.
     pub fn set_class(&mut self, selector: impl AsRef<str>, refinement: StyleRefinement) {
         self.classes.set_class(selector, refinement);
     }
@@ -226,9 +236,10 @@ impl Theme {
     /// Resolves the style of a node.
     ///
     /// Layers, lowest first: text inherited from `parent_text` (or the theme defaults for the
-    /// root), each class in order, each class's `:hover`, then `:focus`, then `:active` variant
-    /// when the state matches, then `inline`. A name present in `local` uses that sheet's rule,
-    /// including its hover, focus and active variants. Names `local` does not define fall through
+    /// root), each class in order, each class's `:disabled` variant when the node is disabled,
+    /// otherwise `:hover`, then `:focus`, then `:active` when the state matches, then `inline`.
+    /// A name present in `local` uses that sheet's rule, including its interaction variants.
+    /// Names `local` does not define fall through
     /// to the theme.
     /// `local` is the sheet of this node only; child nodes do not receive it.
     pub fn resolve(
@@ -260,19 +271,25 @@ impl Theme {
         for rule in &rules {
             apply(&mut style, &rule.base);
         }
-        if state.hovered {
+        if state.disabled {
             for rule in &rules {
-                apply(&mut style, &rule.hover);
+                apply(&mut style, &rule.disabled);
             }
-        }
-        if state.focused {
-            for rule in &rules {
-                apply(&mut style, &rule.focus);
+        } else {
+            if state.hovered {
+                for rule in &rules {
+                    apply(&mut style, &rule.hover);
+                }
             }
-        }
-        if state.pressed {
-            for rule in &rules {
-                apply(&mut style, &rule.active);
+            if state.focused {
+                for rule in &rules {
+                    apply(&mut style, &rule.focus);
+                }
+            }
+            if state.pressed {
+                for rule in &rules {
+                    apply(&mut style, &rule.active);
+                }
             }
         }
         inline.apply_to(&mut style, &self.tokens);
@@ -326,6 +343,7 @@ mod tests {
                         hovered,
                         pressed,
                         focused: false,
+                        disabled: false,
                     },
                     None,
                 )
@@ -405,6 +423,7 @@ mod tests {
                 hovered: true,
                 pressed: false,
                 focused: false,
+                disabled: false,
             },
             Some(&local),
         );

@@ -14,7 +14,7 @@ pub(super) enum BindingKind {
     Theme,
     Flow(FlowId),
     InputValue(TextBinding),
-    InputDisabled(Box<dyn Fn() -> bool>),
+    Disabled(Box<dyn Fn() -> bool>),
     Caret(CaretBinding),
     Selection(SelectionBinding),
     Disposed,
@@ -103,7 +103,7 @@ impl Ui {
             Theme(ThemeHandle),
             Flow(FlowId),
             InputValue(String),
-            InputDisabled(bool),
+            Disabled(bool),
             Caret(Option<usize>),
             Selection(Option<(usize, usize)>),
         }
@@ -117,7 +117,7 @@ impl Ui {
             }
             BindingKind::Flow(flow) => Step::Flow(*flow),
             BindingKind::InputValue(compute) => Step::InputValue(track(observer, compute)),
-            BindingKind::InputDisabled(compute) => Step::InputDisabled(track(observer, compute)),
+            BindingKind::Disabled(compute) => Step::Disabled(track(observer, compute)),
             BindingKind::Caret(compute) => Step::Caret(track(observer, compute)),
             BindingKind::Selection(compute) => Step::Selection(track(observer, compute)),
             BindingKind::Disposed => return,
@@ -125,7 +125,7 @@ impl Ui {
         match step {
             Step::Text(text) => self.set_text_content(node, text),
             Step::InputValue(text) => self.apply_input_value(node, text),
-            Step::InputDisabled(disabled) => self.apply_input_disabled(node, disabled),
+            Step::Disabled(disabled) => self.apply_node_disabled(node, disabled),
             Step::Caret(caret) => self.apply_text_caret(node, caret),
             Step::Selection(selection) => self.apply_text_selection(node, selection),
             Step::Classes(classes) => {

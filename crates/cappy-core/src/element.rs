@@ -117,6 +117,32 @@ where
     }
 }
 
+/// A fixed disabled flag, or a [`Dynamic`] one, for [`Element::disabled`].
+pub trait IntoDisabled {
+    fn apply_disabled(self, element: &mut Element);
+}
+
+impl IntoDisabled for bool {
+    fn apply_disabled(self, element: &mut Element) {
+        element.disabled = self;
+        element.disabled_when = None;
+        if let ElementContent::Input(spec) = &mut element.content {
+            spec.disabled = self;
+            spec.disabled_when = None;
+        }
+    }
+}
+
+impl<F> IntoDisabled for Dynamic<F>
+where
+    F: Fn() -> bool + 'static,
+{
+    fn apply_disabled(self, element: &mut Element) {
+        let Dynamic(read) = self;
+        element.disabled_when = Some(Box::new(read));
+    }
+}
+
 /// A fixed caret index, or a [`Dynamic`] one, for [`Element::caret`].
 pub trait IntoCaret {
     fn add_caret(self, element: &mut Element);
@@ -214,6 +240,10 @@ pub struct Element {
     pub(crate) on_ime: Option<ImeHandler>,
     pub(crate) on_focus: Option<FocusHandler>,
     pub(crate) on_pointer: Option<PointerHandler>,
+    /// Fixed disabled flag. A [`disabled_when`](Element::disabled_when) binding overwrites this
+    /// after mount.
+    pub(crate) disabled: bool,
+    pub(crate) disabled_when: Option<Box<dyn Fn() -> bool>>,
     pub(crate) caret: Option<usize>,
     pub(crate) caret_binding: Option<CaretBinding>,
     pub(crate) selection: Option<(usize, usize)>,
@@ -370,6 +400,8 @@ impl Element {
             on_ime: None,
             on_focus: None,
             on_pointer: None,
+            disabled: false,
+            disabled_when: None,
             caret: None,
             caret_binding: None,
             selection: None,
@@ -555,24 +587,19 @@ impl Element {
         self
     }
 
-    /// A disabled input does not focus and does not edit.
-    ///
-    /// # Panics
-    /// Panics when the element is not an input.
+    /// A disabled node does not hover, press, focus, or show the pointer cursor. An input also
+    /// does not edit. A [`Dynamic`](crate::Dynamic) flag is read again when a signal it reads
+    /// changes.
     #[must_use]
-    pub fn disabled(mut self, disabled: bool) -> Self {
-        self.input_spec().disabled = disabled;
+    pub fn disabled(mut self, disabled: impl IntoDisabled) -> Self {
+        disabled.apply_disabled(&mut self);
         self
     }
 
-    /// Disables the input whenever `disabled` is true.
-    ///
-    /// # Panics
-    /// Panics when the element is not an input.
+    /// Disables this node whenever `disabled` is true.
     #[must_use]
-    pub fn disabled_when(mut self, disabled: impl Fn() -> bool + 'static) -> Self {
-        self.input_spec().disabled_when = Some(Box::new(disabled));
-        self
+    pub fn disabled_when(self, disabled: impl Fn() -> bool + 'static) -> Self {
+        self.disabled(Dynamic(disabled))
     }
 
     fn input_spec(&mut self) -> &mut InputSpec {
@@ -795,6 +822,7 @@ pub struct DivBuilder {
     on_click: Option<ClickHandler>,
     on_hover: Option<HoverHandler>,
     stylesheet: Option<Arc<Stylesheet>>,
+    disabled: Option<Box<dyn FnOnce(&mut Element)>>,
 }
 
 impl DivBuilder {
@@ -804,6 +832,7 @@ impl DivBuilder {
             on_click: None,
             on_hover: None,
             stylesheet: None,
+            disabled: None,
         }
     }
 
@@ -824,6 +853,12 @@ impl DivBuilder {
         self.stylesheet = Some(stylesheet);
         self
     }
+
+    #[must_use]
+    pub fn disabled(mut self, disabled: impl IntoDisabled + 'static) -> Self {
+        self.disabled = Some(Box::new(move |element| disabled.apply_disabled(element)));
+        self
+    }
 }
 
 impl IntoElement for DivBuilder {
@@ -832,6 +867,9 @@ impl IntoElement for DivBuilder {
         element.on_click = self.on_click;
         element.on_hover = self.on_hover;
         element.stylesheet = self.stylesheet;
+        if let Some(apply) = self.disabled {
+            apply(&mut element);
+        }
         element
     }
 }
@@ -1017,6 +1055,7 @@ fn apply_input_fields(
     spec.on_input = on_input;
     spec.on_submit = on_submit;
     spec.disabled = disabled;
+    element.disabled = disabled;
 }
 
 fn stamp_stylesheet(element: &mut Element, sheet: &Arc<Stylesheet>) {

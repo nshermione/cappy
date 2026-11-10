@@ -229,8 +229,9 @@ pub fn style_token(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Defines class names and their style rules together.
 ///
 /// The enum variants are the classes. `@include Name` copies the properties of another class in
-/// this sheet; a property written after the include overwrites a copied one. `:hover` and
-/// `:active` inside a class are extra rules for that class, not extra variants. Each one starts
+/// this sheet; a property written after the include overwrites a copied one. `:hover`,
+/// `:focus`, `:active` and `:disabled` inside a class are extra rules for that class, not extra
+/// variants. Each one starts
 /// from that class's own properties, and a property in the block overwrites one from the base.
 /// The macro generates `as_str`, `ALL`, `sheet` and `apply`. `sheet` and `apply` call
 /// `Stylesheet`, `StyleRefinement` and `Theme`, which must be in scope.

@@ -39,6 +39,7 @@ enum PseudoKind {
     Hover,
     Focus,
     Active,
+    Disabled,
 }
 
 impl PseudoKind {
@@ -47,6 +48,7 @@ impl PseudoKind {
             Self::Hover => ":hover",
             Self::Focus => ":focus",
             Self::Active => ":active",
+            Self::Disabled => ":disabled",
         }
     }
 
@@ -55,6 +57,7 @@ impl PseudoKind {
             Self::Hover => "hover",
             Self::Focus => "focus",
             Self::Active => "active",
+            Self::Disabled => "disabled",
         }
     }
 }
@@ -89,7 +92,7 @@ impl syn::parse::Parse for Input {
         if !input.is_empty() {
             return Err(syn::Error::new(
                 input.span(),
-                "`:hover`, `:focus` and `:active` go inside the class",
+                "`:hover`, `:focus`, `:active` and `:disabled` go inside the class",
             ));
         }
         Ok(Self {
@@ -118,10 +121,11 @@ impl syn::parse::Parse for Pseudo {
             "hover" => PseudoKind::Hover,
             "focus" => PseudoKind::Focus,
             "active" => PseudoKind::Active,
+            "disabled" => PseudoKind::Disabled,
             _ => {
                 return Err(syn::Error::new(
                     kind_name.span(),
-                    "expected `hover`, `focus` or `active`",
+                    "expected `hover`, `focus`, `active` or `disabled`",
                 ));
             }
         };

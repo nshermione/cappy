@@ -327,6 +327,8 @@ impl Ui {
             on_ime,
             on_focus,
             on_pointer,
+            disabled,
+            disabled_when: element_disabled_when,
             caret,
             caret_binding,
             selection,
@@ -342,7 +344,7 @@ impl Ui {
         );
         let mut text_binding = None;
         let mut input_read = None;
-        let mut disabled_when = None;
+        let mut disabled_when = element_disabled_when;
         let focusable = focusable || matches!(content, ElementContent::Input(_));
         let content = match content {
             ElementContent::Container
@@ -368,7 +370,7 @@ impl Ui {
                 }
             }
             ElementContent::Input(spec) => {
-                disabled_when = spec.disabled_when;
+                disabled_when = disabled_when.or(spec.disabled_when);
                 let (text, writer) = match spec.value {
                     InputValue::Fixed(text) => (text, None),
                     InputValue::Bound { read, write } => {
@@ -380,7 +382,7 @@ impl Ui {
                 NodeContent::Input(InputField {
                     edit: TextEdit::new(text),
                     placeholder: spec.placeholder,
-                    disabled: spec.disabled,
+                    disabled: disabled || spec.disabled,
                     scroll_x: 0.0,
                     on_input: spec.on_input,
                     on_submit: spec.on_submit,
@@ -391,6 +393,8 @@ impl Ui {
             }
         };
         let initial_style = Style::inheriting(TextStyle::from_tokens(self.theme.tokens()));
+        let node_disabled =
+            disabled || matches!(&content, NodeContent::Input(field) if field.disabled);
         let node = Node {
             parent,
             children: Vec::new(),
@@ -402,11 +406,14 @@ impl Ui {
             inline_style: style,
             dynamic_style: Default::default(),
             style: initial_style,
-            interaction: Default::default(),
+            interaction: cappy_style::InteractionState {
+                disabled: node_disabled,
+                ..cappy_style::InteractionState::default()
+            },
             on_click,
             on_hover,
             focusable,
-            disabled: false,
+            disabled: node_disabled,
             on_key,
             on_text,
             on_ime,
@@ -452,7 +459,7 @@ impl Ui {
             self.add_binding(id, BindingKind::InputValue(binding));
         }
         if let Some(binding) = disabled_when {
-            self.add_binding(id, BindingKind::InputDisabled(binding));
+            self.add_binding(id, BindingKind::Disabled(binding));
         }
         if let Some(binding) = caret_binding {
             self.add_binding(id, BindingKind::Caret(binding));

@@ -1,7 +1,7 @@
 //! Typed styles, design tokens and themes for cappy.
 //!
 //! - [`StyleRefinement`]: a partial style whose values may reference theme tokens.
-//! - [`Theme`]: tokens plus named classes (with `:hover` / `:active` variants).
+//! - [`Theme`]: tokens plus named classes (with `:hover`, `:focus`, `:active` and `:disabled`).
 //! - [`Style`]: the fully resolved result used by layout and painting.
 
 mod background;

@@ -221,6 +221,66 @@ fn hover_applies_the_hover_variant_and_pointer_cursor() {
 }
 
 #[test]
+fn a_disabled_node_ignores_hover_click_and_the_pointer() {
+    let cx = context();
+    let clicks = cx.reactive(0_i32);
+    let clicks_handle = clicks.clone();
+    let focused = cx.reactive(false);
+    let focused_handle = focused.clone();
+    let open = cx.reactive(false);
+    let open_handle = open.clone();
+    let mut theme = Theme::light();
+    theme.set_class(
+        "gate:disabled",
+        StyleRefinement::default().background(Color::BLACK),
+    );
+    theme.set_class(
+        "gate:hover",
+        StyleRefinement::default().background(Color::WHITE),
+    );
+    let root = div()
+        .class("gate")
+        .key("gate")
+        .style(StyleRefinement::default().size(40))
+        .disabled(Dynamic(move || !open_handle.get()))
+        .focusable()
+        .on_focus(move |is_focused| focused_handle.set(is_focused))
+        .on_click(move |_| clicks_handle.update(|value| *value += 1));
+    let mut ui = Ui::new(&cx, root, theme);
+    ui.update(VIEWPORT);
+    let gate = ui.find_by_key("gate").unwrap();
+    ui.handle_event(InputEvent::PointerMoved {
+        position: center_of(&ui, "gate"),
+    });
+    ui.update(VIEWPORT);
+    assert_eq!(
+        ui.node_style(gate).unwrap().visual.background,
+        Color::BLACK
+    );
+    assert_eq!(ui.cursor(), CursorIcon::Default);
+    let point = center_of(&ui, "gate");
+    click_at(&mut ui, point.x, point.y);
+    key(&mut ui, Key::Tab, Modifiers::default());
+    assert_eq!(clicks.get_untracked(), 0);
+    assert!(!focused.get_untracked());
+
+    open.set(true);
+    ui.update(VIEWPORT);
+    ui.handle_event(InputEvent::PointerMoved {
+        position: center_of(&ui, "gate"),
+    });
+    ui.update(VIEWPORT);
+    assert_eq!(
+        ui.node_style(gate).unwrap().visual.background,
+        Color::WHITE
+    );
+    assert_eq!(ui.cursor(), CursorIcon::Pointer);
+    let point = center_of(&ui, "gate");
+    click_at(&mut ui, point.x, point.y);
+    assert_eq!(clicks.get_untracked(), 1);
+}
+
+#[test]
 fn hover_handlers_fire_on_enter_and_leave() {
     let cx = context();
     let hovered = cx.signal(false);

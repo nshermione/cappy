@@ -178,6 +178,7 @@ mod tests {
                 hovered: true,
                 pressed: false,
                 focused: false,
+                disabled: false,
             },
         );
         let hovered_style = theme.resolve(
@@ -188,6 +189,7 @@ mod tests {
                 hovered: true,
                 pressed: false,
                 focused: false,
+                disabled: false,
             },
             None,
         );
@@ -198,6 +200,7 @@ mod tests {
                 hovered: false,
                 pressed: true,
                 focused: false,
+                disabled: false,
             },
         );
         assert_eq!(rest, colors.surface_alt);

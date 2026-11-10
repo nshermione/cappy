@@ -368,7 +368,7 @@ impl Ui {
             if input || (node.is_text() && node.caret.is_some()) {
                 text = true;
             }
-            if node.on_click.is_some() && !input {
+            if node.on_click.is_some() && !input && !node.disabled {
                 pointer = true;
             }
         }

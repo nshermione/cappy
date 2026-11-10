@@ -209,6 +209,9 @@ impl Ui {
             self.call_hover_handler(id, false);
         }
         for id in entered {
+            if self.node_disabled(id) {
+                continue;
+            }
             self.set_interaction(id, |state| state.hovered = true);
             self.call_hover_handler(id, true);
         }
@@ -222,24 +225,38 @@ impl Ui {
             self.drag_scrollbar(position);
             return;
         }
-        let focus_target = self.hovered.iter().rev().copied().find(|id| {
-            self.is_current(*id) && self.nodes[id.index()].focusable && !self.node_disabled(*id)
-        });
+        let mut focus_target = None;
+        let mut focus_blocked = false;
+        for id in self.hovered.iter().rev().copied() {
+            if !self.is_current(id) || !self.nodes[id.index()].focusable {
+                continue;
+            }
+            if self.node_disabled(id) {
+                focus_blocked = true;
+            } else {
+                focus_target = Some(id);
+            }
+            break;
+        }
         if let Some(id) = focus_target {
             let count = self.press_count(id);
             self.focus(id);
             self.pointer_capture = Some(id);
             self.pointer_down(id, count);
-        } else {
+        } else if !focus_blocked {
             self.blur();
         }
-        let target = self
-            .hovered
-            .iter()
-            .rev()
-            .copied()
-            .find(|id| self.is_current(*id) && self.nodes[id.index()].on_click.is_some());
-        if let Some(id) = target {
+        let mut click_target = None;
+        for id in self.hovered.iter().rev().copied() {
+            if !self.is_current(id) || self.nodes[id.index()].on_click.is_none() {
+                continue;
+            }
+            if !self.node_disabled(id) {
+                click_target = Some(id);
+            }
+            break;
+        }
+        if let Some(id) = click_target {
             self.pressed = Some(id);
             self.set_interaction(id, |state| state.pressed = true);
         }
@@ -862,17 +879,46 @@ impl Ui {
         self.mark_paint_dirty(id);
     }
 
-    pub(super) fn apply_input_disabled(&mut self, id: NodeId, disabled: bool) {
-        let NodeContent::Input(field) = &mut self.nodes[id.index()].content else {
-            return;
-        };
-        if field.disabled == disabled {
+    pub(super) fn apply_node_disabled(&mut self, id: NodeId, disabled: bool) {
+        if !self.is_current(id) {
             return;
         }
-        field.disabled = disabled;
+        let unchanged = self.nodes[id.index()].disabled == disabled
+            && match &self.nodes[id.index()].content {
+                NodeContent::Input(field) => field.disabled == disabled,
+                _ => true,
+            };
+        if unchanged {
+            return;
+        }
+        let was_hovered = self.nodes[id.index()].interaction.hovered;
+        let under_pointer = self.hovered.contains(&id);
+        self.nodes[id.index()].disabled = disabled;
+        if let NodeContent::Input(field) = &mut self.nodes[id.index()].content {
+            field.disabled = disabled;
+        }
+        self.set_interaction(id, |state| {
+            state.disabled = disabled;
+            if disabled {
+                state.hovered = false;
+                state.pressed = false;
+            } else if under_pointer {
+                state.hovered = true;
+            }
+        });
+        if disabled && was_hovered {
+            self.call_hover_handler(id, false);
+        }
+        if !disabled && under_pointer && !was_hovered {
+            self.call_hover_handler(id, true);
+        }
+        if disabled && self.pressed == Some(id) {
+            self.pressed = None;
+        }
         if disabled && self.focused == Some(id) {
             self.blur();
         }
+        self.mark_style_dirty(id);
     }
 
     pub(super) fn apply_text_caret(&mut self, id: NodeId, caret: Option<usize>) {
