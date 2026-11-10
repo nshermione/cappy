@@ -281,6 +281,87 @@ fn motion_tab_fades_and_slides_from_manual_animate() {
 }
 
 #[cfg(not(feature = "cpu"))]
+#[test]
+fn sequence_and_parallel_replay_on_their_own_boxes() {
+    use std::thread::sleep;
+    use std::time::Duration;
+
+    let mut harness = harness();
+    open_tab(&mut harness, "tab-motion");
+    reveal(&mut harness, "motion-sequence");
+    let sequence_y = harness.rect("motion-sequence-box").y;
+    let parallel_y = harness.rect("motion-parallel-box").y;
+    let slide_y = harness.rect("motion-slide").y;
+    let fade_alpha = fill_alpha(&harness, "motion-opacity");
+
+    harness.click("motion-sequence");
+    harness.update();
+    sleep(Duration::from_millis(160));
+    harness.update();
+    assert!((harness.rect("motion-sequence-box").y - sequence_y).abs() < 0.5);
+    assert!(fill_alpha(&harness, "motion-sequence-box") < 0.9);
+    assert!((harness.rect("motion-slide").y - slide_y).abs() < 0.5);
+    assert!((fill_alpha(&harness, "motion-opacity") - fade_alpha).abs() < 0.02);
+    assert!((harness.rect("motion-parallel-box").y - parallel_y).abs() < 0.5);
+
+    harness.click("motion-sequence");
+    harness.update();
+    assert!(fill_alpha(&harness, "motion-sequence-box") > 0.95);
+    assert!((harness.rect("motion-sequence-box").y - sequence_y).abs() < 0.5);
+
+    sleep(Duration::from_millis(160));
+    harness.update();
+    assert!((harness.rect("motion-sequence-box").y - sequence_y).abs() < 0.5);
+    assert!(fill_alpha(&harness, "motion-sequence-box") < 0.9);
+
+    harness.click("motion-parallel");
+    harness.update();
+    sleep(Duration::from_millis(160));
+    harness.update();
+    assert!(harness.rect("motion-parallel-box").y > parallel_y + 8.0);
+    assert!(fill_alpha(&harness, "motion-parallel-box") < 0.9);
+    assert!((harness.rect("motion-slide").y - slide_y).abs() < 0.5);
+    assert!((fill_alpha(&harness, "motion-opacity") - fade_alpha).abs() < 0.02);
+
+    harness.click("motion-parallel");
+    harness.update();
+    assert!((harness.rect("motion-parallel-box").y - parallel_y).abs() < 0.5);
+    assert!(fill_alpha(&harness, "motion-parallel-box") > 0.95);
+}
+
+/// Wheels the motion list until `key` sits inside the scrollport. The ease only moves on frames
+/// close together, so this steps the clock instead of waiting out one long sleep.
+#[cfg(not(feature = "cpu"))]
+fn reveal(harness: &mut TestUi, key: &str) {
+    use std::thread::sleep;
+    use std::time::Duration;
+
+    use cappy::{InputEvent, Point};
+
+    for _ in 0..30 {
+        let list = harness.rect("motion-scroll");
+        let rect = harness.rect(key);
+        if rect.y >= list.y + 1.0 && rect.bottom() <= list.bottom() - 1.0 {
+            return;
+        }
+        let delta = if rect.bottom() > list.bottom() {
+            -120.0
+        } else {
+            120.0
+        };
+        harness.move_pointer(Point::new(list.x + 24.0, list.y + 24.0));
+        harness.ui_mut().handle_event(InputEvent::Wheel {
+            delta: Point::new(0.0, delta),
+        });
+        for _ in 0..12 {
+            sleep(Duration::from_millis(16));
+            harness.update();
+        }
+    }
+    panic!("could not scroll {key} into the motion list");
+}
+
+#[cfg(not(feature = "cpu"))]
 fn fill_alpha(harness: &TestUi, key: &str) -> f32 {
     let rect = harness.rect(key);
     harness

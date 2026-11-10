@@ -1,9 +1,11 @@
-//! The motion tab. Loops start on their own. Fade and Slide still call [`Context::animate`].
+//! The motion tab. Loops start on their own. Fade and Slide call [`Context::animate`].
+//! Sequence and Parallel play their own boxes, and a second click stops that play and starts it again.
 
 use std::time::Duration;
 
 use cappy::Class as ThemeClass;
 use cappy::MotionCtx;
+use cappy::NodeId;
 use cappy::prelude::*;
 
 use super::style::Class;
@@ -56,18 +58,20 @@ fn row(key: &'static str, label: &'static str, ease: Ease) -> EaseRow {
 pub struct MotionTab {
     faded: bool,
     shifted: bool,
+    sequence: Option<AnimHandle>,
+    parallel: Option<AnimHandle>,
 }
 
 impl Component for MotionTab {
     fn render(&self) -> Element {
         let cx = Context::current();
         let tracks = ease_section();
-        let playback = playback_row(cx.clone());
+        let playback = playback_row(cx.clone(), self.sequence, self.parallel);
         element! {
             Container(class = [ThemeClass::Card, Class::Grow]) {
                 Text("Motion", class = ThemeClass::Subtitle)
                 Text(
-                    "Color, scale, spin, shake and fly loop on their own. Fade and Slide are one shot.",
+                    "Loops run on their own. Fade and Slide are one shot. Sequence and Parallel replay from the start.",
                     class = ThemeClass::Muted,
                 )
                 Container(class = Class::ScrollList, key = "motion-scroll") {
@@ -75,6 +79,7 @@ impl Component for MotionTab {
                         { opacity_card(cx.clone(), self.faded) }
                         { slide_card(cx, self.shifted) }
                     }
+                    { playback }
                     Container(class = Class::MotionRow) {
                         { swatch(Class::MotionColor, "motion-color", "color", false) }
                         { swatch(Class::MotionScale, "motion-scale", "scale", false) }
@@ -82,7 +87,6 @@ impl Component for MotionTab {
                         { swatch(Class::MotionTravel, "motion-shake", "shake", false) }
                         { swatch(Class::MotionTravel, "motion-fly", "fly", false) }
                     }
-                    { playback }
                     Text("Easing", class = ThemeClass::Subtitle)
                     Text(
                         "Left to right is one cycle, right to left is the next. Both use the same duration.",
@@ -231,64 +235,116 @@ fn slide_card(cx: Context, shifted: Reactive<bool>) -> Element {
     }
 }
 
-fn playback_row(cx: Context) -> Element {
-    let parallel = cx.clone();
-    let ms = Duration::from_millis;
+fn playback_row(
+    cx: Context,
+    sequence: Reactive<Option<AnimHandle>>,
+    parallel: Reactive<Option<AnimHandle>>,
+) -> Element {
+    let parallel_cx = cx.clone();
     element! {
         Container(class = Class::MotionRow) {
+            { sequence_card(cx, sequence) }
+            { parallel_card(parallel_cx, parallel) }
+        }
+    }
+}
+
+fn sequence_card(cx: Context, running: Reactive<Option<AnimHandle>>) -> Element {
+    element! {
+        Container(class = Class::Specimen) {
+            Container(class = Class::MotionPlay, key = "motion-sequence-box") {
+                Text("then")
+            }
             Container(
                 class = ThemeClass::Btn,
                 key = "motion-sequence",
-                on_click = move |_| {
-                    let cx = cx.clone();
-                    cx.animate(move |ui| {
-                        let Some(opacity) = ui.find_by_key("motion-opacity") else { return };
-                        let Some(slide) = ui.find_by_key("motion-slide") else { return };
-                        ui.play(Anim::sequence([
-                            Anim::play(
-                                opacity,
-                                Motion::opacity(0.25).duration(ms(280)).ease(Ease::OutCubic),
-                            ),
-                            Anim::play(
-                                slide,
-                                Motion::translation(0.0, 28.0)
-                                    .duration(ms(360))
-                                    .ease(Ease::OutBack)
-                                    .delay(ms(120)),
-                            ),
-                        ]));
-                    });
-                },
+                on_click = move |_| replay(cx.clone(), running, sequence_clip),
             ) {
                 Text("Sequence")
+            }
+        }
+    }
+}
+
+fn parallel_card(cx: Context, running: Reactive<Option<AnimHandle>>) -> Element {
+    element! {
+        Container(class = Class::Specimen) {
+            Container(class = Class::MotionPlay, key = "motion-parallel-box") {
+                Text("both")
             }
             Container(
                 class = ThemeClass::Btn,
                 key = "motion-parallel",
-                on_click = move |_| {
-                    let parallel = parallel.clone();
-                    parallel.animate(move |ui| {
-                        let Some(opacity) = ui.find_by_key("motion-opacity") else { return };
-                        let Some(slide) = ui.find_by_key("motion-slide") else { return };
-                        ui.play(Anim::together([
-                            Anim::play(
-                                opacity,
-                                Motion::opacity(0.25).duration(ms(280)).ease(Ease::OutCubic),
-                            ),
-                            Anim::play(
-                                slide,
-                                Motion::translation(0.0, 28.0)
-                                    .duration(ms(360))
-                                    .ease(Ease::OutBack),
-                            ),
-                        ]));
-                    });
-                },
+                on_click = move |_| replay(cx.clone(), running, parallel_clip),
             ) {
                 Text("Parallel")
             }
         }
     }
+}
+
+/// Stops the previous group, then plays `clip` again. The clip snaps back to rest first, so a
+/// second click restarts instead of continuing from the value on screen.
+fn replay(
+    cx: Context,
+    running: Reactive<Option<AnimHandle>>,
+    clip: fn(&mut MotionCtx) -> Option<Anim>,
+) {
+    if let Some(handle) = running.get_untracked() {
+        handle.stop();
+    }
+    cx.animate(move |ui| {
+        let Some(anim) = clip(ui) else {
+            return;
+        };
+        running.set(Some(ui.play(anim)));
+    });
+}
+
+fn sequence_clip(ui: &mut MotionCtx) -> Option<Anim> {
+    let id = ui.find_by_key("motion-sequence-box")?;
+    let ms = Duration::from_millis;
+    Some(Anim::sequence([
+        rest(id),
+        Anim::play(
+            id,
+            Motion::opacity(0.25).duration(ms(280)).ease(Ease::OutCubic),
+        ),
+        Anim::play(
+            id,
+            Motion::translation(0.0, 28.0)
+                .duration(ms(360))
+                .ease(Ease::OutBack),
+        ),
+    ]))
+}
+
+fn parallel_clip(ui: &mut MotionCtx) -> Option<Anim> {
+    let id = ui.find_by_key("motion-parallel-box")?;
+    let ms = Duration::from_millis;
+    Some(Anim::sequence([
+        rest(id),
+        Anim::together([
+            Anim::play(
+                id,
+                Motion::opacity(0.25).duration(ms(280)).ease(Ease::OutCubic),
+            ),
+            Anim::play(
+                id,
+                Motion::translation(0.0, 28.0)
+                    .duration(ms(360))
+                    .ease(Ease::OutBack),
+            ),
+        ]),
+    ]))
+}
+
+/// Zero-length step. The next step reads the value after this one has landed.
+fn rest(id: NodeId) -> Anim {
+    Anim::together([
+        Anim::play(id, Motion::opacity(1.0).duration(Duration::ZERO)),
+        Anim::play(id, Motion::translation(0.0, 0.0).duration(Duration::ZERO)),
+    ])
 }
 
 fn ease_section() -> Element {

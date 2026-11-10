@@ -165,6 +165,11 @@ stylesheet! {
             justify: Justify::Center,
             margin_y: 36,
         }
+        /// Sequence and parallel boxes. No vertical margin, so the row stays with Fade and Slide.
+        MotionPlay {
+            @include MotionOpacity,
+            margin_y: 0,
+        }
         /// Box the motion tab slides with a translation.
         MotionSlide {
             width: 120,
