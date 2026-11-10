@@ -1,4 +1,5 @@
 /target
+/playground/web-demo/dist
 **/*.rs.bk
 *.pdb
 *.snap.new

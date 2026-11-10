@@ -4,9 +4,9 @@
 
 #[cfg(debug_assertions)]
 use cappy_core::ResourceCensus;
+use cappy_core::time::Instant;
 use cappy_core::{CursorIcon, FrameInput, InputEvent, Ui, UpdateOutcome};
 use cappy_text::{CosmicTextMeasurer, FontContext};
-use std::time::Instant;
 
 use crate::resize_pace::{PresentedFrame, ResizeFrame, choose_resize_frame, resize_interval};
 use crate::{PresentOutcome, RendererError, RendererKind, WindowRenderer};

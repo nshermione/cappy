@@ -2,7 +2,9 @@
 
 use cappy::host::WindowOptions;
 
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 const DEBUG_DAMAGE_FLAG: &str = "--debug-damage";
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 const DEBUG_DAMAGE_ENV: &str = "CAPPY_DEBUG_DAMAGE";
 /// Startup and errors only. Per-frame lines and memory samples stay off until
 /// [`WindowOptions::with_log_frames`] or [`WindowOptions::with_log_memory`] is set.
@@ -22,7 +24,15 @@ pub fn window_options(title: &str) -> WindowOptions {
 }
 
 /// Whether the damage overlay was requested with `--debug-damage` or `CAPPY_DEBUG_DAMAGE=1`.
+/// The browser has no process arguments, so a web build never starts with the overlay.
 fn debug_damage_requested() -> bool {
-    std::env::args().any(|argument| argument == DEBUG_DAMAGE_FLAG)
-        || std::env::var(DEBUG_DAMAGE_ENV).is_ok_and(|value| value == "1")
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::env::args().any(|argument| argument == DEBUG_DAMAGE_FLAG)
+            || std::env::var(DEBUG_DAMAGE_ENV).is_ok_and(|value| value == "1")
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        false
+    }
 }

@@ -2,19 +2,20 @@
 //! [`FontSystem`] (layout measurer, renderer, possibly on different threads) clones it.
 //!
 //! [`FontOptions::new`] keeps every face from that scan. [`FontOptions::with_families`] keeps
-//! cappy's UI families plus the caller's names, and [`FontOptions::with_files`] adds font files
-//! after that filter.
+//! cappy's UI families plus the caller's names. [`FontOptions::with_files`] and
+//! [`FontOptions::with_data`] add font files and embedded bytes after that filter.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use cosmic_text::{FontSystem, fontdb};
 
-/// Which faces to keep from the system font directories, plus any extra font files.
+/// Which faces to keep from the system font directories, plus any extra font files or bytes.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FontOptions {
     families: Option<Vec<String>>,
     files: Vec<PathBuf>,
+    blobs: Vec<Vec<u8>>,
 }
 
 impl FontOptions {
@@ -37,6 +38,16 @@ impl FontOptions {
     #[must_use]
     pub fn with_files(mut self, files: impl IntoIterator<Item = impl Into<PathBuf>>) -> Self {
         self.files.extend(files.into_iter().map(Into::into));
+        self
+    }
+
+    /// Loads these font bytes after the system scan and any family filter.
+    ///
+    /// A face is kept even when its family is not on the allowlist. Malformed bytes are logged
+    /// and skipped. This is how a browser build supplies a face: the web has no font directory.
+    #[must_use]
+    pub fn with_data(mut self, fonts: impl IntoIterator<Item = impl Into<Vec<u8>>>) -> Self {
+        self.blobs.extend(fonts.into_iter().map(Into::into));
         self
     }
 }
@@ -94,16 +105,22 @@ impl FontContext {
 
     /// Loads fonts as `options` describes and picks a platform UI font as the default family.
     ///
-    /// When a family filter matches nothing and no font file loads, the full scan is kept so
-    /// text still has a face to shape with.
+    /// When a family filter matches nothing and no extra font loads, the full scan is kept so
+    /// text still has a face to shape with. If none of the platform UI families are present,
+    /// sans-serif is pinned to the first loaded face.
     pub fn load(options: &FontOptions) -> Self {
         let (locale, mut database) = FontSystem::new().into_locale_and_db();
         if let Some(families) = &options.families {
-            restrict_to_families(&mut database, families, &options.files);
+            restrict_to_families(&mut database, families, &options.files, &options.blobs);
         } else {
             load_font_files(&mut database, &options.files);
+            load_font_blobs(&mut database, &options.blobs);
         }
         if let Some(family) = installed_family(&database, PREFERRED_SANS_SERIF) {
+            database.set_sans_serif_family(family);
+        } else if let Some(family) = first_family_name(&database) {
+            // An embedded face (the web build) is often the only face, and it may not be one of
+            // the platform names above. Pinning sans-serif makes text resolve to it.
             database.set_sans_serif_family(family);
         }
         if let Some(family) = installed_family(&database, PREFERRED_MONOSPACE) {
@@ -143,10 +160,15 @@ fn installed_family<'a>(database: &fontdb::Database, candidates: &[&'a str]) -> 
     })
 }
 
-fn restrict_to_families(database: &mut fontdb::Database, families: &[String], files: &[PathBuf]) {
+fn restrict_to_families(
+    database: &mut fontdb::Database,
+    families: &[String],
+    files: &[PathBuf],
+    blobs: &[Vec<u8>],
+) {
     let scanned = database.len();
     let mut extras = fontdb::Database::new();
-    let loaded = load_font_files(&mut extras, files);
+    let loaded = load_font_files(&mut extras, files) + load_font_blobs(&mut extras, blobs);
     if !allowlist_matches(database, families) && loaded == 0 {
         log::warn!(
             "none of the requested UI fonts are installed; keeping all {scanned} font faces"
@@ -169,6 +191,24 @@ fn load_font_files(database: &mut fontdb::Database, files: &[PathBuf]) -> usize 
         }
     }
     database.len() - before
+}
+
+/// Loads each blob into `database`. Returns how many faces were added.
+///
+/// Malformed bytes are logged and skipped.
+fn load_font_blobs(database: &mut fontdb::Database, blobs: &[Vec<u8>]) -> usize {
+    let before = database.len();
+    for blob in blobs {
+        database.load_font_data(blob.clone());
+    }
+    database.len() - before
+}
+
+fn first_family_name(database: &fontdb::Database) -> Option<String> {
+    database
+        .faces()
+        .next()
+        .and_then(|face| face.families.first().map(|(name, _)| name.clone()))
 }
 
 fn append_faces(database: &mut fontdb::Database, extras: fontdb::Database) {
@@ -263,5 +303,19 @@ mod tests {
         let loaded = load_font_files(&mut database, &[PathBuf::from("missing-font.ttf")]);
         assert_eq!(loaded, 0);
         assert!(database.is_empty());
+    }
+
+    #[test]
+    fn malformed_font_bytes_are_skipped() {
+        let mut database = fontdb::Database::new();
+        let loaded = load_font_blobs(&mut database, &[b"not a font".to_vec()]);
+        assert_eq!(loaded, 0);
+        assert!(database.is_empty());
+    }
+
+    #[test]
+    fn with_data_keeps_the_bytes() {
+        let options = FontOptions::new().with_data([vec![1, 2, 3]]);
+        assert_eq!(options.blobs, vec![vec![1, 2, 3]]);
     }
 }

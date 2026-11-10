@@ -9,9 +9,9 @@ mod node;
 mod passes;
 mod scroll;
 
+use crate::time::Instant;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Instant;
 
 use cappy_layout::{ApproximateTextMeasurer, LayoutTree, Point, Rect, Size, TextMeasurer};
 use cappy_style::{Style, Theme};

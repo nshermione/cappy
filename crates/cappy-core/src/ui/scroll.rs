@@ -3,7 +3,7 @@
 //! A wheel event moves the target; the offset chases it and stops there. Dragging the scrollbar
 //! writes the offset directly so the thumb stays under the pointer.
 
-use std::time::{Duration, Instant};
+use crate::time::{Duration, Instant};
 
 use cappy_layout::{Point, Rect};
 use cappy_style::Color;

@@ -10,6 +10,11 @@ authors.workspace = true
 cappy-style.workspace = true
 cappy-layout.workspace = true
 
+# `std::time::Instant` cannot be read on wasm32-unknown-unknown. Only that target
+# pulls in the browser clock; native builds keep `std`.
+[target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
+web-time.workspace = true
+
 [dev-dependencies]
 insta.workspace = true
 

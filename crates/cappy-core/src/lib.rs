@@ -13,6 +13,7 @@ mod paint;
 mod prop;
 mod reactive;
 mod theme_handle;
+pub mod time;
 mod ui;
 
 pub use context::{

@@ -37,6 +37,7 @@ bytemuck = { version = "1", features = ["derive"] }
 
 # Window managers
 winit = "0.30"
+web-time = "1"
 
 # Utilities
 log = "0.4"

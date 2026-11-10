@@ -78,7 +78,8 @@ Frames are drawn on the GPU with [wgpu](https://wgpu.rs/) by default, or on the 
 │   └── cappy-winit/         winit event loop
 ├── playground/
 │   ├── scenes/              Showcase scene shared by hosts
-│   └── winit-demo/          Binary: cargo run -p winit-demo
+│   ├── winit-demo/          Binary: cargo run -p winit-demo
+│   └── web-demo/            Browser: trunk serve (from this directory)
 └── .github/workflows/rust.yml
 ```
 
@@ -92,6 +93,7 @@ Both renderers implement `WindowRenderer` from `cappy-host` and paint the same `
   - **Linux:** a Vulkan driver, or a software Vulkan layer if you have no GPU. Windowing needs the usual winit system packages for your distro.
   - **macOS:** Metal, which ships with the OS.
 - The CPU renderer needs none of the GPU stack. Build with `--no-default-features --features cpu` when you want that path only.
+- **Web:** the `wasm32-unknown-unknown` target and [trunk](https://trunkrs.dev/). A Chromium browser (WebGPU, with WebGL as fallback). The CPU renderer does not run in the browser.
 
 There is no database, no `.env` file, and no separate asset build.
 
@@ -113,7 +115,17 @@ cargo run -p winit-demo -- --debug-damage
 cargo test --workspace
 ```
 
-The window opens at 960×640 logical pixels and stays hidden until the first frame has been presented. The event loop then sleeps until input arrives or a signal changes.
+The same showcase in a browser. Trunk builds the wasm crate and serves it. The first build compiles wgpu for wasm, which is slow.
+
+```sh
+rustup target add wasm32-unknown-unknown
+cargo install trunk
+
+cd playground/web-demo
+trunk serve --open
+```
+
+The native window opens at 960×640 logical pixels and stays hidden until the first frame has been presented. The browser canvas fills the page as soon as it is created and follows the viewport. The event loop then sleeps until input arrives, a signal changes, or an animation frame is due.
 
 A minimal window, using the same pieces the playground uses:
 

@@ -1,7 +1,10 @@
 //! Runs a cappy [`Ui`] in a winit window. The event loop sleeps until input arrives or a signal
 //! changes, and each redraw repaints only the damaged regions. A live resize follows the pointer.
 //! Presents stay on the resize interval, then one more frame is presented when the size settles.
-//! The window stays hidden until that first frame has been presented.
+//! The window stays hidden until that first frame has been presented. On the web the canvas fills
+//! the page and is shown immediately, because a hidden canvas has no size for wgpu to draw to.
+//! Animation there waits for the browser's frame, and `run_app` is replaced by `spawn_app` so the
+//! call returns while the browser keeps the loop alive.
 //!
 //! ```no_run
 //! use cappy_core::{Application, Theme, Ui, div, text};
@@ -21,20 +24,28 @@
 //! Features pick the renderer backends compiled in: `gpu` (wgpu, default) and `cpu`
 //! (tiny-skia + softbuffer, far less memory). With both, [`WindowOptions::with_renderer`] or the
 //! `CAPPY_RENDERER=gpu|cpu` environment variable chooses; otherwise the GPU is preferred.
+//! The web target only builds the GPU backend.
 
 mod renderer;
 mod translate;
 
+use cappy_core::time::Instant;
 use std::fmt;
 use std::sync::Arc;
-use std::time::Instant;
+
+#[cfg(target_arch = "wasm32")]
+use std::cell::RefCell;
+#[cfg(target_arch = "wasm32")]
+use std::rc::Rc;
 
 use cappy_core::{Application, CursorIcon, InputEvent, Ui};
 use cappy_host::{
-    PresentOutcome, RendererError, RendererSelectionError, WindowHost, select_renderer,
+    PresentOutcome, RendererError, RendererSelectionError, WindowHost, WindowRenderer,
+    select_renderer,
 };
 use cappy_text::FontContext;
 use winit::application::ApplicationHandler;
+#[cfg(not(target_arch = "wasm32"))]
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
@@ -49,13 +60,35 @@ pub use renderer::AVAILABLE_RENDERERS;
 const DEBUG_DAMAGE_KEY: KeyCode = KeyCode::F12;
 
 fn window_attributes(options: &WindowOptions, renderer: RendererKind) -> WindowAttributes {
-    let (width, height) = options.logical_size;
+    // Native windows stay hidden until the first presented frame. On the web a hidden canvas
+    // reports a zero size, so wgpu cannot create a surface; the page shows it immediately.
+    // The page CSS sizes that canvas. An inner size would pin it to a fixed pixel box.
     let attributes = Window::default_attributes()
         .with_title(options.title.clone())
-        .with_inner_size(LogicalSize::new(width, height))
-        // Shown after the first presented frame. A hidden window is not transparent on screen.
-        .with_visible(false);
-    without_redirection_bitmap(attributes, renderer)
+        .with_visible(cfg!(target_arch = "wasm32"));
+    let attributes = with_logical_size(attributes, options.logical_size);
+    web_canvas(without_redirection_bitmap(attributes, renderer))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn with_logical_size(attributes: WindowAttributes, size: (f64, f64)) -> WindowAttributes {
+    attributes.with_inner_size(LogicalSize::new(size.0, size.1))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn with_logical_size(attributes: WindowAttributes, _size: (f64, f64)) -> WindowAttributes {
+    attributes
+}
+
+#[cfg(target_arch = "wasm32")]
+fn web_canvas(attributes: WindowAttributes) -> WindowAttributes {
+    use winit::platform::web::WindowAttributesExtWebSys;
+    attributes.with_append(true)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn web_canvas(attributes: WindowAttributes) -> WindowAttributes {
+    attributes
 }
 
 /// DWM keeps a bitmap of the window and scales it on the GPU for the whole drag.
@@ -122,6 +155,9 @@ impl std::error::Error for RunError {
 }
 
 /// Opens a window for an [`Application`] and runs until it is closed.
+///
+/// On the web this returns once the browser event loop is running. A failure while opening the
+/// GPU surface is logged from that loop; it is not returned here.
 pub trait Run {
     fn run(&self, options: WindowOptions, ui: Ui) -> Result<(), RunError>;
 }
@@ -141,6 +177,7 @@ fn run_window(application: &Application, options: WindowOptions, ui: Ui) -> Resu
     let event_loop = EventLoop::<Wake>::with_user_event()
         .build()
         .map_err(RunError::EventLoop)?;
+    #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
     let mut app = WinitHost {
         options,
         renderer,
@@ -148,9 +185,26 @@ fn run_window(application: &Application, options: WindowOptions, ui: Ui) -> Resu
         pending_ui: Some(ui),
         running: None,
         error: None,
+        #[cfg(target_arch = "wasm32")]
+        opening: None,
+        // Last non-zero canvas size. The first resize often arrives before the GPU device
+        // exists, and a zero size would configure a 1×1 surface that then stretches over the page.
+        #[cfg(target_arch = "wasm32")]
+        surface_size: (0, 0),
+        #[cfg(target_arch = "wasm32")]
+        ready: Rc::new(RefCell::new(None)),
     };
-    event_loop.run_app(&mut app).map_err(RunError::EventLoop)?;
-    app.error.map_or(Ok(()), Err)
+    #[cfg(target_arch = "wasm32")]
+    {
+        use winit::platform::web::EventLoopExtWebSys;
+        event_loop.spawn_app(app);
+        Ok(())
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        event_loop.run_app(&mut app).map_err(RunError::EventLoop)?;
+        app.error.map_or(Ok(()), Err)
+    }
 }
 
 /// Sent by the UI's waker when a signal changes outside of input handling.
@@ -167,6 +221,19 @@ struct Running {
     shown: bool,
 }
 
+/// Window and UI waiting for the async GPU surface. Only the web opens the device this way.
+#[cfg(target_arch = "wasm32")]
+struct Opening {
+    window: Arc<Window>,
+    fonts: FontContext,
+    ui: Ui,
+    /// Set once the GPU future has been spawned. A zero canvas size is not a surface yet.
+    gpu_started: bool,
+}
+
+#[cfg(target_arch = "wasm32")]
+type ReadyRenderer = Rc<RefCell<Option<Result<Box<dyn WindowRenderer>, RendererError>>>>;
+
 struct WinitHost {
     options: WindowOptions,
     renderer: RendererKind,
@@ -174,10 +241,19 @@ struct WinitHost {
     pending_ui: Option<Ui>,
     running: Option<Running>,
     error: Option<RunError>,
+    #[cfg(target_arch = "wasm32")]
+    opening: Option<Opening>,
+    /// Filled by the GPU future, then taken on the next wake. The browser types inside the
+    /// renderer are not `Send`, so this stays on the page thread instead of riding the proxy.
+    #[cfg(target_arch = "wasm32")]
+    ready: ReadyRenderer,
+    /// Last non-zero physical size reported for the canvas.
+    #[cfg(target_arch = "wasm32")]
+    surface_size: (u32, u32),
 }
 
 impl WinitHost {
-    fn start(&mut self, event_loop: &ActiveEventLoop, ui: Ui) -> Result<Running, RunError> {
+    fn create_window(&self, event_loop: &ActiveEventLoop) -> Result<Arc<Window>, RunError> {
         cappy_host::set_log_memory(self.options.log_memory);
         #[cfg(debug_assertions)]
         cappy_host::memory_mark("start before window");
@@ -189,11 +265,16 @@ impl WinitHost {
         );
         #[cfg(debug_assertions)]
         cappy_host::memory_mark("start after window");
-        let fonts = FontContext::load(&self.options.fonts);
-        #[cfg(debug_assertions)]
-        cappy_host::memory_mark("start after fonts");
-        let renderer =
-            renderer::open_renderer(self.renderer, &window, &fonts).map_err(RunError::Renderer)?;
+        Ok(window)
+    }
+
+    fn finish(
+        &self,
+        window: Arc<Window>,
+        fonts: FontContext,
+        ui: Ui,
+        renderer: Box<dyn WindowRenderer>,
+    ) -> Running {
         #[cfg(debug_assertions)]
         cappy_host::memory_mark("start after renderer");
         let mut host = WindowHost::new(renderer, &fonts, ui);
@@ -207,20 +288,120 @@ impl WinitHost {
                 log::debug!("wake ignored: the event loop has already exited");
             }
         });
-        let mut running = Running {
+        Running {
             host,
             window,
             settle_at: None,
             shown: false,
-        };
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn start(&mut self, event_loop: &ActiveEventLoop, ui: Ui) -> Result<Running, RunError> {
+        let window = self.create_window(event_loop)?;
+        let fonts = FontContext::load(&self.options.fonts);
+        #[cfg(debug_assertions)]
+        cappy_host::memory_mark("start after fonts");
+        let renderer =
+            renderer::open_renderer(self.renderer, &window, &fonts).map_err(RunError::Renderer)?;
+        let mut running = self.finish(window, fonts, ui, renderer);
         // A hidden window does not receive WM_PAINT, so the first frame cannot wait for
         // RedrawRequested. Present it here, then show the window with that frame in place.
         redraw(&mut running)?;
         Ok(running)
     }
 
+    /// Creates the canvas, then opens the GPU device without blocking the page.
+    #[cfg(target_arch = "wasm32")]
+    fn begin(&mut self, event_loop: &ActiveEventLoop, ui: Ui) {
+        if self.renderer != RendererKind::Gpu {
+            self.fail(
+                event_loop,
+                RunError::Renderer(RendererError::new(
+                    self.renderer,
+                    RendererSelectionError::Unavailable(self.renderer),
+                )),
+            );
+            return;
+        }
+        let window = match self.create_window(event_loop) {
+            Ok(window) => window,
+            Err(error) => {
+                self.fail(event_loop, error);
+                return;
+            }
+        };
+        let fonts = FontContext::load(&self.options.fonts);
+        self.opening = Some(Opening {
+            window,
+            fonts,
+            ui,
+            gpu_started: false,
+        });
+        // `create_window` may already have delivered `Resized` before `opening` existed.
+        self.open_surface();
+    }
+
+    /// Starts the GPU future once the canvas has a real size. Called again from later resizes.
+    #[cfg(target_arch = "wasm32")]
+    fn open_surface(&mut self) {
+        let Some(opening) = &self.opening else {
+            return;
+        };
+        if opening.gpu_started {
+            return;
+        }
+        let size = if self.surface_size.0 > 0 && self.surface_size.1 > 0 {
+            self.surface_size
+        } else {
+            let inner = opening.window.inner_size();
+            (inner.width, inner.height)
+        };
+        if size.0 == 0 || size.1 == 0 {
+            return;
+        }
+        self.surface_size = size;
+        let opening = self.opening.as_mut().expect("opening is present");
+        opening.gpu_started = true;
+        let ready = Rc::clone(&self.ready);
+        let proxy = self.proxy.clone();
+        let surface_window = Arc::clone(&opening.window);
+        let surface_fonts = opening.fonts.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let outcome = renderer::open_gpu(surface_window, size, &surface_fonts).await;
+            *ready.borrow_mut() = Some(outcome);
+            if proxy.send_event(Wake).is_err() {
+                log::debug!("wake ignored: the event loop has already exited");
+            }
+        });
+    }
+
+    /// Builds the host once the GPU future has stored a renderer.
+    #[cfg(target_arch = "wasm32")]
+    fn attach_renderer(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(outcome) = self.ready.borrow_mut().take() else {
+            return;
+        };
+        let Some(opening) = self.opening.take() else {
+            log::error!("gpu renderer became ready without a window");
+            return;
+        };
+        match outcome {
+            Ok(renderer) => {
+                let mut running = self.finish(opening.window, opening.fonts, opening.ui, renderer);
+                match redraw(&mut running) {
+                    Ok(()) => self.running = Some(running),
+                    Err(error) => self.fail(event_loop, error),
+                }
+            }
+            Err(error) => self.fail(event_loop, RunError::Renderer(error)),
+        }
+    }
+
     fn fail(&mut self, event_loop: &ActiveEventLoop, error: RunError) {
         log::error!("{error}");
+        #[cfg(target_arch = "wasm32")]
+        set_boot_status(&error.to_string());
         self.error = Some(error);
         event_loop.exit();
     }
@@ -231,31 +412,41 @@ impl ApplicationHandler<Wake> for WinitHost {
         let Some(ui) = self.pending_ui.take() else {
             return;
         };
+        #[cfg(not(target_arch = "wasm32"))]
         match self.start(event_loop, ui) {
             Ok(running) => self.running = Some(running),
             Err(error) => self.fail(event_loop, error),
         }
+        #[cfg(target_arch = "wasm32")]
+        self.begin(event_loop, ui);
     }
 
-    fn user_event(&mut self, _event_loop: &ActiveEventLoop, _event: Wake) {
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, _event: Wake) {
+        #[cfg(target_arch = "wasm32")]
+        self.attach_renderer(event_loop);
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = event_loop;
+        if self.error.is_some() {
+            return;
+        }
         if let Some(running) = &self.running {
             running.window.request_redraw();
         }
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        #[cfg(target_arch = "wasm32")]
+        self.attach_renderer(event_loop);
+        if self.error.is_some() {
+            return;
+        }
+        #[cfg(target_arch = "wasm32")]
+        self.open_surface();
         let Some(running) = &self.running else {
             event_loop.set_control_flow(ControlFlow::Wait);
             return;
         };
-        match running.settle_at {
-            Some(deadline) if Instant::now() >= deadline => {
-                running.window.request_redraw();
-                event_loop.set_control_flow(ControlFlow::Wait);
-            }
-            Some(deadline) => event_loop.set_control_flow(ControlFlow::WaitUntil(deadline)),
-            None => event_loop.set_control_flow(ControlFlow::Wait),
-        }
+        schedule_animation(event_loop, running);
     }
 
     fn window_event(
@@ -270,6 +461,13 @@ impl ApplicationHandler<Wake> for WinitHost {
                 self.fail(event_loop, error);
             }
             return;
+        }
+        #[cfg(target_arch = "wasm32")]
+        if let WindowEvent::Resized(size) = &event {
+            if size.width > 0 && size.height > 0 {
+                self.surface_size = (size.width, size.height);
+                self.open_surface();
+            }
         }
         let Some(running) = &mut self.running else {
             return;
@@ -313,6 +511,44 @@ impl ApplicationHandler<Wake> for WinitHost {
                 window.request_redraw();
             }
         }
+    }
+}
+
+/// Asks for the next animation frame, or sleeps when nothing is moving.
+///
+/// Native waits until the host deadline, then asks winit to redraw. The browser already
+/// delivers frames through `requestAnimationFrame`. A `WaitUntil` timer would wake the page
+/// between those frames and record an update the display cannot show.
+fn schedule_animation(event_loop: &ActiveEventLoop, running: &Running) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        if running.settle_at.is_some() {
+            running.window.request_redraw();
+        }
+        event_loop.set_control_flow(ControlFlow::Wait);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    match running.settle_at {
+        Some(deadline) if Instant::now() >= deadline => {
+            running.window.request_redraw();
+            event_loop.set_control_flow(ControlFlow::Wait);
+        }
+        Some(deadline) => event_loop.set_control_flow(ControlFlow::WaitUntil(deadline)),
+        None => event_loop.set_control_flow(ControlFlow::Wait),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_boot_status(message: &str) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Some(document) = window.document() else {
+        return;
+    };
+    if let Some(boot) = document.get_element_by_id("boot") {
+        let _ = boot.set_attribute("style", "display:block;padding:16px;white-space:pre-wrap");
+        boot.set_text_content(Some(message));
     }
 }
 

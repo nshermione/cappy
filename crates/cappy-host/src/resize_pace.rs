@@ -5,7 +5,7 @@
 //! stops changing, the next redraw presents that size. The CPU backend uses a longer interval
 //! because a size change repaints the whole window on the UI thread.
 
-use std::time::{Duration, Instant};
+use cappy_core::time::{Duration, Instant};
 
 use crate::RendererKind;
 
@@ -75,7 +75,7 @@ mod tests {
     use super::{
         CPU_RESIZE_INTERVAL, PresentedFrame, RESIZE_INTERVAL, ResizeFrame, choose_resize_frame,
     };
-    use std::time::{Duration, Instant};
+    use cappy_core::time::{Duration, Instant};
 
     fn presented(at: Instant) -> PresentedFrame {
         PresentedFrame {

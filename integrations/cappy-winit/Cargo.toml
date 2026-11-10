@@ -23,5 +23,12 @@ winit.workspace = true
 pollster = { workspace = true, optional = true }
 log.workspace = true
 
+# `getrandom` is pulled in by winit. The wasm target has no OS entropy source until this feature
+# is on. `wasm-bindgen-futures` drives the async GPU surface open; the browser cannot block.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.3", features = ["wasm_js"] }
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Document", "Element", "Window"] }
+
 [lints]
 workspace = true

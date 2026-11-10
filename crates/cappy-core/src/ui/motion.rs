@@ -6,7 +6,7 @@
 //! [`Motion::delay`] waits before the first cycle. [`Anim`] runs clips one after another or at
 //! the same time. Hiding or disposing the node clears it.
 
-use std::time::{Duration, Instant};
+use crate::time::{Duration, Instant};
 
 use cappy_layout::{Point, Rect};
 use cappy_style::{Background, Color};
