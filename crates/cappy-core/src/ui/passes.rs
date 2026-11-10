@@ -424,7 +424,7 @@ impl Ui {
                                 clip,
                             }));
                         }
-                        super::NodeContent::Image { pixels, fit } => {
+                        super::NodeContent::Image { pixels, fit, .. } => {
                             primitives.push(Primitive::Image(ImagePrimitive {
                                 rect,
                                 pixels: pixels.clone(),
@@ -652,6 +652,136 @@ fn fade_background(background: Background, opacity: f32) -> Background {
             start,
             end,
         },
+    }
+}
+
+impl Ui {
+    /// Installs an image whose path or URL finished loading since the last frame.
+    pub(super) fn poll_image_loads(&mut self) {
+        let mut finished = Vec::new();
+        for index in 0..self.nodes.len() {
+            let super::NodeContent::Image {
+                load: Some(load), ..
+            } = &self.nodes[index].content
+            else {
+                continue;
+            };
+            if let Some(result) = load.take() {
+                finished.push((index, result));
+            }
+        }
+        for (index, result) in finished {
+            match result {
+                Ok(clip) => {
+                    let pixels = clip.frame_pixels(0);
+                    if let super::NodeContent::Image {
+                        clip: slot,
+                        pixels: shown,
+                        elapsed,
+                        clock,
+                        shown: frame,
+                        load,
+                        ..
+                    } = &mut self.nodes[index].content
+                    {
+                        *slot = clip;
+                        *shown = pixels;
+                        *elapsed = std::time::Duration::ZERO;
+                        *clock = None;
+                        *frame = 0;
+                        *load = None;
+                    }
+                    self.nodes[index].paint_dirty = true;
+                    self.paint_dirty = true;
+                }
+                Err(error) => {
+                    log::warn!("{error}");
+                    if let super::NodeContent::Image { load, .. } = &mut self.nodes[index].content {
+                        *load = None;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Advances visible GIF clips and damages a node when its frame changes.
+    pub(super) fn step_images(&mut self, now: crate::time::Instant) {
+        let mut changed = Vec::new();
+        for index in 0..self.nodes.len() {
+            if !self.nodes[index].alive {
+                continue;
+            }
+            let visible = self.image_is_visible(index);
+            let super::NodeContent::Image {
+                clip,
+                pixels,
+                elapsed,
+                clock,
+                shown,
+                ..
+            } = &mut self.nodes[index].content
+            else {
+                continue;
+            };
+            if !clip.is_animated() {
+                continue;
+            }
+            if !visible {
+                *clock = None;
+                continue;
+            }
+            if let Some(previous) = *clock {
+                *elapsed += now.saturating_duration_since(previous);
+            }
+            *clock = Some(now);
+            let next = clip.index_at(*elapsed);
+            if next != *shown {
+                *shown = next;
+                *pixels = clip.frame_pixels(next);
+                changed.push(index);
+            }
+        }
+        for index in changed {
+            self.nodes[index].paint_dirty = true;
+            self.paint_dirty = true;
+        }
+    }
+
+    /// When the next visible GIF frame is due.
+    pub(super) fn image_frame_deadline(
+        &self,
+        now: crate::time::Instant,
+    ) -> Option<crate::time::Instant> {
+        let mut soonest: Option<crate::time::Instant> = self
+            .nodes
+            .iter()
+            .any(|node| {
+                node.alive
+                    && matches!(
+                        node.content,
+                        super::NodeContent::Image { load: Some(_), .. }
+                    )
+            })
+            .then_some(now + std::time::Duration::from_millis(16));
+        for (index, node) in self.nodes.iter().enumerate() {
+            let super::NodeContent::Image { clip, elapsed, .. } = &node.content else {
+                continue;
+            };
+            if !clip.is_animated() || !self.image_is_visible(index) {
+                continue;
+            }
+            let Some(remaining) = clip.remaining(*elapsed) else {
+                continue;
+            };
+            let due = now + remaining;
+            soonest = Some(soonest.map_or(due, |current| current.min(due)));
+        }
+        soonest
+    }
+
+    fn image_is_visible(&self, index: usize) -> bool {
+        let node = &self.nodes[index];
+        node.alive && !node.suppressed && node.style.layout.display != Display::None
     }
 }
 

@@ -1,6 +1,4 @@
-#[cfg(not(feature = "cpu"))]
-use cappy::Primitive;
-use cappy::{Application, Background, Damage};
+use cappy::{Application, Background, Damage, Primitive};
 use cappy_testing::TestUi;
 use playground_scenes::showcase;
 
@@ -228,6 +226,37 @@ fn paint_tab_uses_gradient_shadow_and_image() {
     assert!(harness.rect("picture-contain").width > 0.0);
     assert!(harness.rect("picture-cover").width > 0.0);
     assert!(harness.rect("picture-fill").width > 0.0);
+}
+
+#[test]
+fn images_tab_decodes_each_file() {
+    let mut harness = harness();
+    open_tab(&mut harness, "tab-images");
+    for key in [
+        "image-png",
+        "image-jpeg",
+        "image-gif",
+        "image-webp",
+        "image-bmp",
+        "image-ico",
+        "image-svg",
+    ] {
+        let rect = harness.rect(key);
+        let pixels = harness
+            .ui()
+            .display_list()
+            .iter()
+            .find_map(|primitive| match primitive {
+                Primitive::Image(image) if image.rect == rect => Some(image.pixels.clone()),
+                Primitive::Image(_)
+                | Primitive::Quad(_)
+                | Primitive::Shadow(_)
+                | Primitive::Text(_) => None,
+            })
+            .unwrap_or_else(|| panic!("{key} has no image primitive"));
+        assert!(pixels.width() > 0, "{key}");
+        assert!(pixels.height() > 0, "{key}");
+    }
 }
 
 #[cfg(not(feature = "cpu"))]

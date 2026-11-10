@@ -336,7 +336,22 @@ impl Ui {
             | ElementContent::Flow(_) => (NodeContent::Container, None),
             ElementContent::StaticText(text) => (NodeContent::Text(text), None),
             ElementContent::DynamicText(binding) => (NodeContent::Text("".into()), Some(binding)),
-            ElementContent::Image { pixels, fit } => (NodeContent::Image { pixels, fit }, None),
+            ElementContent::Image { source, fit } => {
+                let (clip, load) = crate::image_load::open(source);
+                let pixels = clip.frame_pixels(0);
+                (
+                    NodeContent::Image {
+                        clip,
+                        pixels,
+                        fit,
+                        elapsed: std::time::Duration::ZERO,
+                        clock: None,
+                        shown: 0,
+                        load,
+                    },
+                    None,
+                )
+            }
         };
         let initial_style = Style::inheriting(TextStyle::from_tokens(self.theme.tokens()));
         let node = Node {

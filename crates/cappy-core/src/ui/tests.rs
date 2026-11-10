@@ -497,6 +497,66 @@ fn an_image_leaf_paints_its_bitmap() {
 }
 
 #[test]
+fn an_image_loads_from_a_filesystem_path() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/sample.png");
+    let cx = context();
+    let ui = settled(
+        &cx,
+        crate::image(path)
+            .key("photo")
+            .style(StyleRefinement::default().size(40)),
+    );
+    let image = ui
+        .display_list()
+        .iter()
+        .find_map(|primitive| match primitive {
+            Primitive::Image(image) => Some(image),
+            Primitive::Quad(_) | Primitive::Shadow(_) | Primitive::Text(_) => None,
+        })
+        .expect("loaded image");
+    assert_eq!((image.pixels.width(), image.pixels.height()), (32, 32));
+    assert_eq!(&image.pixels.rgba()[..4], &[255, 0, 0, 128]);
+}
+
+#[test]
+fn a_gif_advances_when_its_delay_elapses() {
+    use crate::ImageClip;
+
+    let clip = ImageClip::decode(include_bytes!("../../fixtures/sample.gif")).expect("gif");
+    let cx = context();
+    let mut ui = Ui::new(
+        &cx,
+        crate::image(clip)
+            .key("gif")
+            .style(StyleRefinement::default().size(40)),
+        Theme::light(),
+    );
+    let start = Instant::now();
+    ui.update_at(VIEWPORT, start);
+    assert_eq!(gif_pixel(&ui), [255, 0, 0, 255]);
+    let outcome = ui.update_at(VIEWPORT, start + Duration::from_millis(100));
+    assert!(outcome.needs_redraw());
+    assert_eq!(gif_pixel(&ui), [0, 0, 255, 255]);
+    assert!(
+        ui.frame_deadline(start + Duration::from_millis(100))
+            .is_some()
+    );
+}
+
+fn gif_pixel(ui: &Ui) -> [u8; 4] {
+    let image = ui
+        .display_list()
+        .iter()
+        .find_map(|primitive| match primitive {
+            Primitive::Image(image) => Some(image),
+            Primitive::Quad(_) | Primitive::Shadow(_) | Primitive::Text(_) => None,
+        })
+        .expect("gif");
+    let rgba = image.pixels.rgba();
+    [rgba[0], rgba[1], rgba[2], rgba[3]]
+}
+
+#[test]
 fn display_list_paints_back_to_front() {
     let cx = context();
     let ui = settled(&cx, counter(cx.signal(0)));

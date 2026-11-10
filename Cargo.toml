@@ -44,6 +44,8 @@ log = "0.4"
 env_logger = "0.11"
 pollster = "1"
 png = "0.18"
+image = { version = "0.25", default-features = false }
+resvg = { version = "0.45", default-features = false }
 
 # Proc-macro
 syn = { version = "2", features = ["full"] }

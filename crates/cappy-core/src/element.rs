@@ -11,7 +11,8 @@ use cappy_style::{ClassName, StyleRefinement, Stylesheet};
 
 use crate::ClickEvent;
 use crate::binding::{Dynamic, IntoClasses, IntoStyle, IntoText};
-use crate::bitmap::{ImagePixels, ObjectFit};
+use crate::bitmap::ObjectFit;
+use crate::image_source::ImageSource;
 
 pub(crate) type ClickHandler = Box<dyn FnMut(&ClickEvent)>;
 pub(crate) type HoverHandler = Box<dyn FnMut(bool)>;
@@ -24,7 +25,7 @@ pub(crate) enum ElementContent {
     StaticText(Arc<str>),
     DynamicText(TextBinding),
     Image {
-        pixels: Arc<ImagePixels>,
+        source: ImageSource,
         fit: ObjectFit,
     },
     /// Transparent hole. Mount skips it until a parent replaces it with a child.
@@ -109,12 +110,16 @@ pub fn text_dyn(content: impl Fn() -> String + 'static) -> Element {
     text(Dynamic(content))
 }
 
-/// An image leaf. `pixels` are straight RGBA8. Give the element a width and height; the box does
-/// not yet size itself from the bitmap. [`Element::fit`] chooses how the bitmap fills that box.
+/// An image leaf. `source` is pixels ([`ImageClip`], [`ImagePixels`](crate::ImagePixels)) or a
+/// locator string. [`asset_path!`](crate::asset_path) turns a path relative to the calling crate
+/// into that locator. A path is read from disk. `http://` and `https://` are fetched. In the
+/// browser any other string is a URL on the page, such as `assets/photo.png`. A GIF with more
+/// than one frame plays. Give the element a width and height; the box does not yet size itself from the
+/// bitmap. [`Element::fit`] chooses how the bitmap fills that box.
 #[must_use]
-pub fn image(pixels: impl Into<Arc<ImagePixels>>) -> Element {
+pub fn image(source: impl Into<ImageSource>) -> Element {
     Element::new(ElementContent::Image {
-        pixels: pixels.into(),
+        source: source.into(),
         fit: ObjectFit::Fill,
     })
 }
@@ -599,7 +604,7 @@ impl<T> Image<T> {
     }
 }
 
-impl<T: Into<Arc<ImagePixels>>> IntoElement for Image<T> {
+impl<T: Into<ImageSource>> IntoElement for Image<T> {
     fn into_element(self) -> Element {
         image(self.content).fit(self.fit)
     }

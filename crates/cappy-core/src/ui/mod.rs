@@ -254,8 +254,15 @@ impl Ui {
 
     /// When the host should draw the next animation frame. `None` once scroll and tweens rest.
     pub fn frame_deadline(&self, now: Instant) -> Option<Instant> {
-        (self.scroll_animating() || self.motion_animating() || !self.ticking.is_empty())
-            .then_some(now + scroll::SCROLL_FRAME)
+        let paced =
+            (self.scroll_animating() || self.motion_animating() || !self.ticking.is_empty())
+                .then_some(now + scroll::SCROLL_FRAME);
+        let image = self.image_frame_deadline(now);
+        match (paced, image) {
+            (Some(left), Some(right)) => Some(left.min(right)),
+            (Some(deadline), None) | (None, Some(deadline)) => Some(deadline),
+            (None, None) => None,
+        }
     }
 
     fn scroll_animating(&self) -> bool {
@@ -285,6 +292,8 @@ impl Ui {
         self.drain_motions();
         self.step_scroll(dt);
         self.step_motion(now);
+        self.poll_image_loads();
+        self.step_images(now);
         self.finish_anims(now);
         self.run_layout();
         self.collect_paint_damage();

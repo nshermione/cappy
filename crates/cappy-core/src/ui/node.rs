@@ -5,7 +5,11 @@ use std::sync::Arc;
 use cappy_layout::{Point, Rect};
 use cappy_style::{ClassName, InteractionState, Style, StyleRefinement, Stylesheet};
 
-use crate::bitmap::{ImagePixels, ObjectFit};
+use std::time::Duration;
+
+use crate::bitmap::{ImageClip, ImagePixels, ObjectFit};
+use crate::image_load::ImageLoad;
+use crate::time::Instant;
 
 use crate::element::{ClickHandler, HoverHandler};
 
@@ -80,8 +84,14 @@ pub(crate) enum NodeContent {
     Container,
     Text(Arc<str>),
     Image {
+        clip: ImageClip,
         pixels: Arc<ImagePixels>,
         fit: ObjectFit,
+        elapsed: Duration,
+        /// `None` while the image is hidden, so that gap is not added to `elapsed`.
+        clock: Option<Instant>,
+        shown: usize,
+        load: Option<ImageLoad>,
     },
 }
 

@@ -14,6 +14,19 @@ cpu = []
 [dependencies]
 cappy-style.workspace = true
 cappy-layout.workspace = true
+image = { workspace = true, features = ["png", "jpeg", "gif", "webp", "bmp", "ico"] }
+resvg.workspace = true
+log.workspace = true
+
+# OS TLS for https. wasm loads URLs with the browser's fetch instead.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+native-tls = "0.2"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = "0.3"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Window", "Response"] }
 
 # `std::time::Instant` cannot be read on wasm32-unknown-unknown. Only that target
 # pulls in the browser clock; native builds keep `std`.

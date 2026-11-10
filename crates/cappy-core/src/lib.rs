@@ -8,6 +8,9 @@ mod context;
 mod damage;
 mod element;
 mod event;
+mod image_decode;
+mod image_load;
+mod image_source;
 mod lifecycle;
 mod listener;
 mod paint;
@@ -24,13 +27,14 @@ pub use context::{
 pub use lifecycle::{on_before_mount, on_before_unmount, on_mounted, on_unmounted, on_updated};
 
 pub use binding::{Dynamic, IntoClasses, IntoStyle, IntoText};
-pub use bitmap::{ImagePixels, ImagePixelsError, ObjectFit};
+pub use bitmap::{ImageClip, ImageDecodeError, ImagePixels, ImagePixelsError, ObjectFit};
 pub use damage::{Damage, DamageTracker, coalesce_regions};
 pub use element::{
     Component, Container, Element, HasContext, Image, IntoElement, Slot, Text, div, for_each,
     fragment, if_else, image, show, slot, text, text_dyn, with_context,
 };
 pub use event::{ButtonState, ClickEvent, CursorIcon, InputEvent, PointerButton};
+pub use image_source::ImageSource;
 pub use listener::Listener;
 pub use paint::{
     ImagePlacement, ImagePrimitive, Primitive, QuadPrimitive, RenderFrame, ShadowPrimitive, Spin,
