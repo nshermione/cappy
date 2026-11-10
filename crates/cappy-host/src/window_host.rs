@@ -16,6 +16,9 @@ const DEFAULT_LOGICAL_SIZE: (f64, f64) = (960.0, 640.0);
 /// CPU presents are not vsynced. A steady 60 Hz clock keeps motion steps even; waiting 8 ms
 /// after a paint of varying length does not.
 const CPU_FRAME: Duration = Duration::from_nanos(16_666_667);
+/// A scheduled frame inside this window applies new input. Farther out is a caret blink, and
+/// waiting for it leaves the caret where it was until that blink.
+const PROMPT_FRAME: Duration = Duration::from_millis(32);
 
 /// Window settings shared by the desktop integrations.
 #[derive(Clone, Debug, PartialEq)]
@@ -138,8 +141,9 @@ pub struct WindowHost {
     presented: Option<PresentedFrame>,
     frames: u64,
     /// When set, a motion or scroll frame is already scheduled. Pointer events wait for it
-    /// instead of running a second update, which freezes the window while the cursor moves
-    /// over a looping animation.
+    /// when it is due within [`PROMPT_FRAME`], instead of running a second update, which
+    /// freezes the window while the cursor moves over a looping animation. A later deadline
+    /// is only the caret blink, so input that changes pixels does not wait for it.
     animation_due: Option<Instant>,
     /// When set, each presented frame writes a repaint line. Off by default.
     log_frames: bool,
@@ -216,10 +220,15 @@ impl WindowHost {
 
     /// Runs pending updates at the last known size. Returns whether a redraw is needed.
     ///
-    /// A frame already scheduled for motion or scroll applies this input. Updating again here
-    /// would restyle and rebuild the display list on every cursor event.
+    /// A motion or scroll frame due within [`PROMPT_FRAME`] applies this input. Updating
+    /// again here would restyle and rebuild the display list on every cursor event. The caret
+    /// blink is hundreds of milliseconds later, so a key that moves the caret paints now.
     fn settle(&mut self) -> bool {
-        if self.animation_due.is_some() {
+        let now = Instant::now();
+        if self
+            .animation_due
+            .is_some_and(|due| due <= now + PROMPT_FRAME)
+        {
             return false;
         }
         if !self.ui.needs_update() {

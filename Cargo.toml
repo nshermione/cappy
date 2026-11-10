@@ -41,6 +41,7 @@ web-time = "1"
 
 # Utilities
 log = "0.4"
+unicode-segmentation = "1"
 env_logger = "0.11"
 pollster = "1"
 png = "0.18"

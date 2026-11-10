@@ -11,7 +11,11 @@ use crate::bitmap::{ImageClip, ImagePixels, ObjectFit};
 use crate::image_load::ImageLoad;
 use crate::time::Instant;
 
-use crate::element::{ClickHandler, HoverHandler};
+use crate::element::{
+    ClickHandler, FocusHandler, HoverHandler, ImeHandler, InputHandler, KeyHandler, PointerHandler,
+    TextHandler,
+};
+use crate::ui::edit::TextEdit;
 
 /// One direct child of a node: a mounted element, a control-flow block, or a component boundary.
 ///
@@ -93,6 +97,22 @@ pub(crate) enum NodeContent {
         shown: usize,
         load: Option<ImageLoad>,
     },
+    Input(InputField),
+}
+
+/// Editing state of one single-line input.
+pub(crate) struct InputField {
+    pub(crate) edit: TextEdit,
+    pub(crate) placeholder: String,
+    pub(crate) disabled: bool,
+    pub(crate) scroll_x: f32,
+    pub(crate) on_input: Option<InputHandler>,
+    pub(crate) on_submit: Option<InputHandler>,
+    pub(crate) writer: Option<Box<dyn Fn(String)>>,
+    /// Last string written to [`Self::writer`], so an echo of that write does not move the caret.
+    pub(crate) published: String,
+    /// Text event equal to the last IME commit, swallowed so a platform that emits both inserts once.
+    pub(crate) swallow_text: Option<String>,
 }
 
 pub(crate) struct Node {
@@ -110,6 +130,16 @@ pub(crate) struct Node {
     pub(crate) interaction: InteractionState,
     pub(crate) on_click: Option<ClickHandler>,
     pub(crate) on_hover: Option<HoverHandler>,
+    pub(crate) focusable: bool,
+    pub(crate) disabled: bool,
+    pub(crate) on_key: Option<KeyHandler>,
+    pub(crate) on_text: Option<TextHandler>,
+    pub(crate) on_ime: Option<ImeHandler>,
+    pub(crate) on_focus: Option<FocusHandler>,
+    pub(crate) on_pointer: Option<PointerHandler>,
+    /// Caret byte index drawn on a text leaf. Inputs keep theirs on [`InputField`].
+    pub(crate) caret: Option<usize>,
+    pub(crate) selection: Option<(usize, usize)>,
     /// Ordered children before flows are flattened into [`Node::children`](Self::children).
     pub(crate) parts: Vec<ChildPart>,
     /// `show` is hiding this node, or a parent `show` is.
@@ -152,7 +182,7 @@ impl Node {
     pub(crate) fn text(&self) -> Option<&str> {
         match &self.content {
             NodeContent::Text(text) => Some(text),
-            NodeContent::Container | NodeContent::Image { .. } => None,
+            NodeContent::Container | NodeContent::Image { .. } | NodeContent::Input(_) => None,
         }
     }
 

@@ -38,7 +38,9 @@ use std::cell::RefCell;
 #[cfg(target_arch = "wasm32")]
 use std::rc::Rc;
 
-use cappy_core::{Application, CursorIcon, InputEvent, Ui};
+#[cfg(target_arch = "wasm32")]
+use cappy_core::NoopClipboard;
+use cappy_core::{Application, CursorIcon, InputEvent, Modifiers, Ui};
 use cappy_host::{
     PresentOutcome, RendererError, RendererSelectionError, WindowHost, WindowRenderer,
     select_renderer,
@@ -219,6 +221,7 @@ struct Running {
     settle_at: Option<Instant>,
     /// Set once the first presented frame has been followed by [`Window::set_visible`].
     shown: bool,
+    modifiers: Modifiers,
 }
 
 /// Window and UI waiting for the async GPU surface. Only the web opens the device this way.
@@ -288,11 +291,13 @@ impl WinitHost {
                 log::debug!("wake ignored: the event loop has already exited");
             }
         });
+        install_clipboard(host.ui_mut());
         Running {
             host,
             window,
             settle_at: None,
             shown: false,
+            modifiers: Modifiers::default(),
         }
     }
 
@@ -473,43 +478,90 @@ impl ApplicationHandler<Wake> for WinitHost {
             return;
         };
         let window = Arc::clone(&running.window);
-        let input = match event {
+        let events = match event {
             WindowEvent::CloseRequested => {
                 event_loop.exit();
-                None
+                Vec::new()
             }
             WindowEvent::Resized(size) => {
                 running.host.resize((size.width, size.height));
                 window.request_redraw();
-                None
+                Vec::new()
             }
             WindowEvent::ScaleFactorChanged { .. } => {
                 window.request_redraw();
-                None
+                Vec::new()
             }
             WindowEvent::CursorMoved { position, .. } => {
-                Some(translate::pointer_moved(position, window.scale_factor()))
+                vec![translate::pointer_moved(position, window.scale_factor())]
             }
-            WindowEvent::CursorLeft { .. } => Some(InputEvent::PointerLeft),
+            WindowEvent::CursorLeft { .. } => vec![InputEvent::PointerLeft],
             WindowEvent::MouseInput { state, button, .. } => {
                 translate::pointer_button(button, state)
+                    .into_iter()
+                    .collect()
             }
             WindowEvent::MouseWheel { delta, .. } => {
-                Some(translate::mouse_wheel(delta, window.scale_factor()))
+                vec![translate::mouse_wheel(delta, window.scale_factor())]
             }
             WindowEvent::KeyboardInput { event, .. } if is_debug_toggle(&event) => {
                 running.host.toggle_debug_damage();
                 window.request_redraw();
-                None
+                Vec::new()
             }
-            _ => None,
+            WindowEvent::KeyboardInput { event, .. } => {
+                translate::keyboard(&event, running.modifiers)
+            }
+            WindowEvent::ModifiersChanged(modifiers) => {
+                let event = translate::modifiers(modifiers.state());
+                if let InputEvent::Modifiers(modifiers) = event {
+                    running.modifiers = modifiers;
+                }
+                vec![event]
+            }
+            WindowEvent::Ime(event) => translate::ime(event).into_iter().collect(),
+            _ => Vec::new(),
         };
-        if let Some(input) = input {
+        for input in events {
             let response = running.host.handle_event(input);
             apply_cursor(&window, response.cursor);
             if response.redraw {
+                // `about_to_wait` sleeps until `settle_at`. Leaving the caret blink there
+                // holds this redraw until the caret flips.
+                running.settle_at = Some(Instant::now());
                 window.request_redraw();
             }
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn install_clipboard(ui: &mut Ui) {
+    match arboard::Clipboard::new() {
+        Ok(clipboard) => ui.set_clipboard(PlatformClipboard { clipboard }),
+        Err(error) => log::warn!("clipboard unavailable, edits stay in memory: {error}"),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn install_clipboard(ui: &mut Ui) {
+    ui.set_clipboard(NoopClipboard);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct PlatformClipboard {
+    clipboard: arboard::Clipboard,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl cappy_core::Clipboard for PlatformClipboard {
+    fn read_text(&mut self) -> Option<String> {
+        self.clipboard.get_text().ok()
+    }
+
+    fn write_text(&mut self, text: &str) {
+        if let Err(error) = self.clipboard.set_text(text) {
+            log::warn!("failed to write the clipboard: {error}");
         }
     }
 }

@@ -70,6 +70,11 @@ pub use cappy_macros::{slot_self, ui_closure, ui_for_view, ui_view};
 /// out before the closure. The setter must accept [`Dynamic`](cappy_core::Dynamic), as `text`, `class`
 /// and `style` do.
 ///
+/// `text` and `input` share `value`. `value = "hello"` is static. `:value = "hello"` or
+/// `:value = name`, where `name` is a [`Signal`](cappy_core::Signal) or
+/// [`Reactive`](cappy_core::Reactive) string, is dynamic. The signal is read for you. An input
+/// writes edits back to that signal.
+///
 /// `class` takes one class or a list: `class = [a, b]` is shorthand for `class = a, class = b`,
 /// and `:class = [a, b]` for `:class = a, :class = b`. List items may mix strings and typed
 /// classes.
@@ -159,6 +164,9 @@ macro_rules! __ui_open {
     (@cx $cx:ident ; image) => {
         $crate::__private::Image::open(&$cx)
     };
+    (@cx $cx:ident ; input) => {
+        $crate::__private::Input::open(&$cx)
+    };
     (@cx $cx:ident ; $type:ident $(:: $segment:ident)+) => {
         <$type $(:: $segment)*>::open(&$cx)
     };
@@ -172,6 +180,9 @@ macro_rules! __ui_open {
         $name::open(&$cx)
     };
     (@name @cx $cx:ident ; Image ; $name:ident) => {
+        $name::open(&$cx)
+    };
+    (@name @cx $cx:ident ; Input ; $name:ident) => {
         $name::open(&$cx)
     };
     (@name @cx $cx:ident ; $other:ident ; $name:ident) => {
@@ -191,6 +202,9 @@ macro_rules! __ui_type_path {
     };
     (image) => {
         $crate::__private::Image
+    };
+    (input) => {
+        $crate::__private::Input
     };
     ($type:ident $(:: $segment:ident)*) => {
         $type $(:: $segment)*

@@ -16,6 +16,7 @@ impl Component for CounterTab {
         let shared = use_store(Counter);
         let mirror = use_store(Counter);
         let local = use_local_store(Counter);
+        let name = reactive(String::new());
         element! {
             Container(class = [ThemeClass::Card, Class::Grow]) {
                 Text("Counter", class = ThemeClass::Subtitle)
@@ -36,6 +37,8 @@ impl Component for CounterTab {
                         Text("Local +1")
                     }
                 }
+                Input(:value = name, placeholder = "Name", key = "name", class = Class::Field)
+                Text(:value = name, key = "name-echo", class = ThemeClass::Muted)
                 Text("The badge shares this counter. Its hits stay on the badge.", class = ThemeClass::Muted)
                 Badge(label = "Badge", key = "counter-badge") {
                     Text("•", key = "badge-mark", slot = icon)

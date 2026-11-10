@@ -1,8 +1,8 @@
 //! Headless driver for writing UI tests against a [`Ui`] without a window or GPU.
 
 use cappy_core::{
-    ButtonState, Context, Damage, FrameInput, InputEvent, IntoElement, NodeId, Point,
-    PointerButton, Rect, RenderFrame, Theme, Ui, UpdateOutcome,
+    ButtonState, Context, Damage, FrameInput, InputEvent, IntoElement, Key, KeyEvent, Modifiers,
+    NodeId, Point, PointerButton, Rect, RenderFrame, Theme, Ui, UpdateOutcome,
 };
 
 const DEFAULT_VIEWPORT: FrameInput = FrameInput {
@@ -127,6 +127,23 @@ impl TestUi {
 
     pub fn leave(&mut self) {
         self.ui.handle_event(InputEvent::PointerLeft);
+    }
+
+    /// Sends committed text to the focused node, then updates.
+    pub fn type_text(&mut self, text: &str) {
+        self.ui.handle_event(InputEvent::Text(text.to_owned()));
+        self.update();
+    }
+
+    /// Presses `key` once. `modifiers` is what Ctrl, Alt, Shift and Command were doing.
+    pub fn press_key(&mut self, key: Key, modifiers: Modifiers) {
+        self.ui.handle_event(InputEvent::Key(KeyEvent {
+            key,
+            state: ButtonState::Pressed,
+            repeat: false,
+            modifiers,
+        }));
+        self.update();
     }
 
     fn primary_button(&mut self, state: ButtonState) {

@@ -2,6 +2,7 @@
 //! damaged regions plus a display list. It knows nothing about windows or GPUs.
 
 mod bindings;
+mod edit;
 pub(crate) mod flow;
 mod input;
 #[cfg_attr(feature = "cpu", allow(dead_code))]
@@ -17,7 +18,9 @@ use std::sync::Arc;
 use cappy_layout::{ApproximateTextMeasurer, LayoutTree, Point, Rect, Size, TextMeasurer};
 use cappy_style::{Style, Theme};
 
+use crate::clipboard::{Clipboard, MemoryClipboard};
 use crate::element::IntoElement;
+use crate::event::Modifiers;
 use crate::paint::{Primitive, RenderFrame};
 use crate::reactive::{BindingQueue, Signal};
 use crate::{Context, CursorIcon, Damage, DamageTracker, ThemeHandle};
@@ -147,6 +150,16 @@ pub struct Ui {
     pressed: Option<NodeId>,
     /// Thumb or track drag. The offset follows the pointer until the button is released.
     scrollbar_drag: Option<input::ScrollbarDrag>,
+    focused: Option<NodeId>,
+    /// Node receiving pointer moves until the button is released.
+    pointer_capture: Option<NodeId>,
+    modifiers: Modifiers,
+    /// Previous primary press, used to treat a second press as a double click.
+    last_press: Option<(NodeId, Instant)>,
+    /// Caret is painted while this is true. It flips on [`Self::caret_deadline`].
+    caret_on: bool,
+    caret_deadline: Option<Instant>,
+    clipboard: Box<dyn Clipboard>,
     /// Sequence and parallel groups still waiting on a step.
     anims: Vec<motion::Running>,
     next_anim_owner: u64,
@@ -195,6 +208,13 @@ impl Ui {
             hovered: Vec::new(),
             pressed: None,
             scrollbar_drag: None,
+            focused: None,
+            pointer_capture: None,
+            modifiers: Modifiers::default(),
+            last_press: None,
+            caret_on: true,
+            caret_deadline: None,
+            clipboard: Box::new(MemoryClipboard::new()),
             anims: Vec::new(),
             next_anim_owner: 0,
         };
@@ -258,11 +278,17 @@ impl Ui {
             (self.scroll_animating() || self.motion_animating() || !self.ticking.is_empty())
                 .then_some(now + scroll::SCROLL_FRAME);
         let image = self.image_frame_deadline(now);
-        match (paced, image) {
-            (Some(left), Some(right)) => Some(left.min(right)),
-            (Some(deadline), None) | (None, Some(deadline)) => Some(deadline),
-            (None, None) => None,
-        }
+        let caret = self.caret_deadline.filter(|_| self.focused.is_some());
+        [paced, image, caret].into_iter().flatten().min()
+    }
+
+    /// Replaces the clipboard. The default keeps text in memory, which is what tests paste from.
+    pub fn set_clipboard(&mut self, clipboard: impl Clipboard + 'static) {
+        self.clipboard = Box::new(clipboard);
+    }
+
+    pub fn clipboard_mut(&mut self) -> &mut dyn Clipboard {
+        self.clipboard.as_mut()
     }
 
     fn scroll_animating(&self) -> bool {
@@ -294,6 +320,7 @@ impl Ui {
         self.step_motion(now);
         self.poll_image_loads();
         self.step_images(now);
+        self.step_caret(now);
         self.finish_anims(now);
         self.run_layout();
         self.collect_paint_damage();
@@ -323,12 +350,25 @@ impl Ui {
     }
 
     pub fn cursor(&self) -> CursorIcon {
-        let over_clickable = self
-            .hovered
-            .iter()
-            .any(|id| self.is_current(*id) && self.nodes[id.index()].on_click.is_some());
-        if over_clickable {
+        let mut pointer = false;
+        let mut text = false;
+        for id in &self.hovered {
+            if !self.is_current(*id) {
+                continue;
+            }
+            let node = &self.nodes[id.index()];
+            let input = matches!(node.content, NodeContent::Input(_));
+            if input || (node.is_text() && node.caret.is_some()) {
+                text = true;
+            }
+            if node.on_click.is_some() && !input {
+                pointer = true;
+            }
+        }
+        if pointer {
             CursorIcon::Pointer
+        } else if text {
+            CursorIcon::Text
         } else {
             CursorIcon::Default
         }

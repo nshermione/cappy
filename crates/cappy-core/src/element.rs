@@ -5,18 +5,28 @@
 
 use std::fmt;
 use std::marker::PhantomData;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use cappy_style::{ClassName, StyleRefinement, Stylesheet};
 
-use crate::ClickEvent;
-use crate::binding::{Dynamic, IntoClasses, IntoStyle, IntoText};
+use crate::binding::{Dynamic, IntoClasses, IntoStyle, IntoText, LiveText};
 use crate::bitmap::ObjectFit;
+use crate::clipboard::Clipboard;
 use crate::image_source::ImageSource;
+use crate::{ClickEvent, ImeEvent, KeyEvent, PointerEvent};
 
 pub(crate) type ClickHandler = Box<dyn FnMut(&ClickEvent)>;
 pub(crate) type HoverHandler = Box<dyn FnMut(bool)>;
+pub(crate) type KeyHandler = Box<dyn FnMut(&KeyEvent, &mut dyn Clipboard)>;
+pub(crate) type TextHandler = Box<dyn FnMut(&str)>;
+pub(crate) type ImeHandler = Box<dyn FnMut(&ImeEvent)>;
+pub(crate) type FocusHandler = Box<dyn FnMut(bool)>;
+pub(crate) type PointerHandler = Box<dyn FnMut(&PointerEvent)>;
+pub(crate) type InputHandler = Box<dyn FnMut(&str)>;
 pub(crate) type TextBinding = Box<dyn Fn() -> String>;
+pub(crate) type CaretBinding = Box<dyn Fn() -> Option<usize>>;
+pub(crate) type SelectionBinding = Box<dyn Fn() -> Option<(usize, usize)>>;
 pub(crate) type ClassBinding = Box<dyn Fn() -> Vec<ClassName>>;
 pub(crate) type StyleBinding = Box<dyn Fn() -> StyleRefinement>;
 
@@ -36,6 +46,119 @@ pub(crate) enum ElementContent {
     Fragment(Vec<Element>),
     /// `show`, `if` / `else` or `for`. The runtime splices the result into the parent.
     Flow(crate::ui::flow::FlowSpec),
+    Input(InputSpec),
+}
+
+/// Value of an [`input`]: a fixed string, or a signal that is read and written.
+#[doc(hidden)]
+pub enum InputValue {
+    Fixed(String),
+    Bound {
+        read: TextBinding,
+        write: Box<dyn Fn(String)>,
+    },
+}
+
+/// Fields of an [`input`] before it is mounted.
+#[doc(hidden)]
+pub struct InputSpec {
+    pub value: InputValue,
+    pub placeholder: String,
+    pub on_input: Option<InputHandler>,
+    pub on_submit: Option<InputHandler>,
+    pub disabled: bool,
+    pub disabled_when: Option<Box<dyn Fn() -> bool>>,
+}
+
+impl InputSpec {
+    fn empty() -> Self {
+        Self {
+            value: InputValue::Fixed(String::new()),
+            placeholder: String::new(),
+            on_input: None,
+            on_submit: None,
+            disabled: false,
+            disabled_when: None,
+        }
+    }
+}
+
+/// A static string, or a [`Dynamic`] value. The closure may return a string or a [`Signal`] /
+/// [`Reactive`] string. A signal is read on each update and written on each edit.
+pub trait IntoInputValue {
+    fn into_input_value(self) -> InputValue;
+}
+
+impl IntoInputValue for String {
+    fn into_input_value(self) -> InputValue {
+        InputValue::Fixed(self)
+    }
+}
+
+impl IntoInputValue for &str {
+    fn into_input_value(self) -> InputValue {
+        InputValue::Fixed(self.to_owned())
+    }
+}
+
+impl<F, R> IntoInputValue for Dynamic<F>
+where
+    F: Fn() -> R + 'static,
+    R: LiveText + 'static,
+{
+    fn into_input_value(self) -> InputValue {
+        let Dynamic(source) = self;
+        let source = Rc::new(source);
+        let read = Rc::clone(&source);
+        InputValue::Bound {
+            read: Box::new(move || (*read)().read_text()),
+            write: Box::new(move |value| (*source)().write_text(value)),
+        }
+    }
+}
+
+/// A fixed caret index, or a [`Dynamic`] one, for [`Element::caret`].
+pub trait IntoCaret {
+    fn add_caret(self, element: &mut Element);
+}
+
+impl IntoCaret for usize {
+    fn add_caret(self, element: &mut Element) {
+        element.caret = Some(self);
+        element.caret_binding = None;
+    }
+}
+
+impl<F> IntoCaret for Dynamic<F>
+where
+    F: Fn() -> usize + 'static,
+{
+    fn add_caret(self, element: &mut Element) {
+        let Dynamic(read) = self;
+        element.caret_binding = Some(Box::new(move || Some(read())));
+    }
+}
+
+/// A fixed selection, or a [`Dynamic`] one, for [`Element::selection`].
+pub trait IntoSelection {
+    fn add_selection(self, element: &mut Element);
+}
+
+impl IntoSelection for (usize, usize) {
+    fn add_selection(self, element: &mut Element) {
+        element.selection = Some(self);
+        element.selection_binding = None;
+    }
+}
+
+impl<F> IntoSelection for Dynamic<F>
+where
+    F: Fn() -> (usize, usize) + 'static,
+{
+    fn add_selection(self, element: &mut Element) {
+        let Dynamic(read) = self;
+        element.selection_binding = Some(Box::new(move || Some(read())));
+    }
 }
 
 /// Identity of one `#[slot]` field. The component stores the marker, not the child, so it stays
@@ -85,6 +208,16 @@ pub struct Element {
     pub(crate) stylesheet: Option<Arc<Stylesheet>>,
     pub(crate) on_click: Option<ClickHandler>,
     pub(crate) on_hover: Option<HoverHandler>,
+    pub(crate) focusable: bool,
+    pub(crate) on_key: Option<KeyHandler>,
+    pub(crate) on_text: Option<TextHandler>,
+    pub(crate) on_ime: Option<ImeHandler>,
+    pub(crate) on_focus: Option<FocusHandler>,
+    pub(crate) on_pointer: Option<PointerHandler>,
+    pub(crate) caret: Option<usize>,
+    pub(crate) caret_binding: Option<CaretBinding>,
+    pub(crate) selection: Option<(usize, usize)>,
+    pub(crate) selection_binding: Option<SelectionBinding>,
     pub(crate) children: Vec<Element>,
     /// Non-zero on a component root. Nested slot walks stop at a different owner.
     pub(crate) slot_owner: u32,
@@ -99,8 +232,9 @@ pub fn div() -> Element {
     Element::new(ElementContent::Container)
 }
 
-/// A text leaf. A string never changes; a [`Dynamic`] closure is recomputed whenever a signal it
-/// reads changes.
+/// A text leaf. A string never changes. A [`Dynamic`] closure (`:value` in `element!`) is
+/// recomputed when a signal it reads changes. A [`Signal`] or [`Reactive`] string is read
+/// without calling [`Signal::get`](crate::Signal::get).
 pub fn text(content: impl IntoText) -> Element {
     content.into_text()
 }
@@ -108,6 +242,16 @@ pub fn text(content: impl IntoText) -> Element {
 /// A text leaf whose content is recomputed whenever a signal it reads changes.
 pub fn text_dyn(content: impl Fn() -> String + 'static) -> Element {
     text(Dynamic(content))
+}
+
+/// A single-line text field. Click to place the caret and type. `value = "hello"` stays as
+/// written. `:value = name` follows a [`Signal`](crate::Signal) or [`Reactive`](crate::Reactive)
+/// string and writes edits back.
+#[must_use]
+pub fn input() -> Element {
+    let mut element = Element::new(ElementContent::Input(InputSpec::empty()));
+    element.focusable = true;
+    element
 }
 
 /// An image leaf. `source` is pixels ([`ImageClip`], [`ImagePixels`](crate::ImagePixels)) or a
@@ -220,6 +364,16 @@ impl Element {
             stylesheet: None,
             on_click: None,
             on_hover: None,
+            focusable: false,
+            on_key: None,
+            on_text: None,
+            on_ime: None,
+            on_focus: None,
+            on_pointer: None,
+            caret: None,
+            caret_binding: None,
+            selection: None,
+            selection_binding: None,
             children: Vec::new(),
             slot_owner: 0,
             accepts_slots: false,
@@ -297,6 +451,137 @@ impl Element {
         self
     }
 
+    /// Lets this element take keyboard focus. An [`input`] is focusable without this call.
+    #[must_use]
+    pub fn focusable(mut self) -> Self {
+        self.focusable = true;
+        self
+    }
+
+    /// Key press or release while this element is focused. The clipboard is the one installed
+    /// on the [`Ui`](crate::Ui).
+    #[must_use]
+    pub fn on_key(mut self, handler: impl FnMut(&KeyEvent, &mut dyn Clipboard) + 'static) -> Self {
+        self.focusable = true;
+        self.on_key = Some(Box::new(handler));
+        self
+    }
+
+    /// Committed text while this element is focused. Shortcuts arrive through [`on_key`](Self::on_key).
+    #[must_use]
+    pub fn on_text(mut self, handler: impl FnMut(&str) + 'static) -> Self {
+        self.focusable = true;
+        self.on_text = Some(Box::new(handler));
+        self
+    }
+
+    /// IME composition while this element is focused.
+    #[must_use]
+    pub fn on_ime(mut self, handler: impl FnMut(&ImeEvent) + 'static) -> Self {
+        self.focusable = true;
+        self.on_ime = Some(Box::new(handler));
+        self
+    }
+
+    /// Called with `true` when this element gains focus and `false` when it loses it.
+    #[must_use]
+    pub fn on_focus(mut self, handler: impl FnMut(bool) + 'static) -> Self {
+        self.on_focus = Some(Box::new(handler));
+        self
+    }
+
+    /// Pointer down, move and up while this element is the pointer target. `text_index` is set
+    /// when the pointer is over a text leaf.
+    #[must_use]
+    pub fn on_pointer(mut self, handler: impl FnMut(&PointerEvent) + 'static) -> Self {
+        self.focusable = true;
+        self.on_pointer = Some(Box::new(handler));
+        self
+    }
+
+    /// Caret byte index drawn on a text leaf. A [`Dynamic`] index is read again when its signals change.
+    #[must_use]
+    pub fn caret(mut self, index: impl IntoCaret) -> Self {
+        index.add_caret(&mut self);
+        self
+    }
+
+    /// Selection byte range drawn on a text leaf.
+    #[must_use]
+    pub fn selection(mut self, range: impl IntoSelection) -> Self {
+        range.add_selection(&mut self);
+        self
+    }
+
+    /// Replaces the input's value. A string is static. A [`Dynamic`] value (`:value` in `element!`)
+    /// is read again when it changes. A [`Signal`] or [`Reactive`] string returned from that closure
+    /// is written on each edit.
+    ///
+    /// # Panics
+    /// Panics when the element is not an input.
+    #[must_use]
+    pub fn value(mut self, value: impl IntoInputValue) -> Self {
+        self.input_spec().value = value.into_input_value();
+        self
+    }
+
+    /// Text shown while the input is empty and not composing.
+    ///
+    /// # Panics
+    /// Panics when the element is not an input.
+    #[must_use]
+    pub fn placeholder(mut self, text: impl Into<String>) -> Self {
+        self.input_spec().placeholder = text.into();
+        self
+    }
+
+    /// Called with the new value after an edit.
+    ///
+    /// # Panics
+    /// Panics when the element is not an input.
+    #[must_use]
+    pub fn on_input(mut self, handler: impl FnMut(&str) + 'static) -> Self {
+        self.input_spec().on_input = Some(Box::new(handler));
+        self
+    }
+
+    /// Called with the value when Enter is pressed. Enter does not insert a newline.
+    ///
+    /// # Panics
+    /// Panics when the element is not an input.
+    #[must_use]
+    pub fn on_submit(mut self, handler: impl FnMut(&str) + 'static) -> Self {
+        self.input_spec().on_submit = Some(Box::new(handler));
+        self
+    }
+
+    /// A disabled input does not focus and does not edit.
+    ///
+    /// # Panics
+    /// Panics when the element is not an input.
+    #[must_use]
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.input_spec().disabled = disabled;
+        self
+    }
+
+    /// Disables the input whenever `disabled` is true.
+    ///
+    /// # Panics
+    /// Panics when the element is not an input.
+    #[must_use]
+    pub fn disabled_when(mut self, disabled: impl Fn() -> bool + 'static) -> Self {
+        self.input_spec().disabled_when = Some(Box::new(disabled));
+        self
+    }
+
+    fn input_spec(&mut self) -> &mut InputSpec {
+        let ElementContent::Input(spec) = &mut self.content else {
+            panic!("this method is only for input elements");
+        };
+        spec
+    }
+
     /// Identifier for lookups such as [`crate::Ui::find_by_key`].
     #[must_use]
     pub fn key(mut self, key: impl Into<String>) -> Self {
@@ -312,8 +597,11 @@ impl Element {
     pub fn child(mut self, child: impl IntoElement) -> Self {
         assert!(!self.is_text(), "text elements cannot have children");
         assert!(
-            !matches!(self.content, ElementContent::Image { .. }),
-            "image elements cannot have children"
+            !matches!(
+                self.content,
+                ElementContent::Image { .. } | ElementContent::Input(_)
+            ),
+            "image and input elements cannot have children"
         );
         self.children.push(child.into_element());
         self
@@ -436,6 +724,7 @@ impl fmt::Debug for Element {
             ElementContent::Slot { index } => format!("slot({index})"),
             ElementContent::Fragment(children) => format!("fragment({})", children.len()),
             ElementContent::Flow(_) => "flow".to_owned(),
+            ElementContent::Input(_) => "input".to_owned(),
         };
         f.debug_struct("Element")
             .field("kind", &kind)
@@ -563,6 +852,13 @@ impl<T> Text<T> {
     pub fn content<U>(self, content: U) -> Text<U> {
         Text { content }
     }
+
+    /// Same setter as [`content`](Self::content). `value = "..."` is static. `:value = ...` is
+    /// dynamic: a string expression, or a [`Signal`] / [`Reactive`] string.
+    #[must_use]
+    pub fn value<U>(self, value: U) -> Text<U> {
+        Text { content: value }
+    }
 }
 
 impl<T: IntoText> IntoElement for Text<T> {
@@ -608,6 +904,113 @@ impl<T: Into<ImageSource>> IntoElement for Image<T> {
     fn into_element(self) -> Element {
         image(self.content).fit(self.fit)
     }
+}
+
+/// `element!` `input` builder. [`Input::open`] starts empty; [`Input::value`] replaces that.
+pub struct Input<T> {
+    value: T,
+    placeholder: String,
+    on_input: Option<InputHandler>,
+    on_submit: Option<InputHandler>,
+    disabled: bool,
+}
+
+impl Input<()> {
+    #[must_use]
+    pub fn open(_cx: &crate::Context) -> Self {
+        Self {
+            value: (),
+            placeholder: String::new(),
+            on_input: None,
+            on_submit: None,
+            disabled: false,
+        }
+    }
+}
+
+impl<T> Input<T> {
+    #[must_use]
+    pub fn value<U>(self, value: U) -> Input<U> {
+        Input {
+            value,
+            placeholder: self.placeholder,
+            on_input: self.on_input,
+            on_submit: self.on_submit,
+            disabled: self.disabled,
+        }
+    }
+
+    #[must_use]
+    pub fn placeholder(mut self, text: impl Into<String>) -> Self {
+        self.placeholder = text.into();
+        self
+    }
+
+    #[must_use]
+    pub fn on_input(mut self, handler: impl FnMut(&str) + 'static) -> Self {
+        self.on_input = Some(Box::new(handler));
+        self
+    }
+
+    #[must_use]
+    pub fn on_submit(mut self, handler: impl FnMut(&str) + 'static) -> Self {
+        self.on_submit = Some(Box::new(handler));
+        self
+    }
+
+    #[must_use]
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
+    }
+}
+
+impl IntoElement for Input<()> {
+    fn into_element(self) -> Element {
+        finish_input(self, String::new())
+    }
+}
+
+impl<T: IntoInputValue> IntoElement for Input<T> {
+    fn into_element(self) -> Element {
+        let value = self.value.into_input_value();
+        let mut element = input();
+        element.input_spec().value = value;
+        apply_input_fields(
+            &mut element,
+            self.placeholder,
+            self.on_input,
+            self.on_submit,
+            self.disabled,
+        );
+        element
+    }
+}
+
+fn finish_input(builder: Input<()>, value: String) -> Element {
+    let mut element = input().value(value);
+    apply_input_fields(
+        &mut element,
+        builder.placeholder,
+        builder.on_input,
+        builder.on_submit,
+        builder.disabled,
+    );
+    element
+}
+
+fn apply_input_fields(
+    element: &mut Element,
+    placeholder: String,
+    on_input: Option<InputHandler>,
+    on_submit: Option<InputHandler>,
+    disabled: bool,
+) {
+    let spec = element.input_spec();
+    spec.placeholder = placeholder;
+    spec.on_input = on_input;
+    spec.on_submit = on_submit;
+    spec.disabled = disabled;
 }
 
 fn stamp_stylesheet(element: &mut Element, sheet: &Arc<Stylesheet>) {

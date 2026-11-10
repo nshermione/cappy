@@ -17,6 +17,17 @@ pub trait TextMeasurer {
     /// Size of the laid-out text. With `max_width`, text wraps at word boundaries.
     fn measure(&mut self, request: &TextMeasureRequest<'_>, max_width: Option<f32>) -> Size;
 
+    /// Byte index of the gap nearest to `(x, y)` in the text's own coordinates. The left half of
+    /// a glyph maps to the gap before it and the right half to the gap after it. `y` picks the
+    /// line. `max_width` wraps the same way [`measure`](Self::measure) does; `None` is one line.
+    fn hit_test(
+        &mut self,
+        request: &TextMeasureRequest<'_>,
+        max_width: Option<f32>,
+        x: f32,
+        y: f32,
+    ) -> usize;
+
     /// Cached measurements this measurer is still holding.
     fn cached_measurements(&self) -> usize {
         0
@@ -54,6 +65,41 @@ impl TextMeasurer for ApproximateTextMeasurer {
         }
         Size::new(widest_line, line_count as f32 * request.line_height)
     }
+
+    fn hit_test(
+        &mut self,
+        request: &TextMeasureRequest<'_>,
+        _max_width: Option<f32>,
+        x: f32,
+        y: f32,
+    ) -> usize {
+        let advance = request.font_size * self.advance_ratio;
+        let line_height = request.line_height.max(1.0);
+        let line_index = (y / line_height).floor().max(0.0) as usize;
+        let mut byte = 0usize;
+        for (index, line) in request.text.split('\n').enumerate() {
+            if index == line_index {
+                return byte + hit_line(line, advance, x);
+            }
+            byte += line.len() + 1;
+        }
+        request.text.len()
+    }
+}
+
+/// Gap nearest to `x` inside one line. Each character is `advance` wide.
+fn hit_line(text: &str, advance: f32, x: f32) -> usize {
+    if advance <= 0.0 {
+        return 0;
+    }
+    let mut cursor = 0.0;
+    for (offset, _) in text.char_indices() {
+        if x < cursor + advance * 0.5 {
+            return offset;
+        }
+        cursor += advance;
+    }
+    text.len()
 }
 
 /// Greedy word wrap. Returns the character count of each produced line.
@@ -116,5 +162,14 @@ mod tests {
     fn explicit_newlines_start_new_lines() {
         let size = ApproximateTextMeasurer::default().measure(&request("ab\ncdef"), None);
         assert_eq!(size, Size::new(20.0, 28.0));
+    }
+
+    #[test]
+    fn a_click_between_characters_lands_in_that_gap() {
+        let mut measurer = ApproximateTextMeasurer::default();
+        let request = request("hello");
+        assert_eq!(measurer.hit_test(&request, None, -4.0, 0.0), 0);
+        assert_eq!(measurer.hit_test(&request, None, 11.0, 0.0), 2);
+        assert_eq!(measurer.hit_test(&request, None, 80.0, 0.0), 5);
     }
 }

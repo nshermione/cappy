@@ -14,6 +14,7 @@ cpu = []
 [dependencies]
 cappy-style.workspace = true
 cappy-layout.workspace = true
+unicode-segmentation.workspace = true
 image = { workspace = true, features = ["png", "jpeg", "gif", "webp", "bmp", "ico"] }
 resvg.workspace = true
 log.workspace = true

@@ -1,7 +1,8 @@
 //! Text drawing with glyphon: one text renderer per batch, shaped buffers cached across frames.
 
-use cappy_core::{Primitive, TextPrimitive};
+use cappy_core::{Background, Color, Primitive, QuadPrimitive, Rect, Spin, TextPrimitive};
 use cappy_text::ShapedTextCache;
+use cappy_text::{caret_origin, selection_spans};
 use glyphon::{
     Buffer, Cache, FontSystem, PrepareError, RenderError, Resolution, SwashCache, TextArea,
     TextAtlas, TextBounds, TextRenderer, Viewport,
@@ -98,11 +99,77 @@ impl TextLayer {
         self.renderers[batch_index].render(&self.atlas, &self.viewport, pass)
     }
 
+    /// Selection quads, then caret quads, in logical pixels. Call after [`TextLayer::prepare`].
+    pub fn decorations(
+        &self,
+        primitives: &[Primitive],
+    ) -> (Vec<QuadPrimitive>, Vec<QuadPrimitive>) {
+        let mut selection = Vec::new();
+        let mut carets = Vec::new();
+        for primitive in primitives {
+            let Primitive::Text(text) = primitive else {
+                continue;
+            };
+            let Some(buffer) = self.buffers.get(text) else {
+                continue;
+            };
+            if let Some((start, end)) = text.selection {
+                let mut color = text.color;
+                color.a *= 0.35;
+                for (x, y, width, height) in selection_spans(buffer, start, end) {
+                    if let Some(quad) = decoration_quad(text, x, y, width, height, color) {
+                        selection.push(quad);
+                    }
+                }
+            }
+            if let Some(index) = text.caret
+                && let Some((x, y, height)) = caret_origin(buffer, index)
+                && let Some(quad) = decoration_quad(text, x, y, 1.0, height, text.color)
+            {
+                carets.push(quad);
+            }
+        }
+        (selection, carets)
+    }
+
     /// Releases glyphs and buffers that are no longer needed.
     pub fn finish_paint(&mut self) {
         self.atlas.trim();
         self.buffers.finish_paint();
     }
+}
+
+fn decoration_quad(
+    text: &TextPrimitive,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    color: Color,
+) -> Option<QuadPrimitive> {
+    let rect = Rect::new(
+        text.rect.x + x - text.scroll_x,
+        text.rect.y + y,
+        width,
+        height,
+    );
+    let rect = rect.intersection(&text.rect)?;
+    let rect = match text.clip {
+        Some(clip) => rect.intersection(&clip)?,
+        None => rect,
+    };
+    if rect.width <= 0.0 || rect.height <= 0.0 {
+        return None;
+    }
+    Some(QuadPrimitive {
+        rect,
+        background: Background::Solid(color),
+        border_color: Color::TRANSPARENT,
+        border_width: 0.0,
+        corner_radius: 0.0,
+        clip: text.clip,
+        spin: Spin::NONE,
+    })
 }
 
 fn batch_texts<'a>(
@@ -121,14 +188,14 @@ fn batch_texts<'a>(
 fn text_area<'a>(buffer: &'a Buffer, text: &TextPrimitive, scale_factor: f32) -> TextArea<'a> {
     let visible = match text.clip.and_then(|clip| text.rect.intersection(&clip)) {
         Some(visible) => visible,
-        None if text.clip.is_some() => cappy_core::Rect::ZERO,
+        None if text.clip.is_some() => Rect::ZERO,
         None => text.rect,
     };
     let clip = visible.scale(scale_factor).round_out();
     let [red, green, blue, alpha] = text.color.to_rgba8();
     TextArea {
         buffer,
-        left: text.rect.x * scale_factor,
+        left: (text.rect.x - text.scroll_x) * scale_factor,
         top: text.rect.y * scale_factor,
         scale: scale_factor,
         bounds: TextBounds {

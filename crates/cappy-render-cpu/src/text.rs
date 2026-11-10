@@ -3,7 +3,7 @@
 
 use cappy_core::{Rect, TextPrimitive};
 use cappy_text::cosmic_text::{FontSystem, SwashCache, SwashContent, SwashImage};
-use cappy_text::{FontContext, ShapedTextCache};
+use cappy_text::{FontContext, ShapedTextCache, caret_origin, selection_spans};
 use tiny_skia::PixmapMut;
 
 use crate::blend::{blend_into, blend_linear_coverage, premultiply, scale};
@@ -72,10 +72,23 @@ impl TextPainter {
             .get(text)
             .expect("the buffer was shaped just above");
         let color = text.color.to_rgba8();
-        let left = text.rect.x * scale_factor;
+        let left = (text.rect.x - text.scroll_x) * scale_factor;
         let top = text.rect.y * scale_factor;
         let target_width = target.width() as usize;
         let pixels = target.data_mut();
+        if let Some((start, end)) = text.selection {
+            let mut highlight = text.color;
+            highlight.a *= 0.35;
+            for (x, y, width, height) in selection_spans(buffer, start, end) {
+                fill_rect(
+                    pixels,
+                    target_width,
+                    clip,
+                    logical_rect(text, x, y, width, height, scale_factor, origin),
+                    highlight.to_rgba8(),
+                );
+            }
+        }
         for run in buffer.layout_runs() {
             let line_y = (run.line_y * scale_factor).round() as i32;
             for glyph in run.glyphs {
@@ -100,6 +113,73 @@ impl TextPainter {
                 };
                 draw_glyph(target, image, position, glyph_color);
             }
+        }
+        if let Some(index) = text.caret
+            && let Some((x, y, height)) = caret_origin(buffer, index)
+        {
+            fill_rect(
+                pixels,
+                target_width,
+                clip,
+                logical_rect(text, x, y, 1.0, height, scale_factor, origin),
+                text.color.to_rgba8(),
+            );
+        }
+    }
+}
+
+fn logical_rect(
+    text: &TextPrimitive,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    scale_factor: f32,
+    origin: (u32, u32),
+) -> ClipBounds {
+    let rect = Rect::new(
+        text.rect.x + x - text.scroll_x,
+        text.rect.y + y,
+        width,
+        height,
+    );
+    let visible = text
+        .clip
+        .and_then(|clip| rect.intersection(&clip))
+        .or(text.clip.is_none().then_some(rect))
+        .and_then(|rect| rect.intersection(&text.rect))
+        .unwrap_or(Rect::ZERO);
+    let physical = visible.scale(scale_factor).round_out();
+    ClipBounds {
+        left: physical.x as i32 - origin.0 as i32,
+        top: physical.y as i32 - origin.1 as i32,
+        right: physical.right() as i32 - origin.0 as i32,
+        bottom: physical.bottom() as i32 - origin.1 as i32,
+    }
+}
+
+fn fill_rect(pixels: &mut [u8], width: usize, clip: ClipBounds, rect: ClipBounds, color: [u8; 4]) {
+    let visible = ClipBounds {
+        left: rect.left.max(clip.left).max(0),
+        top: rect.top.max(clip.top).max(0),
+        right: rect.right.min(clip.right),
+        bottom: rect.bottom.min(clip.bottom),
+    };
+    if visible.is_empty() || color[3] == 0 {
+        return;
+    }
+    let source = premultiply(color);
+    let row_limit = pixels.len() / BYTES_PER_PIXEL / width.max(1);
+    for pixel_y in visible.top..visible.bottom {
+        if pixel_y < 0 || pixel_y as usize >= row_limit {
+            continue;
+        }
+        for pixel_x in visible.left..visible.right {
+            if pixel_x < 0 || pixel_x as usize >= width {
+                continue;
+            }
+            let offset = (pixel_y as usize * width + pixel_x as usize) * BYTES_PER_PIXEL;
+            blend_into(&mut pixels[offset..offset + BYTES_PER_PIXEL], source);
         }
     }
 }
@@ -192,6 +272,10 @@ mod tests {
             line_height: 20.0,
             weight: 400,
             clip: None,
+            caret: None,
+            selection: None,
+            wrap: true,
+            scroll_x: 0.0,
         }
     }
 

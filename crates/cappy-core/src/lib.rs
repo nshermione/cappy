@@ -4,6 +4,7 @@
 
 mod binding;
 mod bitmap;
+mod clipboard;
 mod context;
 mod damage;
 mod element;
@@ -26,14 +27,19 @@ pub use context::{
 };
 pub use lifecycle::{on_before_mount, on_before_unmount, on_mounted, on_unmounted, on_updated};
 
-pub use binding::{Dynamic, IntoClasses, IntoStyle, IntoText};
+pub use binding::{Dynamic, IntoClasses, IntoStyle, IntoText, LiveText};
 pub use bitmap::{ImageClip, ImageDecodeError, ImagePixels, ImagePixelsError, ObjectFit};
+pub use clipboard::{Clipboard, MemoryClipboard, NoopClipboard};
 pub use damage::{Damage, DamageTracker, coalesce_regions};
 pub use element::{
-    Component, Container, Element, HasContext, Image, IntoElement, Slot, Text, div, for_each,
-    fragment, if_else, image, show, slot, text, text_dyn, with_context,
+    Component, Container, Element, HasContext, Image, Input, IntoCaret, IntoElement,
+    IntoInputValue, IntoSelection, Slot, Text, div, for_each, fragment, if_else, image, input,
+    show, slot, text, text_dyn, with_context,
 };
-pub use event::{ButtonState, ClickEvent, CursorIcon, InputEvent, PointerButton};
+pub use event::{
+    ButtonState, ClickEvent, CursorIcon, ImeEvent, InputEvent, Key, KeyEvent, Modifiers,
+    PointerButton, PointerEvent, PointerPhase,
+};
 pub use image_source::ImageSource;
 pub use listener::Listener;
 pub use paint::{

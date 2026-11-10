@@ -22,6 +22,7 @@ struct BufferKey {
     line_height_bits: u32,
     weight: u16,
     width_bits: u32,
+    wrap: bool,
 }
 
 impl BufferKey {
@@ -31,7 +32,12 @@ impl BufferKey {
             font_size_bits: text.font_size.to_bits(),
             line_height_bits: text.line_height.to_bits(),
             weight: text.weight,
-            width_bits: text.rect.width.to_bits(),
+            width_bits: if text.wrap {
+                text.rect.width.to_bits()
+            } else {
+                0
+            },
+            wrap: text.wrap,
         }
     }
 }
@@ -74,7 +80,7 @@ impl ShapedTextCache {
                         line_height: text.line_height,
                         weight: text.weight,
                     },
-                    Some(text.rect.width + WRAP_SLACK),
+                    text.wrap.then_some(text.rect.width + WRAP_SLACK),
                 ),
                 last_used: paint_count,
             });
@@ -131,6 +137,10 @@ mod tests {
             line_height: 20.0,
             weight: 400,
             clip: None,
+            caret: None,
+            selection: None,
+            wrap: true,
+            scroll_x: 0.0,
         }
     }
 

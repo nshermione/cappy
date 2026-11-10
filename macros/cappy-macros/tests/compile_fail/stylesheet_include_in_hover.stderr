@@ -1,4 +1,4 @@
-error: hover and active blocks only set properties
+error: hover, focus and active blocks only set properties
  --> tests/compile_fail/stylesheet_include_in_hover.rs:7:26
   |
 7 |                 @include Badge,

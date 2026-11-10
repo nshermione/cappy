@@ -50,6 +50,31 @@ impl Ui {
         self.layout_dirty = true;
     }
 
+    /// Gives an input one line of height from its placeholder, not from the value, so a long
+    /// value scrolls inside the box instead of growing it.
+    pub(super) fn sync_input_leaf(&mut self, node: NodeId) {
+        let Some(sample) = self.input_sample(node) else {
+            return;
+        };
+        let style = &self.nodes[node.index()].style.text;
+        let leaf = text_leaf(&sample, style);
+        self.layout
+            .set_text(node, Some(leaf))
+            .expect(LAYOUT_OUT_OF_SYNC);
+        self.layout_dirty = true;
+    }
+
+    fn input_sample(&self, node: NodeId) -> Option<String> {
+        let super::NodeContent::Input(field) = &self.nodes[node.index()].content else {
+            return None;
+        };
+        if field.placeholder.is_empty() {
+            Some(" ".to_owned())
+        } else {
+            Some(field.placeholder.clone())
+        }
+    }
+
     /// The root fills the viewport unless its style gives it an explicit size.
     pub(super) fn layout_style_of(&self, node: NodeId) -> LayoutStyle {
         let mut style = self.nodes[node.index()].style.layout.clone();
@@ -96,6 +121,7 @@ impl Ui {
         );
         let change = resolved.diff(&node.style);
         let is_text = node.is_text();
+        let is_input = matches!(node.content, super::NodeContent::Input(_));
         let node = &mut self.nodes[id.index()];
         node.style = resolved;
         node.style_dirty = false;
@@ -107,6 +133,9 @@ impl Ui {
             self.layout_dirty = true;
             if is_text {
                 self.sync_text_leaf(id);
+            }
+            if is_input {
+                self.sync_input_leaf(id);
             }
         }
         if change.paint {
@@ -402,17 +431,7 @@ impl Ui {
                     push_box(&mut primitives, rect, &visual, clip, opacity, spin);
                     match &node.content {
                         super::NodeContent::Text(text) => {
-                            let padding = node.style.layout.padding;
-                            let content = scale_about(
-                                Rect::new(
-                                    node.rect.x + padding.left,
-                                    node.rect.y + padding.top,
-                                    (node.rect.width - padding.horizontal()).max(0.0),
-                                    (node.rect.height - padding.vertical()).max(0.0),
-                                ),
-                                space.pivot,
-                                space.scale,
-                            );
+                            let content = text_content_rect(node, space);
                             let text_style = &node.style.text;
                             primitives.push(Primitive::Text(TextPrimitive {
                                 rect: content,
@@ -422,6 +441,58 @@ impl Ui {
                                 line_height: text_style.line_height_px() * space.scale,
                                 weight: text_style.weight.0,
                                 clip,
+                                caret: node.caret,
+                                selection: node.selection,
+                                wrap: true,
+                                scroll_x: 0.0,
+                            }));
+                        }
+                        super::NodeContent::Input(field) => {
+                            let content = text_content_rect(node, space);
+                            let text_style = &node.style.text;
+                            let focused = self.focused == Some(id);
+                            let placeholder = field.edit.text().is_empty()
+                                && field.edit.display().selection.is_none()
+                                && field.edit.display().text == field.edit.text();
+                            let display = field.edit.display();
+                            let (shown, color, caret, selection) = if placeholder {
+                                (
+                                    field.placeholder.clone(),
+                                    Color {
+                                        a: text_style.color.a * 0.45,
+                                        ..text_style.color
+                                    },
+                                    if focused && self.caret_on {
+                                        Some(0)
+                                    } else {
+                                        None
+                                    },
+                                    None,
+                                )
+                            } else {
+                                (
+                                    display.text.clone(),
+                                    text_style.color,
+                                    if focused && self.caret_on {
+                                        Some(display.caret)
+                                    } else {
+                                        None
+                                    },
+                                    display.selection,
+                                )
+                            };
+                            primitives.push(Primitive::Text(TextPrimitive {
+                                rect: content,
+                                text: Arc::from(shown),
+                                color: fade_color(color, opacity),
+                                font_size: text_style.font_size * space.scale,
+                                line_height: text_style.line_height_px() * space.scale,
+                                weight: text_style.weight.0,
+                                clip,
+                                caret,
+                                selection,
+                                wrap: false,
+                                scroll_x: field.scroll_x * space.scale,
                             }));
                         }
                         super::NodeContent::Image { pixels, fit, .. } => {
@@ -538,6 +609,20 @@ impl PaintSpace {
             rotation: self.rotation + rotation,
         }
     }
+}
+
+fn text_content_rect(node: &super::node::Node, space: PaintSpace) -> Rect {
+    let padding = node.style.layout.padding;
+    scale_about(
+        Rect::new(
+            node.rect.x + padding.left,
+            node.rect.y + padding.top,
+            (node.rect.width - padding.horizontal()).max(0.0),
+            (node.rect.height - padding.vertical()).max(0.0),
+        ),
+        space.pivot,
+        space.scale,
+    )
 }
 
 fn map_paint_rect(rect: Rect, space: PaintSpace) -> (Rect, Spin) {

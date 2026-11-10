@@ -139,6 +139,14 @@ pub struct TextPrimitive {
     pub weight: u16,
     /// Ancestor scrollports. `None` means the primitive is not clipped further.
     pub clip: Option<Rect>,
+    /// Byte index of the caret inside `text`. `None` draws no caret.
+    pub caret: Option<usize>,
+    /// Byte range to highlight, inside `text`.
+    pub selection: Option<(usize, usize)>,
+    /// When false, the line does not wrap and [`Self::scroll_x`] shifts glyphs left inside `rect`.
+    pub wrap: bool,
+    /// Logical pixels the glyphs are shifted left so a caret past `rect` stays visible.
+    pub scroll_x: f32,
 }
 
 /// Where an image is drawn inside its box, and which part of the texture that shows.

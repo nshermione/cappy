@@ -77,6 +77,8 @@ pub struct Renderer {
     images: ImageLayer,
     compositor: Compositor,
     scene_quads: QuadBatch,
+    selection_quads: QuadBatch,
+    caret_quads: QuadBatch,
     overlay_quads: QuadBatch,
     text: TextLayer,
     offscreen: Option<Offscreen>,
@@ -92,6 +94,8 @@ impl Renderer {
         let quad_pipelines = QuadPipelines::new(device);
         Self {
             scene_quads: QuadBatch::new(device, &quad_pipelines, "cappy scene quads"),
+            selection_quads: QuadBatch::new(device, &quad_pipelines, "cappy text selection"),
+            caret_quads: QuadBatch::new(device, &quad_pipelines, "cappy text carets"),
             overlay_quads: QuadBatch::new(device, &quad_pipelines, "cappy overlay quads"),
             images: ImageLayer::new(device),
             quad_pipelines,
@@ -173,7 +177,32 @@ impl Renderer {
             &frame.primitives,
             &batches,
         )?;
-        self.draw_regions(device, encoder, size, &scissors, &quad_ranges)?;
+        let (selection, carets) = self.text.decorations(&frame.primitives);
+        let selection_count = upload_quads(
+            &mut self.selection_quads,
+            device,
+            queue,
+            size,
+            &selection,
+            frame.scale_factor,
+        );
+        let caret_count = upload_quads(
+            &mut self.caret_quads,
+            device,
+            queue,
+            size,
+            &carets,
+            frame.scale_factor,
+        );
+        self.draw_regions(
+            device,
+            encoder,
+            size,
+            &scissors,
+            &quad_ranges,
+            selection_count,
+            caret_count,
+        )?;
         self.text.finish_paint();
 
         self.last_repainted = scissors.iter().map(|scissor| scissor.to_rect()).collect();
@@ -212,6 +241,8 @@ impl Renderer {
         frame_size: (u32, u32),
         scissors: &[PixelRect],
         quad_ranges: &[Range<u32>],
+        selection_count: u32,
+        caret_count: u32,
     ) -> Result<(), RenderError> {
         let eraser = self
             .quad_pipelines
@@ -234,7 +265,10 @@ impl Renderer {
                 self.scene_quads.draw(&mut pass, &painter, range.clone());
                 self.images
                     .draw(device, &mut pass, OFFSCREEN_FORMAT, batch_index);
+                self.selection_quads
+                    .draw(&mut pass, &painter, 0..selection_count);
                 self.text.render(batch_index, &mut pass)?;
+                self.caret_quads.draw(&mut pass, &painter, 0..caret_count);
             }
         }
         Ok(())
@@ -271,6 +305,25 @@ impl Renderer {
 
 /// Instance list: one eraser per scissor first, then each batch's quads.
 /// Returns the instances and, per batch, the range holding its quads.
+fn upload_quads(
+    batch: &mut QuadBatch,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    size: (u32, u32),
+    quads: &[cappy_core::QuadPrimitive],
+    scale_factor: f32,
+) -> u32 {
+    let instances: Vec<QuadInstance> = quads
+        .iter()
+        .filter_map(|quad| {
+            QuadInstance::from_primitive(&Primitive::Quad(quad.clone()), scale_factor)
+        })
+        .collect();
+    let count = instances.len() as u32;
+    batch.upload(device, queue, size, &instances);
+    count
+}
+
 fn quad_instances(
     primitives: &[Primitive],
     batches: &[Batch],

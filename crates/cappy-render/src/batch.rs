@@ -110,6 +110,10 @@ mod tests {
             line_height: 10.0,
             weight: 400,
             clip: None,
+            caret: None,
+            selection: None,
+            wrap: true,
+            scroll_x: 0.0,
         })
     }
 

@@ -37,6 +37,7 @@ struct Property {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum PseudoKind {
     Hover,
+    Focus,
     Active,
 }
 
@@ -44,6 +45,7 @@ impl PseudoKind {
     fn suffix(self) -> &'static str {
         match self {
             Self::Hover => ":hover",
+            Self::Focus => ":focus",
             Self::Active => ":active",
         }
     }
@@ -51,6 +53,7 @@ impl PseudoKind {
     fn label(self) -> &'static str {
         match self {
             Self::Hover => "hover",
+            Self::Focus => "focus",
             Self::Active => "active",
         }
     }
@@ -86,7 +89,7 @@ impl syn::parse::Parse for Input {
         if !input.is_empty() {
             return Err(syn::Error::new(
                 input.span(),
-                "`:hover` and `:active` go inside the class",
+                "`:hover`, `:focus` and `:active` go inside the class",
             ));
         }
         Ok(Self {
@@ -113,11 +116,12 @@ impl syn::parse::Parse for Pseudo {
         let kind_name: Ident = input.parse()?;
         let kind = match kind_name.to_string().as_str() {
             "hover" => PseudoKind::Hover,
+            "focus" => PseudoKind::Focus,
             "active" => PseudoKind::Active,
             _ => {
                 return Err(syn::Error::new(
                     kind_name.span(),
-                    "expected `hover` or `active`",
+                    "expected `hover`, `focus` or `active`",
                 ));
             }
         };
@@ -128,13 +132,13 @@ impl syn::parse::Parse for Pseudo {
                 BodyItem::Include(name) => {
                     return Err(syn::Error::new(
                         name.span(),
-                        "hover and active blocks only set properties",
+                        "hover, focus and active blocks only set properties",
                     ));
                 }
                 BodyItem::Pseudo(nested) => {
                     return Err(syn::Error::new(
                         nested.kind_name.span(),
-                        "hover and active blocks only set properties",
+                        "hover, focus and active blocks only set properties",
                     ));
                 }
                 BodyItem::Property(property) => properties.push(property),

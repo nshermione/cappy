@@ -4,11 +4,13 @@
 
 mod cache;
 mod font;
+mod geometry;
 mod measure;
 mod shaping;
 
 pub use cache::ShapedTextCache;
 pub use font::{FontContext, FontOptions};
+pub use geometry::{caret_origin, hit_index, selection_spans};
 pub use measure::CosmicTextMeasurer;
 
 pub use cosmic_text;

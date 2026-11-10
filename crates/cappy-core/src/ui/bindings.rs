@@ -4,7 +4,7 @@
 use super::flow::FlowId;
 use super::{NodeId, Ui};
 use crate::ThemeHandle;
-use crate::element::{ClassBinding, StyleBinding, TextBinding};
+use crate::element::{CaretBinding, ClassBinding, SelectionBinding, StyleBinding, TextBinding};
 use crate::reactive::{BindingId, Observer, detach_binding, track};
 
 pub(super) enum BindingKind {
@@ -13,6 +13,10 @@ pub(super) enum BindingKind {
     Style(StyleBinding),
     Theme,
     Flow(FlowId),
+    InputValue(TextBinding),
+    InputDisabled(Box<dyn Fn() -> bool>),
+    Caret(CaretBinding),
+    Selection(SelectionBinding),
     Disposed,
 }
 
@@ -98,6 +102,10 @@ impl Ui {
             Style(Box<cappy_style::StyleRefinement>),
             Theme(ThemeHandle),
             Flow(FlowId),
+            InputValue(String),
+            InputDisabled(bool),
+            Caret(Option<usize>),
+            Selection(Option<(usize, usize)>),
         }
         let step = match &self.bindings[id.slot()].kind {
             BindingKind::Text(compute) => Step::Text(track(observer, compute)),
@@ -108,10 +116,18 @@ impl Ui {
                 Step::Theme(track(observer, || theme_signal.get()))
             }
             BindingKind::Flow(flow) => Step::Flow(*flow),
+            BindingKind::InputValue(compute) => Step::InputValue(track(observer, compute)),
+            BindingKind::InputDisabled(compute) => Step::InputDisabled(track(observer, compute)),
+            BindingKind::Caret(compute) => Step::Caret(track(observer, compute)),
+            BindingKind::Selection(compute) => Step::Selection(track(observer, compute)),
             BindingKind::Disposed => return,
         };
         match step {
             Step::Text(text) => self.set_text_content(node, text),
+            Step::InputValue(text) => self.apply_input_value(node, text),
+            Step::InputDisabled(disabled) => self.apply_input_disabled(node, disabled),
+            Step::Caret(caret) => self.apply_text_caret(node, caret),
+            Step::Selection(selection) => self.apply_text_selection(node, selection),
             Step::Classes(classes) => {
                 let target = &mut self.nodes[node.index()];
                 if target.dynamic_classes != classes {

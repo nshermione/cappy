@@ -177,6 +177,7 @@ mod tests {
             InteractionState {
                 hovered: true,
                 pressed: false,
+                focused: false,
             },
         );
         let hovered_style = theme.resolve(
@@ -186,6 +187,7 @@ mod tests {
             InteractionState {
                 hovered: true,
                 pressed: false,
+                focused: false,
             },
             None,
         );
@@ -195,6 +197,7 @@ mod tests {
             InteractionState {
                 hovered: false,
                 pressed: true,
+                focused: false,
             },
         );
         assert_eq!(rest, colors.surface_alt);

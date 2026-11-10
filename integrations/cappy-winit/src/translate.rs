@@ -1,8 +1,11 @@
 //! winit types to cappy types.
 
-use cappy_core::{ButtonState, CursorIcon, InputEvent, Point, PointerButton};
+use cappy_core::{
+    ButtonState, CursorIcon, ImeEvent, InputEvent, Key, KeyEvent, Modifiers, Point, PointerButton,
+};
 use winit::dpi::PhysicalPosition;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta};
+use winit::keyboard::{Key as WinitKey, NamedKey};
 
 /// Logical pixels one wheel line moves the content.
 ///
@@ -50,7 +53,70 @@ pub fn cursor_icon(cursor: CursorIcon) -> winit::window::CursorIcon {
     match cursor {
         CursorIcon::Default => winit::window::CursorIcon::Default,
         CursorIcon::Pointer => winit::window::CursorIcon::Pointer,
+        CursorIcon::Text => winit::window::CursorIcon::Text,
     }
+}
+
+pub fn modifiers(state: winit::keyboard::ModifiersState) -> InputEvent {
+    InputEvent::Modifiers(Modifiers {
+        shift: state.shift_key(),
+        ctrl: state.control_key(),
+        alt: state.alt_key(),
+        meta: state.super_key(),
+    })
+}
+
+/// A key may produce text and a logical key. Shortcuts with Ctrl or Command do not also insert
+/// the character, unless Alt is held (AltGr).
+pub fn keyboard(event: &winit::event::KeyEvent, modifiers: Modifiers) -> Vec<InputEvent> {
+    let mut events = Vec::new();
+    let state = match event.state {
+        ElementState::Pressed => ButtonState::Pressed,
+        ElementState::Released => ButtonState::Released,
+    };
+    if state == ButtonState::Pressed
+        && let Some(text) = event.text.as_deref()
+        && !(modifiers.primary() && !modifiers.alt)
+        && !text.chars().all(char::is_control)
+    {
+        events.push(InputEvent::Text(text.to_owned()));
+    }
+    if let Some(key) = map_key(&event.logical_key) {
+        events.push(InputEvent::Key(KeyEvent {
+            key,
+            state,
+            repeat: event.repeat,
+            modifiers,
+        }));
+    }
+    events
+}
+
+pub fn ime(event: winit::event::Ime) -> Option<InputEvent> {
+    match event {
+        winit::event::Ime::Enabled | winit::event::Ime::Disabled => None,
+        winit::event::Ime::Preedit(text, cursor) => Some(InputEvent::Ime(ImeEvent::Preedit {
+            cursor: cursor.map(|(_, end)| end),
+            text,
+        })),
+        winit::event::Ime::Commit(text) => Some(InputEvent::Ime(ImeEvent::Commit(text))),
+    }
+}
+
+fn map_key(key: &WinitKey) -> Option<Key> {
+    Some(match key {
+        WinitKey::Named(NamedKey::Enter) => Key::Enter,
+        WinitKey::Named(NamedKey::Tab) => Key::Tab,
+        WinitKey::Named(NamedKey::Escape) => Key::Escape,
+        WinitKey::Named(NamedKey::Backspace) => Key::Backspace,
+        WinitKey::Named(NamedKey::Delete) => Key::Delete,
+        WinitKey::Named(NamedKey::ArrowLeft) => Key::Left,
+        WinitKey::Named(NamedKey::ArrowRight) => Key::Right,
+        WinitKey::Named(NamedKey::Home) => Key::Home,
+        WinitKey::Named(NamedKey::End) => Key::End,
+        WinitKey::Character(text) => Key::Character(text.chars().next()?),
+        _ => return None,
+    })
 }
 
 #[cfg(test)]

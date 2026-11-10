@@ -9,8 +9,9 @@ use cappy_style::{Style, TextStyle};
 
 use super::Ui;
 use super::bindings::BindingKind;
-use super::node::{ChildPart, ComponentId, Node, NodeContent, NodeId};
-use crate::element::{Element, ElementContent, div};
+use super::edit::TextEdit;
+use super::node::{ChildPart, ComponentId, InputField, Node, NodeContent, NodeId};
+use crate::element::{Element, ElementContent, InputValue, div};
 use crate::lifecycle::{Lifecycle, run_hooks};
 use crate::reactive::{BindingId, Observer, Signal, dispose_owner, enter_owner, track};
 
@@ -320,6 +321,16 @@ impl Ui {
             stylesheet,
             on_click,
             on_hover,
+            focusable,
+            on_key,
+            on_text,
+            on_ime,
+            on_focus,
+            on_pointer,
+            caret,
+            caret_binding,
+            selection,
+            selection_binding,
             children,
             slot_owner: _,
             accepts_slots: _,
@@ -329,28 +340,54 @@ impl Ui {
             lifecycle.is_none(),
             "component lifecycle must be taken before the node is mounted"
         );
-        let (content, text_binding) = match content {
+        let mut text_binding = None;
+        let mut input_read = None;
+        let mut disabled_when = None;
+        let focusable = focusable || matches!(content, ElementContent::Input(_));
+        let content = match content {
             ElementContent::Container
             | ElementContent::Slot { .. }
             | ElementContent::Fragment(_)
-            | ElementContent::Flow(_) => (NodeContent::Container, None),
-            ElementContent::StaticText(text) => (NodeContent::Text(text), None),
-            ElementContent::DynamicText(binding) => (NodeContent::Text("".into()), Some(binding)),
+            | ElementContent::Flow(_) => NodeContent::Container,
+            ElementContent::StaticText(text) => NodeContent::Text(text),
+            ElementContent::DynamicText(binding) => {
+                text_binding = Some(binding);
+                NodeContent::Text("".into())
+            }
             ElementContent::Image { source, fit } => {
                 let (clip, load) = crate::image_load::open(source);
                 let pixels = clip.frame_pixels(0);
-                (
-                    NodeContent::Image {
-                        clip,
-                        pixels,
-                        fit,
-                        elapsed: std::time::Duration::ZERO,
-                        clock: None,
-                        shown: 0,
-                        load,
-                    },
-                    None,
-                )
+                NodeContent::Image {
+                    clip,
+                    pixels,
+                    fit,
+                    elapsed: std::time::Duration::ZERO,
+                    clock: None,
+                    shown: 0,
+                    load,
+                }
+            }
+            ElementContent::Input(spec) => {
+                disabled_when = spec.disabled_when;
+                let (text, writer) = match spec.value {
+                    InputValue::Fixed(text) => (text, None),
+                    InputValue::Bound { read, write } => {
+                        input_read = Some(read);
+                        (String::new(), Some(write))
+                    }
+                };
+                let published = text.clone();
+                NodeContent::Input(InputField {
+                    edit: TextEdit::new(text),
+                    placeholder: spec.placeholder,
+                    disabled: spec.disabled,
+                    scroll_x: 0.0,
+                    on_input: spec.on_input,
+                    on_submit: spec.on_submit,
+                    writer,
+                    published,
+                    swallow_text: None,
+                })
             }
         };
         let initial_style = Style::inheriting(TextStyle::from_tokens(self.theme.tokens()));
@@ -368,6 +405,15 @@ impl Ui {
             interaction: Default::default(),
             on_click,
             on_hover,
+            focusable,
+            disabled: false,
+            on_key,
+            on_text,
+            on_ime,
+            on_focus,
+            on_pointer,
+            caret,
+            selection,
             parts: Vec::new(),
             suppressed,
             alive: true,
@@ -398,8 +444,21 @@ impl Ui {
             .insert(id, &layout_style)
             .expect("inserting a fresh layout node cannot fail");
         self.sync_text_leaf(id);
+        self.sync_input_leaf(id);
         if let Some(binding) = text_binding {
             self.add_binding(id, BindingKind::Text(binding));
+        }
+        if let Some(binding) = input_read {
+            self.add_binding(id, BindingKind::InputValue(binding));
+        }
+        if let Some(binding) = disabled_when {
+            self.add_binding(id, BindingKind::InputDisabled(binding));
+        }
+        if let Some(binding) = caret_binding {
+            self.add_binding(id, BindingKind::Caret(binding));
+        }
+        if let Some(binding) = selection_binding {
+            self.add_binding(id, BindingKind::Selection(binding));
         }
         if let Some(binding) = class_binding {
             self.add_binding(id, BindingKind::Classes(binding));
@@ -768,6 +827,14 @@ impl Ui {
         node.key = None;
         node.on_click = None;
         node.on_hover = None;
+        node.on_key = None;
+        node.on_text = None;
+        node.on_ime = None;
+        node.on_focus = None;
+        node.on_pointer = None;
+        node.focusable = false;
+        node.caret = None;
+        node.selection = None;
         node.content = NodeContent::Container;
         node.suppressed = true;
         node.paint_dirty = false;
@@ -787,6 +854,13 @@ impl Ui {
         node.parent = None;
         if self.pressed == Some(id) {
             self.pressed = None;
+        }
+        if self.focused == Some(id) {
+            self.focused = None;
+            self.caret_deadline = None;
+        }
+        if self.pointer_capture == Some(id) {
+            self.pointer_capture = None;
         }
         if self
             .scrollbar_drag

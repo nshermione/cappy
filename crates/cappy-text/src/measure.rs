@@ -3,6 +3,8 @@
 use std::collections::HashMap;
 
 use cappy_core::{Size, TextMeasureRequest, TextMeasurer};
+
+use crate::geometry::hit_index;
 use cosmic_text::FontSystem;
 
 use crate::FontContext;
@@ -63,6 +65,22 @@ impl CosmicTextMeasurer {
 }
 
 impl TextMeasurer for CosmicTextMeasurer {
+    fn hit_test(
+        &mut self,
+        request: &TextMeasureRequest<'_>,
+        max_width: Option<f32>,
+        x: f32,
+        y: f32,
+    ) -> usize {
+        let font = TextFont {
+            font_size: request.font_size,
+            line_height: request.line_height,
+            weight: request.weight,
+        };
+        let buffer = shape_text(&mut self.font_system, request.text, font, max_width);
+        hit_index(&buffer, x, y)
+    }
+
     fn measure(&mut self, request: &TextMeasureRequest<'_>, max_width: Option<f32>) -> Size {
         let key = MeasureKey::new(request, max_width);
         if let Some(size) = self.cache.get(&key) {

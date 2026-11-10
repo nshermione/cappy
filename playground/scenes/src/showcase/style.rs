@@ -71,6 +71,20 @@ stylesheet! {
             overflow_y: Overflow::Auto,
         }
         Count { font_size: FontSize::Xl }
+        /// A single-line text field. Focus changes the border; the caret comes from the input.
+        Field {
+            width: 240,
+            padding: Space::Sm,
+            border_width: 1,
+            border_color: ColorToken::Border,
+            radius: Radius::Md,
+            background: ColorToken::Surface,
+            overflow_x: Overflow::Hidden,
+            overflow_y: Overflow::Hidden,
+            :focus {
+                border_color: ColorToken::Primary
+            },
+        }
         TileGrid {
             display: Display::Grid,
             grid_columns: TILE_COLUMNS,

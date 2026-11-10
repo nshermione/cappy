@@ -8,10 +8,10 @@ use super::*;
 use crate::paint::Primitive;
 use crate::reactive::{live_signal_count, signal_is_alive, signal_subscriber_count};
 use crate::{
-    Application, ButtonState, Component, Context, Element, HasContext, InputEvent, IntoElement,
-    PointerButton, Signal, Singleton, SingletonOf, Slot, div, for_each, fragment, if_else,
-    on_before_mount, on_before_unmount, on_mounted, on_unmounted, on_updated, show, slot, text,
-    text_dyn, use_store,
+    Application, ButtonState, Component, Context, Dynamic, Element, HasContext, ImeEvent,
+    InputEvent, IntoElement, Key, KeyEvent, Modifiers, PointerButton, Signal, Singleton,
+    SingletonOf, Slot, div, for_each, fragment, if_else, input, on_before_mount, on_before_unmount,
+    on_mounted, on_unmounted, on_updated, show, slot, text, text_dyn, use_store,
 };
 use cappy_style::{Background, Color, FlexDirection, Overflow, StyleRefinement};
 
@@ -2733,4 +2733,259 @@ fn on_updated_reruns_every_frame_and_flushes_a_signal_in_that_update() {
 fn on_mounted_outside_render_panics() {
     let cx = context();
     cx.enter(|| on_mounted(|| {}));
+}
+
+fn field(value: impl crate::IntoInputValue) -> (Element, Rc<RefCell<String>>) {
+    let seen = Rc::new(RefCell::new(String::new()));
+    let slot = Rc::clone(&seen);
+    let element = input()
+        .value(value)
+        .key("field")
+        .style(StyleRefinement::default().width(200).font_size(10))
+        .on_input(move |text| *slot.borrow_mut() = text.to_owned());
+    (element, seen)
+}
+
+fn click_at(ui: &mut Ui, x: f32, y: f32) {
+    ui.handle_event(InputEvent::PointerMoved {
+        position: Point::new(x, y),
+    });
+    ui.handle_event(InputEvent::PointerButton {
+        button: PointerButton::Primary,
+        state: ButtonState::Pressed,
+    });
+    ui.handle_event(InputEvent::PointerButton {
+        button: PointerButton::Primary,
+        state: ButtonState::Released,
+    });
+}
+
+fn key(ui: &mut Ui, key: Key, modifiers: Modifiers) {
+    ui.handle_event(InputEvent::Key(KeyEvent {
+        key,
+        state: ButtonState::Pressed,
+        repeat: false,
+        modifiers,
+    }));
+}
+
+fn ctrl() -> Modifiers {
+    Modifiers {
+        ctrl: true,
+        ..Modifiers::default()
+    }
+}
+
+#[test]
+fn dynamic_text_reads_a_reactive_string() {
+    let cx = context();
+    let name = cx.reactive(String::from("ada"));
+    let mut ui = Ui::new(
+        &cx,
+        text(Dynamic(move || name)).key("label"),
+        Theme::light(),
+    );
+    ui.update(VIEWPORT);
+    assert_eq!(ui.node_text(ui.find_by_key("label").unwrap()), Some("ada"));
+    name.set(String::from("bea"));
+    ui.update(VIEWPORT);
+    assert_eq!(ui.node_text(ui.find_by_key("label").unwrap()), Some("bea"));
+}
+
+#[test]
+fn tab_focuses_the_input_and_typing_appends_at_the_caret() {
+    let cx = context();
+    let name = cx.reactive(String::from("hi"));
+    let mut ui = Ui::new(
+        &cx,
+        input()
+            .value(Dynamic(move || name))
+            .key("field")
+            .style(StyleRefinement::default().width(200).font_size(10)),
+        Theme::light(),
+    );
+    ui.update(VIEWPORT);
+    key(&mut ui, Key::Tab, Modifiers::default());
+    ui.handle_event(InputEvent::Text("!".into()));
+    ui.update(VIEWPORT);
+    assert_eq!(name.get(), "hi!");
+}
+
+#[test]
+fn click_between_letters_inserts_there() {
+    let (element, seen) = field("hello");
+    let mut ui = settled(&context(), element);
+    click_at(&mut ui, 11.0, 4.0);
+    ui.handle_event(InputEvent::Text("XX".into()));
+    assert_eq!(seen.borrow().as_str(), "heXXllo");
+}
+
+#[test]
+fn click_before_the_first_letter_inserts_there() {
+    let (element, seen) = field("hello");
+    let mut ui = settled(&context(), element);
+    click_at(&mut ui, 0.0, 4.0);
+    ui.handle_event(InputEvent::Text("A".into()));
+    assert_eq!(seen.borrow().as_str(), "Ahello");
+}
+
+#[test]
+fn click_after_the_last_letter_inserts_there() {
+    let (element, seen) = field("hello");
+    let mut ui = settled(&context(), element);
+    click_at(&mut ui, 80.0, 4.0);
+    ui.handle_event(InputEvent::Text("Z".into()));
+    assert_eq!(seen.borrow().as_str(), "helloZ");
+}
+
+#[test]
+fn drag_selects_a_range_and_copy_reads_only_that_range() {
+    let (element, _) = field("hello");
+    let mut ui = settled(&context(), element);
+    ui.clipboard_mut().write_text("keep");
+    ui.handle_event(InputEvent::PointerMoved {
+        position: Point::new(6.0, 4.0),
+    });
+    ui.handle_event(InputEvent::PointerButton {
+        button: PointerButton::Primary,
+        state: ButtonState::Pressed,
+    });
+    ui.handle_event(InputEvent::PointerMoved {
+        position: Point::new(16.0, 4.0),
+    });
+    ui.handle_event(InputEvent::PointerButton {
+        button: PointerButton::Primary,
+        state: ButtonState::Released,
+    });
+    key(&mut ui, Key::Character('c'), ctrl());
+    assert_eq!(ui.clipboard_mut().read_text().as_deref(), Some("el"));
+}
+
+#[test]
+fn copy_without_a_selection_leaves_the_clipboard_alone() {
+    let (element, _) = field("hello");
+    let mut ui = settled(&context(), element);
+    ui.clipboard_mut().write_text("keep");
+    click_at(&mut ui, 11.0, 4.0);
+    key(&mut ui, Key::Character('c'), ctrl());
+    assert_eq!(ui.clipboard_mut().read_text().as_deref(), Some("keep"));
+}
+
+#[test]
+fn paste_inserts_at_the_caret_and_replaces_a_selection() {
+    let (element, seen) = field("hello");
+    let mut ui = settled(&context(), element);
+    click_at(&mut ui, 11.0, 4.0);
+    ui.clipboard_mut().write_text("XX");
+    key(&mut ui, Key::Character('v'), ctrl());
+    assert_eq!(seen.borrow().as_str(), "heXXllo");
+}
+
+#[test]
+fn paste_replaces_the_selected_range() {
+    let (element, seen) = field("hello");
+    let mut ui = settled(&context(), element);
+    ui.handle_event(InputEvent::PointerMoved {
+        position: Point::new(11.0, 4.0),
+    });
+    ui.handle_event(InputEvent::PointerButton {
+        button: PointerButton::Primary,
+        state: ButtonState::Pressed,
+    });
+    ui.handle_event(InputEvent::PointerMoved {
+        position: Point::new(20.0, 4.0),
+    });
+    ui.handle_event(InputEvent::PointerButton {
+        button: PointerButton::Primary,
+        state: ButtonState::Released,
+    });
+    ui.clipboard_mut().write_text("XX");
+    key(&mut ui, Key::Character('v'), ctrl());
+    assert_eq!(seen.borrow().as_str(), "heXXo");
+}
+
+#[test]
+fn select_all_and_shift_arrow_copy_the_highlighted_text() {
+    let (element, _) = field("hello");
+    let mut ui = settled(&context(), element);
+    click_at(&mut ui, 0.0, 4.0);
+    key(&mut ui, Key::Character('a'), ctrl());
+    key(&mut ui, Key::Character('c'), ctrl());
+    assert_eq!(ui.clipboard_mut().read_text().as_deref(), Some("hello"));
+
+    key(&mut ui, Key::Home, Modifiers::default());
+    let shift = Modifiers {
+        shift: true,
+        ..Modifiers::default()
+    };
+    key(&mut ui, Key::Right, shift);
+    key(&mut ui, Key::Right, shift);
+    key(&mut ui, Key::Character('c'), ctrl());
+    assert_eq!(ui.clipboard_mut().read_text().as_deref(), Some("he"));
+}
+
+#[test]
+fn backspace_deletes_the_selection_or_the_grapheme_before_the_caret() {
+    let (element, seen) = field("hếllo");
+    let mut ui = settled(&context(), element);
+    click_at(&mut ui, 80.0, 4.0);
+    key(&mut ui, Key::Backspace, Modifiers::default());
+    assert_eq!(seen.borrow().as_str(), "hếll");
+}
+
+#[test]
+fn ime_commit_inserts_at_the_caret() {
+    let cx = context();
+    let name = cx.reactive(String::from("he"));
+    let mut ui = Ui::new(
+        &cx,
+        input()
+            .value(Dynamic(move || name))
+            .key("field")
+            .style(StyleRefinement::default().width(200).font_size(10)),
+        Theme::light(),
+    );
+    ui.update(VIEWPORT);
+    key(&mut ui, Key::Tab, Modifiers::default());
+    ui.handle_event(InputEvent::Ime(ImeEvent::Preedit {
+        text: "ế".into(),
+        cursor: None,
+    }));
+    ui.update(VIEWPORT);
+    assert_eq!(name.get(), "he");
+    ui.handle_event(InputEvent::Ime(ImeEvent::Commit("ế".into())));
+    ui.handle_event(InputEvent::Text("ế".into()));
+    ui.update(VIEWPORT);
+    assert_eq!(name.get(), "heế");
+}
+
+#[test]
+fn a_disabled_input_does_not_take_focus_or_text() {
+    let (element, seen) = field("hi");
+    let element = element.disabled(true);
+    let mut ui = settled(&context(), element);
+    key(&mut ui, Key::Tab, Modifiers::default());
+    ui.handle_event(InputEvent::Text("!".into()));
+    assert_eq!(seen.borrow().as_str(), "");
+}
+
+#[test]
+fn external_signal_writes_replace_the_buffer_and_keep_a_caret_inside_it() {
+    let cx = context();
+    let name = cx.reactive(String::from("hello"));
+    let mut ui = Ui::new(
+        &cx,
+        input()
+            .value(Dynamic(move || name))
+            .key("field")
+            .style(StyleRefinement::default().width(200).font_size(10)),
+        Theme::light(),
+    );
+    ui.update(VIEWPORT);
+    click_at(&mut ui, 11.0, 4.0);
+    name.set(String::from("yo"));
+    ui.update(VIEWPORT);
+    ui.handle_event(InputEvent::Text("!".into()));
+    ui.update(VIEWPORT);
+    assert_eq!(name.get(), "yo!");
 }
