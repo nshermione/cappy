@@ -4,7 +4,7 @@
 
 #[cfg(debug_assertions)]
 use cappy_core::ResourceCensus;
-use cappy_core::time::Instant;
+use cappy_core::time::{Duration, Instant};
 use cappy_core::{CursorIcon, FrameInput, InputEvent, Ui, UpdateOutcome};
 use cappy_text::{CosmicTextMeasurer, FontContext};
 
@@ -13,6 +13,9 @@ use crate::{PresentOutcome, RendererError, RendererKind, WindowRenderer};
 
 const DEFAULT_TITLE: &str = "cappy";
 const DEFAULT_LOGICAL_SIZE: (f64, f64) = (960.0, 640.0);
+/// CPU presents are not vsynced. A steady 60 Hz clock keeps motion steps even; waiting 8 ms
+/// after a paint of varying length does not.
+const CPU_FRAME: Duration = Duration::from_nanos(16_666_667);
 
 /// Window settings shared by the desktop integrations.
 #[derive(Clone, Debug, PartialEq)]
@@ -330,12 +333,26 @@ impl WindowHost {
         }
         #[cfg(debug_assertions)]
         self.trace_memory();
-        let settle_at = self.ui.frame_deadline(Instant::now());
+        let settle_at = self.next_frame_at(Instant::now());
         self.animation_due = settle_at;
         Ok(RedrawResult {
             present,
             cursor: self.take_cursor_change(),
             settle_at,
+        })
+    }
+
+    /// When the next animation frame is due. GPU keeps the core's 8 ms deadline, because vsync
+    /// absorbs it. CPU steps on [`CPU_FRAME`] from the previous deadline so a slow paint does
+    /// not stretch the gap before the next one.
+    fn next_frame_at(&self, now: Instant) -> Option<Instant> {
+        let deadline = self.ui.frame_deadline(now)?;
+        if self.renderer.kind() != RendererKind::Cpu {
+            return Some(deadline);
+        }
+        Some(match self.animation_due {
+            Some(due) if due + CPU_FRAME > now => due + CPU_FRAME,
+            _ => now + CPU_FRAME,
         })
     }
 

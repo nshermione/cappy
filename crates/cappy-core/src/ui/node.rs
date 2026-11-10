@@ -85,6 +85,8 @@ pub(crate) struct Node {
     pub(crate) rect: Rect,
     /// Ink painted last frame, including shadow that falls outside [`Self::rect`].
     pub(crate) painted: Rect,
+    /// Ancestor clip from the last place, in logical pixels. `None` means nothing clips this node.
+    pub(crate) clip: Option<Rect>,
     /// Visual offset added after layout. Identity is zero.
     pub(crate) translation: Point,
     /// Multiplier applied while painting this node and its descendants. Identity is 1.

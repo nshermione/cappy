@@ -4,7 +4,7 @@
 use std::fmt;
 use std::ops::Range;
 
-use cappy_core::{Color, Damage, Primitive, Rect, RenderFrame};
+use cappy_core::{Color, Damage, Primitive, Rect, RenderFrame, coalesce_regions};
 use cappy_host::{PixelRect, physical_regions};
 
 use crate::FontContext;
@@ -14,6 +14,8 @@ use crate::image::ImageLayer;
 use crate::quad::{QuadBatch, QuadBlend, QuadInstance, QuadPipelines, needs_manual_srgb};
 use crate::text::TextLayer;
 
+/// Each scissor redraws every batch, so a long list of regions becomes their bounding box.
+const MAX_GPU_REGIONS: usize = 8;
 const DAMAGE_OVERLAY_FILL: Color = Color::rgba(255, 40, 80, 40);
 const DAMAGE_OVERLAY_BORDER: Color = Color::rgba(255, 40, 80, 220);
 const DAMAGE_OVERLAY_BORDER_WIDTH: f32 = 2.0;
@@ -145,7 +147,7 @@ impl Renderer {
         } else {
             &frame.damage
         };
-        let logical_damage = damage.rects(frame.logical_size());
+        let logical_damage = coalesce_regions(damage.rects(frame.logical_size()), MAX_GPU_REGIONS);
         let scissors = physical_regions(&logical_damage, frame.scale_factor, size);
         if scissors.is_empty() {
             return Ok(0);

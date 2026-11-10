@@ -38,9 +38,6 @@ impl Damage {
     }
 }
 
-/// Above this many separate regions the tracker repaints their bounding box instead.
-const MAX_REGIONS: usize = 8;
-
 /// Accumulates damaged rectangles and simplifies them when taken.
 #[derive(Debug, Default)]
 pub struct DamageTracker {
@@ -94,8 +91,7 @@ impl DamageTracker {
     }
 }
 
-/// Repeatedly unions rectangles that overlap or share an edge; collapses to one bounding box
-/// when too many remain.
+/// Repeatedly unions rectangles that overlap or share an edge.
 fn merge_touching(mut rects: Vec<Rect>) -> Vec<Rect> {
     let mut merged_any = true;
     while merged_any {
@@ -111,14 +107,22 @@ fn merge_touching(mut rects: Vec<Rect>) -> Vec<Rect> {
             }
         }
     }
-    if rects.len() > MAX_REGIONS {
-        let bounds = rects
-            .iter()
-            .skip(1)
-            .fold(rects[0], |acc, rect| acc.union(rect));
-        return vec![bounds];
-    }
     rects
+}
+
+/// One bounding box once `rects` is longer than `limit`.
+///
+/// The CPU painter wants each region tight. A GPU pass redraws every batch inside each scissor,
+/// so the GPU renderer collapses a long list before it draws.
+pub fn coalesce_regions(rects: Vec<Rect>, limit: usize) -> Vec<Rect> {
+    if rects.len() <= limit {
+        return rects;
+    }
+    let bounds = rects
+        .iter()
+        .skip(1)
+        .fold(rects[0], |acc, rect| acc.union(rect));
+    vec![bounds]
 }
 
 #[cfg(test)]
@@ -177,15 +181,29 @@ mod tests {
     }
 
     #[test]
-    fn too_many_regions_collapse_to_bounds() {
+    fn many_disjoint_regions_stay_separate() {
         let mut tracker = DamageTracker::default();
-        for index in 0..=MAX_REGIONS {
+        for index in 0..9 {
             let offset = index as f32 * 10.0;
             tracker.add(Rect::new(offset, offset, 2.0, 2.0));
         }
+        let Damage::Regions(regions) = tracker.take(VIEWPORT) else {
+            panic!("expected separate regions");
+        };
+        assert_eq!(regions.len(), 9);
+    }
+
+    #[test]
+    fn coalesce_regions_collapses_past_the_limit() {
+        let rects: Vec<Rect> = (0..9)
+            .map(|index| {
+                let offset = index as f32 * 10.0;
+                Rect::new(offset, offset, 2.0, 2.0)
+            })
+            .collect();
         assert_eq!(
-            tracker.take(VIEWPORT),
-            Damage::Regions(vec![Rect::new(0.0, 0.0, 82.0, 82.0)])
+            coalesce_regions(rects, 8),
+            vec![Rect::new(0.0, 0.0, 82.0, 82.0)]
         );
     }
 

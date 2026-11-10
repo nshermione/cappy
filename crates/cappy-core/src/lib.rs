@@ -23,7 +23,7 @@ pub use context::{
 
 pub use binding::{Dynamic, IntoClasses, IntoStyle, IntoText};
 pub use bitmap::{ImagePixels, ImagePixelsError, ObjectFit};
-pub use damage::{Damage, DamageTracker};
+pub use damage::{Damage, DamageTracker, coalesce_regions};
 pub use element::{
     Component, Container, Element, HasContext, Image, IntoElement, Slot, Text, div, for_each,
     fragment, if_else, image, show, slot, text, text_dyn, with_context,

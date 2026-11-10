@@ -1233,6 +1233,71 @@ fn scroll_column(overflow: Overflow) -> Element {
     )
 }
 
+#[test]
+fn visual_motion_above_the_scroll_clip_does_not_enlarge_damage() {
+    let cx = context();
+    let start = Instant::now();
+    let mut ui = Ui::new(&cx, clipped_motion_column(), Theme::light());
+    ui.update_at(VIEWPORT, start);
+    let scroller_id = ui.find_by_key("scroller").unwrap();
+    let box_id = ui.find_by_key("box").unwrap();
+    ui.jump_scroll(scroller_id, true, 20.0);
+    ui.update_at(VIEWPORT, start);
+    ui.prepare_frame();
+
+    let scroller = ui.node_rect(scroller_id).unwrap();
+    let hidden = ui.node_rect(box_id).unwrap();
+    assert!(hidden.y < scroller.y);
+    assert!(hidden.bottom() > scroller.y);
+
+    ui.animate(
+        box_id,
+        Motion::background(Color::rgb(220, 40, 40)).duration(Duration::from_millis(200)),
+    );
+    let stepped = ui.update_at(VIEWPORT, start + Duration::from_millis(40));
+    let UpdateOutcome::Redraw { damage } = stepped else {
+        panic!("expected a redraw, got {stepped:?}");
+    };
+    let regions = damage.rects(VIEWPORT.logical_size());
+    assert!(!regions.is_empty());
+    for region in &regions {
+        assert_eq!(
+            region.intersection(&scroller),
+            Some(*region),
+            "hidden pixels above the clip are in {region:?}, scroller {scroller:?}"
+        );
+    }
+}
+
+fn clipped_motion_column() -> Element {
+    div().child(
+        div()
+            .key("scroller")
+            .style(
+                StyleRefinement::default()
+                    .direction(FlexDirection::Column)
+                    .width(120)
+                    .height(80)
+                    .overflow_y(Overflow::Auto),
+            )
+            .children([
+                div().key("box").style(
+                    StyleRefinement::default()
+                        .width(100)
+                        .height(40)
+                        .flex_shrink(0.0)
+                        .background(Color::BLACK),
+                ),
+                div().style(
+                    StyleRefinement::default()
+                        .width(100)
+                        .height(200)
+                        .flex_shrink(0.0),
+                ),
+            ]),
+    )
+}
+
 fn settle_scroll(ui: &mut Ui, start: Instant) {
     let mut now = start;
     for _ in 0..40 {

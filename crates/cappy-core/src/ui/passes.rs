@@ -249,6 +249,7 @@ impl Ui {
                 let moved = node.rect != rect;
                 let previous = node.painted;
                 let shadow = node.style.visual.shadow;
+                node.clip = clip;
                 if moved {
                     node.rect = rect;
                 }
@@ -287,7 +288,7 @@ impl Ui {
             .add(scrollport(node.rect, node.style.visual.border_width));
     }
 
-    fn damage_clipped(&mut self, rect: Rect, clip: Option<Rect>) {
+    pub(super) fn damage_clipped(&mut self, rect: Rect, clip: Option<Rect>) {
         let Some(rect) = clip_rect(rect, clip) else {
             return;
         };
@@ -299,13 +300,19 @@ impl Ui {
         if !std::mem::take(&mut self.paint_dirty) {
             return;
         }
-        for node in &mut self.nodes {
-            if std::mem::take(&mut node.paint_dirty) {
-                self.damage.add(node.painted);
-                self.damage
-                    .add(paint_bounds(node.rect, node.style.visual.shadow));
-                self.display_list_stale = true;
+        for index in 0..self.nodes.len() {
+            if !std::mem::take(&mut self.nodes[index].paint_dirty) {
+                continue;
             }
+            let clip = self.nodes[index].clip;
+            let painted = self.nodes[index].painted;
+            let bounds = paint_bounds(
+                self.nodes[index].rect,
+                self.nodes[index].style.visual.shadow,
+            );
+            self.damage_clipped(painted, clip);
+            self.damage_clipped(bounds, clip);
+            self.display_list_stale = true;
         }
     }
 
@@ -316,11 +323,14 @@ impl Ui {
                 continue;
             }
             let ink = self.visual_ink(current);
-            let node = &mut self.nodes[current.index()];
-            self.damage.add(node.painted);
-            self.damage.add(ink);
-            node.paint_dirty = true;
-            stack.extend(node.children.clone());
+            let (painted, clip, children) = {
+                let node = &mut self.nodes[current.index()];
+                node.paint_dirty = true;
+                (node.painted, node.clip, node.children.clone())
+            };
+            self.damage_clipped(painted, clip);
+            self.damage_clipped(ink, clip);
+            stack.extend(children);
         }
         self.paint_dirty = true;
         self.display_list_stale = true;

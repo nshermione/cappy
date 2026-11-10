@@ -168,6 +168,9 @@ fn clip_mask(
     origin: (f32, f32),
 ) -> Option<Mask> {
     let clip = clip.scale(scale_factor);
+    if clip_covers_target(clip, origin, target.width(), target.height()) {
+        return None;
+    }
     let mut mask = Mask::new(target.width(), target.height())?;
     let local = Rect::new(
         clip.x - origin.0,
@@ -178,6 +181,15 @@ fn clip_mask(
     let path = rounded_rect_path(local, 0.0)?;
     mask.fill_path(&path, FillRule::Winding, true, Transform::identity());
     Some(mask)
+}
+
+/// The scratch pixmap is already inside `clip`, so a mask the size of that pixmap would only
+/// repeat the same rectangle.
+fn clip_covers_target(clip: Rect, origin: (f32, f32), width: u32, height: u32) -> bool {
+    clip.x <= origin.0
+        && clip.y <= origin.1
+        && clip.right() >= origin.0 + width as f32
+        && clip.bottom() >= origin.1 + height as f32
 }
 
 fn fill_background(
@@ -337,6 +349,24 @@ mod tests {
         assert_eq!(pixel(&pixmap, 20, 20), [0, 0, 255, 255]);
         assert_eq!(pixel(&pixmap, 6, 20), [255, 0, 0, 255]);
         assert_eq!(pixel(&pixmap, 2, 2), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn clip_covering_the_target_matches_an_unclipped_quad() {
+        let open = render(&bordered(0.0));
+        let mut covered = bordered(0.0);
+        covered.clip = Some(Rect::new(0.0, 0.0, SIZE as f32, SIZE as f32));
+        let covered = render(&covered);
+        assert_eq!(open.data(), covered.data());
+    }
+
+    #[test]
+    fn clip_still_cuts_pixels_outside_it() {
+        let mut quad = bordered(0.0);
+        quad.clip = Some(Rect::new(0.0, 0.0, 12.0, SIZE as f32));
+        let pixmap = render(&quad);
+        assert_ne!(pixel(&pixmap, 8, 20), [0, 0, 0, 0]);
+        assert_eq!(pixel(&pixmap, 20, 20), [0, 0, 0, 0]);
     }
 
     #[test]

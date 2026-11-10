@@ -233,6 +233,7 @@ impl Ui {
             scroll_target: cappy_layout::Point::default(),
             rect: cappy_layout::Rect::ZERO,
             painted: cappy_layout::Rect::ZERO,
+            clip: None,
             translation: cappy_layout::Point::default(),
             opacity: 1.0,
             background: None,
@@ -560,8 +561,11 @@ impl Ui {
         for binding in bindings {
             self.retire_binding(binding);
         }
-        self.damage.add(self.nodes[id.index()].painted);
-        self.damage.add(self.nodes[id.index()].rect);
+        let painted = self.nodes[id.index()].painted;
+        let rect = self.nodes[id.index()].rect;
+        let clip = self.nodes[id.index()].clip;
+        self.damage_clipped(painted, clip);
+        self.damage_clipped(rect, clip);
         let _ = self.layout.remove(id);
         let node = &mut self.nodes[id.index()];
         node.alive = false;
@@ -573,6 +577,7 @@ impl Ui {
         node.suppressed = true;
         node.paint_dirty = false;
         node.style_dirty = false;
+        node.clip = None;
         node.translation = cappy_layout::Point::default();
         node.opacity = 1.0;
         node.background = None;
