@@ -83,7 +83,12 @@ impl BindingQueue {
     }
 
     pub(crate) fn set_waker(&self, waker: Option<Rc<dyn Fn()>>) {
-        *self.waker.borrow_mut() = waker.clone();
+        *self.waker.borrow_mut() = waker;
+    }
+
+    /// Waker for motions and [`crate::Context::open_surface`]. Only the first UI publishes this,
+    /// so a popup window does not steal wakes meant for the loop.
+    pub(crate) fn set_runtime_waker(&self, waker: Option<Rc<dyn Fn()>>) {
         *self.runtime.waker.borrow_mut() = waker;
     }
 
@@ -253,12 +258,16 @@ pub(crate) struct Runtime {
     /// One frame per component `render` currently on the stack. Hooks register into the top frame.
     pub(crate) hook_frames: RefCell<Vec<crate::lifecycle::HookFrame>>,
     themes: RefCell<Option<ThemeSlot>>,
-    /// Closures from [`crate::Context::animate`], run by the one [`crate::Ui`] on this runtime.
+    /// Closures from [`crate::Context::animate`], run by the first [`crate::Ui`] on this runtime.
     motion_jobs: RefCell<Vec<MotionJob>>,
-    /// Host waker, shared with the binding queue so a motion enqueue can wake a sleeping loop.
+    /// Host waker for motions and surface requests. The first [`crate::Ui`] publishes it.
+    /// Each UI's binding queue keeps its own waker for the signals that UI reads.
     waker: RefCell<Option<Rc<dyn Fn()>>>,
-    /// True while a [`crate::Ui`] built on this runtime is alive.
-    ui_attached: Cell<bool>,
+    /// How many [`crate::Ui`] values built on this runtime are still alive.
+    ui_count: Cell<u32>,
+    /// Popup windows requested by UI code. The host takes them with [`crate::Context::drain_surfaces`].
+    pub(crate) surfaces: RefCell<Vec<crate::surface::SurfaceCommand>>,
+    pub(crate) next_surface: Cell<u64>,
 }
 
 struct ThemeSlot {
@@ -270,14 +279,26 @@ const DEAD_SIGNAL: &str =
     "signal was disposed, or used on a thread other than the one that created it";
 
 impl Runtime {
-    pub(crate) fn attach_ui(&self) {
-        if self.ui_attached.replace(true) {
-            panic!("a context drives one Ui");
+    /// Records one more [`crate::Ui`]. The first one is the primary: it drains motions and owns
+    /// the runtime waker.
+    pub(crate) fn attach_ui(&self) -> bool {
+        let primary = self.ui_count.get() == 0;
+        self.ui_count.set(self.ui_count.get().saturating_add(1));
+        primary
+    }
+
+    pub(crate) fn detach_ui(&self, primary: bool) {
+        self.ui_count.set(self.ui_count.get().saturating_sub(1));
+        if primary {
+            *self.waker.borrow_mut() = None;
         }
     }
 
-    pub(crate) fn detach_ui(&self) {
-        self.ui_attached.set(false);
+    pub(crate) fn wake_host(&self) {
+        let waker = self.waker.borrow().clone();
+        if let Some(waker) = waker {
+            waker();
+        }
     }
 
     #[cfg_attr(feature = "cpu", allow(dead_code))]

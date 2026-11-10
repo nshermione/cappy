@@ -863,6 +863,9 @@ impl Ui {
     }
 
     pub(super) fn drain_motions(&mut self) {
+        if !self.primary {
+            return;
+        }
         loop {
             let jobs = self.queue.runtime.take_motions();
             if jobs.is_empty() {

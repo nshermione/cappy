@@ -163,6 +163,8 @@ pub struct Ui {
     /// Sequence and parallel groups still waiting on a step.
     anims: Vec<motion::Running>,
     next_anim_owner: u64,
+    /// The first UI on this context. It drains motion jobs and publishes the runtime waker.
+    primary: bool,
 }
 
 impl Ui {
@@ -217,10 +219,11 @@ impl Ui {
             clipboard: Box::new(MemoryClipboard::new()),
             anims: Vec::new(),
             next_anim_owner: 0,
+            primary: false,
         };
         ui.root = ui.mount(root.into_element(), None);
         ui.add_binding(ui.root, BindingKind::Theme);
-        ui.queue.runtime.attach_ui();
+        ui.primary = ui.queue.runtime.attach_ui();
         ui
     }
 
@@ -238,7 +241,11 @@ impl Ui {
     /// Called whenever a signal change makes the UI need an update, so a host sleeping in an
     /// event loop can wake up. Fires at most once until the next [`Ui::update`].
     pub fn set_waker(&mut self, waker: impl Fn() + 'static) {
-        self.queue.set_waker(Some(Rc::new(waker)));
+        let waker: Rc<dyn Fn()> = Rc::new(waker);
+        self.queue.set_waker(Some(Rc::clone(&waker)));
+        if self.primary {
+            self.queue.set_runtime_waker(Some(waker));
+        }
     }
 
     pub fn theme(&self) -> &ThemeHandle {
@@ -538,9 +545,10 @@ impl Context {
 
     /// Queues `apply` to run on the next [`Ui::update`](Ui::update), after layout.
     ///
-    /// The closure does not run at the call. A context has one [`Ui`]; that `Ui` drains the queue.
-    /// A call made before the `Ui` exists waits for its first update. The host waker set on the
-    /// `Ui` fires when the queue goes from empty to occupied.
+    /// The closure does not run at the call. The first [`Ui`] on this context drains the queue.
+    /// A later [`Ui`] leaves the jobs for that first one. A call made before any `Ui` exists
+    /// waits for its first update. The host waker set on the first `Ui` fires when the queue
+    /// goes from empty to occupied.
     ///
     /// The `cpu` feature does not export this method. A call in that build does not compile.
     #[cfg(not(feature = "cpu"))]
@@ -556,8 +564,9 @@ impl Context {
 
 impl Drop for Ui {
     fn drop(&mut self) {
+        let primary = self.primary;
         self.dispose_tree();
-        self.queue.runtime.detach_ui();
+        self.queue.runtime.detach_ui(primary);
     }
 }
 

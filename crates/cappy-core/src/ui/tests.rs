@@ -10,8 +10,9 @@ use crate::reactive::{live_signal_count, signal_is_alive, signal_subscriber_coun
 use crate::{
     Application, ButtonState, Component, Context, Dynamic, Element, HasContext, ImeEvent,
     InputEvent, IntoElement, Key, KeyEvent, Modifiers, PointerButton, Signal, Singleton,
-    SingletonOf, Slot, div, for_each, fragment, if_else, input, on_before_mount, on_before_unmount,
-    on_mounted, on_unmounted, on_updated, show, slot, text, text_dyn, use_store,
+    SingletonOf, Slot, SurfaceCommand, SurfaceOptions, div, for_each, fragment, if_else, input,
+    on_before_mount, on_before_unmount, on_mounted, on_unmounted, on_updated, show, slot, text,
+    text_dyn, use_store,
 };
 use cappy_style::{Background, Color, FlexDirection, Overflow, StyleRefinement};
 
@@ -2198,11 +2199,64 @@ fn painted_quad<'a>(ui: &'a Ui, key: &str) -> &'a crate::paint::QuadPrimitive {
 }
 
 #[test]
-#[should_panic(expected = "a context drives one Ui")]
-fn a_context_has_one_ui() {
+fn two_uis_share_a_signal_and_surface_commands_drain_once() {
     let cx = context();
-    let _first = Ui::new(&cx, div(), Theme::light());
-    let _second = Ui::new(&cx, div(), Theme::light());
+    let count = cx.reactive(0_i32);
+    let primary_wakes = Rc::new(Cell::new(0));
+    let secondary_wakes = Rc::new(Cell::new(0));
+    let mut first = Ui::new(
+        &cx,
+        text_dyn({
+            let count = count.clone();
+            move || count.get().to_string()
+        }),
+        Theme::light(),
+    );
+    let mut second = Ui::new(
+        &cx,
+        text_dyn({
+            let count = count.clone();
+            move || count.get().to_string()
+        }),
+        Theme::light(),
+    );
+    let primary_flag = Rc::clone(&primary_wakes);
+    first.set_waker(move || primary_flag.set(primary_flag.get() + 1));
+    let secondary_flag = Rc::clone(&secondary_wakes);
+    second.set_waker(move || secondary_flag.set(secondary_flag.get() + 1));
+    first.update(VIEWPORT);
+    second.update(VIEWPORT);
+    count.set(4);
+    assert!(first.needs_update());
+    assert!(second.needs_update());
+    assert_eq!(primary_wakes.get(), 1);
+    assert_eq!(secondary_wakes.get(), 1);
+
+    let id = cx.open_surface(SurfaceOptions::new("popup"), |_| div());
+    assert_eq!(primary_wakes.get(), 2);
+    assert_eq!(secondary_wakes.get(), 1);
+    match cx.drain_surfaces().as_slice() {
+        [
+            SurfaceCommand::Open {
+                id: opened,
+                options,
+                ..
+            },
+        ] => {
+            assert_eq!(*opened, id);
+            assert_eq!(options.title, "popup");
+            assert_eq!(options.logical_size, (360.0, 240.0));
+            assert_eq!(options.offset, (32.0, 32.0));
+        }
+        other => panic!("expected one open command, got {other:?}"),
+    }
+    assert!(cx.drain_surfaces().is_empty());
+    cx.close_surface(id);
+    assert!(matches!(
+        cx.drain_surfaces().as_slice(),
+        [SurfaceCommand::Close(closed)] if *closed == id
+    ));
+    assert!(cx.drain_surfaces().is_empty());
 }
 
 fn phase(log: &Rc<RefCell<Vec<String>>>, label: &'static str) -> impl FnMut() + 'static {

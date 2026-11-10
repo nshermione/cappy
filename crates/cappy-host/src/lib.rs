@@ -6,6 +6,7 @@ mod regions;
 mod renderer;
 mod resize_pace;
 mod selection;
+mod session;
 mod window_host;
 
 pub use cappy_text::FontOptions;
@@ -14,6 +15,7 @@ pub use renderer::{
     PresentOutcome, RendererError, RendererKind, UnknownRendererError, WindowRenderer,
 };
 pub use selection::{RENDERER_ENV, RendererSelectionError, select_renderer};
+pub use session::WindowSession;
 pub use window_host::{
     InputResponse, RedrawResult, WindowHost, WindowOptions, memory_mark, set_log_memory,
 };

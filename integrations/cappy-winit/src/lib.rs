@@ -1,8 +1,10 @@
 //! Runs a cappy [`Ui`] in a winit window. The event loop sleeps until input arrives or a signal
 //! changes, and each redraw repaints only the damaged regions. A live resize follows the pointer.
 //! Presents stay on the resize interval, then one more frame is presented when the size settles.
-//! The window stays hidden until that first frame has been presented. On the web the canvas fills
-//! the page and is shown immediately, because a hidden canvas has no size for wgpu to draw to.
+//! A surface request from the UI opens another native window on this same loop. The web target
+//! keeps a single canvas and drops those requests. The window stays hidden until that first
+//! frame has been presented. On the web the canvas fills the page and is shown immediately,
+//! because a hidden canvas has no size for wgpu to draw to.
 //! Animation there waits for the browser's frame, and `run_app` is replaced by `spawn_app` so the
 //! call returns while the browser keeps the loop alive.
 //!
@@ -40,20 +42,22 @@ use std::rc::Rc;
 
 #[cfg(target_arch = "wasm32")]
 use cappy_core::NoopClipboard;
-use cappy_core::{Application, CursorIcon, InputEvent, Modifiers, Ui};
+use cappy_core::{Application, Context, CursorIcon, InputEvent, Modifiers, SurfaceId, Ui};
+#[cfg(not(target_arch = "wasm32"))]
+use cappy_core::{Element, SurfaceCommand, SurfaceOptions, Theme};
 use cappy_host::{
     PresentOutcome, RendererError, RendererSelectionError, WindowHost, WindowRenderer,
-    select_renderer,
+    WindowSession, select_renderer,
 };
 use cappy_text::FontContext;
 use winit::application::ApplicationHandler;
 #[cfg(not(target_arch = "wasm32"))]
-use winit::dpi::LogicalSize;
+use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{KeyCode, PhysicalKey};
 #[cfg(target_os = "windows")]
-use winit::platform::windows::WindowAttributesExtWindows;
+use winit::platform::windows::{HWND, WindowAttributesExtWindows};
 use winit::window::{Window, WindowAttributes, WindowId};
 
 pub use cappy_host::{FontOptions, RendererKind, WindowOptions};
@@ -184,9 +188,16 @@ fn run_window(application: &Application, options: WindowOptions, ui: Ui) -> Resu
         options,
         renderer,
         proxy: event_loop.create_proxy(),
+        context: application.context().clone(),
         pending_ui: Some(ui),
-        running: None,
+        session: WindowSession::new(),
+        primary: None,
+        popups: Vec::new(),
+        #[cfg(not(target_arch = "wasm32"))]
+        fonts: None,
         error: None,
+        #[cfg(target_arch = "wasm32")]
+        warned_surface: false,
         #[cfg(target_arch = "wasm32")]
         opening: None,
         // Last non-zero canvas size. The first resize often arrives before the GPU device
@@ -213,15 +224,20 @@ fn run_window(application: &Application, options: WindowOptions, ui: Ui) -> Resu
 #[derive(Debug)]
 struct Wake;
 
-struct Running {
-    // Declared before `window` so the renderer is dropped before the window it renders to.
-    host: WindowHost,
+/// Platform window beside a [`WindowHost`]. The host lives in [`WindowSession`], which is
+/// dropped first so the renderer releases the surface before the window.
+struct WindowChrome {
     window: Arc<Window>,
     /// When set, redraw then so a resize presents on its cadence or at the resting size.
     settle_at: Option<Instant>,
     /// Set once the first presented frame has been followed by [`Window::set_visible`].
     shown: bool,
     modifiers: Modifiers,
+}
+
+enum WindowSlot {
+    Primary,
+    Popup(usize),
 }
 
 /// Window and UI waiting for the async GPU surface. Only the web opens the device this way.
@@ -241,8 +257,15 @@ struct WinitHost {
     options: WindowOptions,
     renderer: RendererKind,
     proxy: EventLoopProxy<Wake>,
+    context: Context,
     pending_ui: Option<Ui>,
-    running: Option<Running>,
+    /// Dropped before [`Self::primary`] and [`Self::popups`] so each renderer releases its
+    /// surface before the window.
+    session: WindowSession<WindowHost>,
+    primary: Option<WindowChrome>,
+    popups: Vec<(SurfaceId, WindowChrome)>,
+    #[cfg(not(target_arch = "wasm32"))]
+    fonts: Option<FontContext>,
     error: Option<RunError>,
     #[cfg(target_arch = "wasm32")]
     opening: Option<Opening>,
@@ -253,14 +276,20 @@ struct WinitHost {
     /// Last non-zero physical size reported for the canvas.
     #[cfg(target_arch = "wasm32")]
     surface_size: (u32, u32),
+    /// One warning for surface requests the browser cannot open.
+    #[cfg(target_arch = "wasm32")]
+    warned_surface: bool,
 }
 
 impl WinitHost {
-    fn create_window(&self, event_loop: &ActiveEventLoop) -> Result<Arc<Window>, RunError> {
+    fn create_window(
+        &self,
+        event_loop: &ActiveEventLoop,
+        attributes: WindowAttributes,
+    ) -> Result<Arc<Window>, RunError> {
         cappy_host::set_log_memory(self.options.log_memory);
         #[cfg(debug_assertions)]
         cappy_host::memory_mark("start before window");
-        let attributes = window_attributes(&self.options, self.renderer);
         let window = Arc::new(
             event_loop
                 .create_window(attributes)
@@ -274,10 +303,10 @@ impl WinitHost {
     fn finish(
         &self,
         window: Arc<Window>,
-        fonts: FontContext,
+        fonts: &FontContext,
         ui: Ui,
         renderer: Box<dyn WindowRenderer>,
-    ) -> Running {
+    ) -> (WindowHost, WindowChrome) {
         #[cfg(debug_assertions)]
         cappy_host::memory_mark("start after renderer");
         let mut host = WindowHost::new(renderer, &fonts, ui);
@@ -292,28 +321,34 @@ impl WinitHost {
             }
         });
         install_clipboard(host.ui_mut());
-        Running {
+        (
             host,
-            window,
-            settle_at: None,
-            shown: false,
-            modifiers: Modifiers::default(),
-        }
+            WindowChrome {
+                window,
+                settle_at: None,
+                shown: false,
+                modifiers: Modifiers::default(),
+            },
+        )
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    fn start(&mut self, event_loop: &ActiveEventLoop, ui: Ui) -> Result<Running, RunError> {
-        let window = self.create_window(event_loop)?;
+    fn start(&mut self, event_loop: &ActiveEventLoop, ui: Ui) -> Result<(), RunError> {
+        let window =
+            self.create_window(event_loop, window_attributes(&self.options, self.renderer))?;
         let fonts = FontContext::load(&self.options.fonts);
+        self.fonts = Some(fonts.clone());
         #[cfg(debug_assertions)]
         cappy_host::memory_mark("start after fonts");
         let renderer =
             renderer::open_renderer(self.renderer, &window, &fonts).map_err(RunError::Renderer)?;
-        let mut running = self.finish(window, fonts, ui, renderer);
+        let (mut host, mut chrome) = self.finish(window, &fonts, ui, renderer);
         // A hidden window does not receive WM_PAINT, so the first frame cannot wait for
         // RedrawRequested. Present it here, then show the window with that frame in place.
-        redraw(&mut running)?;
-        Ok(running)
+        redraw(&mut chrome, &mut host)?;
+        self.session.set_primary(host);
+        self.primary = Some(chrome);
+        Ok(())
     }
 
     /// Creates the canvas, then opens the GPU device without blocking the page.
@@ -329,13 +364,14 @@ impl WinitHost {
             );
             return;
         }
-        let window = match self.create_window(event_loop) {
-            Ok(window) => window,
-            Err(error) => {
-                self.fail(event_loop, error);
-                return;
-            }
-        };
+        let window =
+            match self.create_window(event_loop, window_attributes(&self.options, self.renderer)) {
+                Ok(window) => window,
+                Err(error) => {
+                    self.fail(event_loop, error);
+                    return;
+                }
+            };
         let fonts = FontContext::load(&self.options.fonts);
         self.opening = Some(Opening {
             window,
@@ -344,12 +380,12 @@ impl WinitHost {
             gpu_started: false,
         });
         // `create_window` may already have delivered `Resized` before `opening` existed.
-        self.open_surface();
+        self.open_gpu_surface();
     }
 
     /// Starts the GPU future once the canvas has a real size. Called again from later resizes.
     #[cfg(target_arch = "wasm32")]
-    fn open_surface(&mut self) {
+    fn open_gpu_surface(&mut self) {
         let Some(opening) = &self.opening else {
             return;
         };
@@ -393,13 +429,209 @@ impl WinitHost {
         };
         match outcome {
             Ok(renderer) => {
-                let mut running = self.finish(opening.window, opening.fonts, opening.ui, renderer);
-                match redraw(&mut running) {
-                    Ok(()) => self.running = Some(running),
+                let (mut host, mut chrome) =
+                    self.finish(opening.window, &opening.fonts, opening.ui, renderer);
+                match redraw(&mut chrome, &mut host) {
+                    Ok(()) => {
+                        self.session.set_primary(host);
+                        self.primary = Some(chrome);
+                    }
                     Err(error) => self.fail(event_loop, error),
                 }
             }
             Err(error) => self.fail(event_loop, RunError::Renderer(error)),
+        }
+    }
+
+    fn apply_surface_commands(&mut self, event_loop: &ActiveEventLoop) {
+        if self.primary.is_none() {
+            return;
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.discard_surface_commands();
+            return;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            for command in self.context.drain_surfaces() {
+                match command {
+                    SurfaceCommand::Open { id, options, root } => {
+                        if let Err(error) = self.open_popup(event_loop, id, options, root) {
+                            self.fail(event_loop, error);
+                            return;
+                        }
+                    }
+                    SurfaceCommand::Close(id) => self.close_popup(id),
+                }
+            }
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn discard_surface_commands(&mut self) {
+        if self.context.drain_surfaces().is_empty() || self.warned_surface {
+            return;
+        }
+        self.warned_surface = true;
+        log::warn!("popup windows stay closed in the browser");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn open_popup(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        id: SurfaceId,
+        options: SurfaceOptions,
+        root: Element,
+    ) -> Result<(), RunError> {
+        let Some(fonts) = self.fonts.clone() else {
+            log::error!("popup opened before the primary window loaded fonts");
+            return Ok(());
+        };
+        let owner = self
+            .primary
+            .as_ref()
+            .map(|chrome| Arc::clone(&chrome.window));
+        let attributes = popup_attributes(&options, self.renderer, owner.as_deref());
+        let window = self.create_window(event_loop, attributes)?;
+        let ui = Ui::new(&self.context, root, Theme::light());
+        let renderer =
+            renderer::open_renderer(self.renderer, &window, &fonts).map_err(RunError::Renderer)?;
+        let (mut host, mut chrome) = self.finish(window, &fonts, ui, renderer);
+        redraw(&mut chrome, &mut host)?;
+        self.session.insert_popup(id, host);
+        self.popups.push((id, chrome));
+        Ok(())
+    }
+
+    fn close_popup(&mut self, id: SurfaceId) {
+        self.session.remove_popup(id);
+        self.popups.retain(|(open, _)| *open != id);
+    }
+
+    fn close_primary(&mut self, event_loop: &ActiveEventLoop) {
+        self.session.close_primary();
+        self.primary = None;
+        self.popups.clear();
+        event_loop.exit();
+    }
+
+    fn slot_for(&self, id: WindowId) -> Option<WindowSlot> {
+        if self
+            .primary
+            .as_ref()
+            .is_some_and(|chrome| chrome.window.id() == id)
+        {
+            return Some(WindowSlot::Primary);
+        }
+        self.popups
+            .iter()
+            .position(|(_, chrome)| chrome.window.id() == id)
+            .map(WindowSlot::Popup)
+    }
+
+    fn with_slot_mut<R>(
+        &mut self,
+        slot: WindowSlot,
+        body: impl FnOnce(&mut WindowChrome, &mut WindowHost) -> R,
+    ) -> Option<R> {
+        match slot {
+            WindowSlot::Primary => {
+                let WinitHost {
+                    primary, session, ..
+                } = self;
+                let chrome = primary.as_mut()?;
+                let host = session.primary_mut()?;
+                Some(body(chrome, host))
+            }
+            WindowSlot::Popup(index) => {
+                let WinitHost {
+                    popups, session, ..
+                } = self;
+                let (id, chrome) = popups.get_mut(index)?;
+                let host = session.popup_mut(*id)?;
+                Some(body(chrome, host))
+            }
+        }
+    }
+
+    fn redraw_window(&mut self, id: WindowId) -> Result<(), RunError> {
+        let Some(slot) = self.slot_for(id) else {
+            return Ok(());
+        };
+        let mut failure = None;
+        self.with_slot_mut(slot, |chrome, host| {
+            if let Err(error) = redraw(chrome, host) {
+                failure = Some(error);
+            }
+        });
+        match failure {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+
+    fn request_dirty_redraws(&mut self) {
+        let WinitHost {
+            primary,
+            popups,
+            session,
+            ..
+        } = self;
+        if let (Some(chrome), Some(host)) = (primary.as_ref(), session.primary()) {
+            if host.ui().needs_update() {
+                chrome.window.request_redraw();
+            }
+        }
+        for (id, chrome) in popups.iter() {
+            let dirty = session
+                .popup(*id)
+                .is_some_and(|host| host.ui().needs_update());
+            if dirty {
+                chrome.window.request_redraw();
+            }
+        }
+    }
+
+    fn schedule(&mut self, event_loop: &ActiveEventLoop) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            if self
+                .primary
+                .as_ref()
+                .is_some_and(|chrome| chrome.settle_at.is_some())
+            {
+                if let Some(chrome) = &self.primary {
+                    chrome.window.request_redraw();
+                }
+            }
+            event_loop.set_control_flow(ControlFlow::Wait);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let now = Instant::now();
+            let mut earliest = None;
+            for chrome in self
+                .primary
+                .iter()
+                .chain(self.popups.iter().map(|(_, chrome)| chrome))
+            {
+                match chrome.settle_at {
+                    Some(deadline) if now >= deadline => chrome.window.request_redraw(),
+                    Some(deadline) => {
+                        earliest = Some(match earliest {
+                            Some(current) if current < deadline => current,
+                            _ => deadline,
+                        });
+                    }
+                    None => {}
+                }
+            }
+            match earliest {
+                Some(deadline) => event_loop.set_control_flow(ControlFlow::WaitUntil(deadline)),
+                None => event_loop.set_control_flow(ControlFlow::Wait),
+            }
         }
     }
 
@@ -418,9 +650,8 @@ impl ApplicationHandler<Wake> for WinitHost {
             return;
         };
         #[cfg(not(target_arch = "wasm32"))]
-        match self.start(event_loop, ui) {
-            Ok(running) => self.running = Some(running),
-            Err(error) => self.fail(event_loop, error),
+        if let Err(error) = self.start(event_loop, ui) {
+            self.fail(event_loop, error);
         }
         #[cfg(target_arch = "wasm32")]
         self.begin(event_loop, ui);
@@ -429,14 +660,14 @@ impl ApplicationHandler<Wake> for WinitHost {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, _event: Wake) {
         #[cfg(target_arch = "wasm32")]
         self.attach_renderer(event_loop);
-        #[cfg(not(target_arch = "wasm32"))]
-        let _ = event_loop;
         if self.error.is_some() {
             return;
         }
-        if let Some(running) = &self.running {
-            running.window.request_redraw();
+        self.apply_surface_commands(event_loop);
+        if self.error.is_some() {
+            return;
         }
+        self.request_dirty_redraws();
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
@@ -446,23 +677,23 @@ impl ApplicationHandler<Wake> for WinitHost {
             return;
         }
         #[cfg(target_arch = "wasm32")]
-        self.open_surface();
-        let Some(running) = &self.running else {
+        self.open_gpu_surface();
+        self.apply_surface_commands(event_loop);
+        if self.error.is_some() || self.primary.is_none() {
             event_loop.set_control_flow(ControlFlow::Wait);
             return;
-        };
-        schedule_animation(event_loop, running);
+        }
+        self.schedule(event_loop);
     }
 
     fn window_event(
         &mut self,
         event_loop: &ActiveEventLoop,
-        _window_id: WindowId,
+        window_id: WindowId,
         event: WindowEvent,
     ) {
         if event == WindowEvent::RedrawRequested {
-            let outcome = self.running.as_mut().map_or(Ok(()), redraw);
-            if let Err(error) = outcome {
+            if let Err(error) = self.redraw_window(window_id) {
                 self.fail(event_loop, error);
             }
             return;
@@ -471,67 +702,26 @@ impl ApplicationHandler<Wake> for WinitHost {
         if let WindowEvent::Resized(size) = &event {
             if size.width > 0 && size.height > 0 {
                 self.surface_size = (size.width, size.height);
-                self.open_surface();
+                self.open_gpu_surface();
             }
         }
-        let Some(running) = &mut self.running else {
+        let Some(slot) = self.slot_for(window_id) else {
             return;
         };
-        let window = Arc::clone(&running.window);
-        let events = match event {
-            WindowEvent::CloseRequested => {
-                event_loop.exit();
-                Vec::new()
-            }
-            WindowEvent::Resized(size) => {
-                running.host.resize((size.width, size.height));
-                window.request_redraw();
-                Vec::new()
-            }
-            WindowEvent::ScaleFactorChanged { .. } => {
-                window.request_redraw();
-                Vec::new()
-            }
-            WindowEvent::CursorMoved { position, .. } => {
-                vec![translate::pointer_moved(position, window.scale_factor())]
-            }
-            WindowEvent::CursorLeft { .. } => vec![InputEvent::PointerLeft],
-            WindowEvent::MouseInput { state, button, .. } => {
-                translate::pointer_button(button, state)
-                    .into_iter()
-                    .collect()
-            }
-            WindowEvent::MouseWheel { delta, .. } => {
-                vec![translate::mouse_wheel(delta, window.scale_factor())]
-            }
-            WindowEvent::KeyboardInput { event, .. } if is_debug_toggle(&event) => {
-                running.host.toggle_debug_damage();
-                window.request_redraw();
-                Vec::new()
-            }
-            WindowEvent::KeyboardInput { event, .. } => {
-                translate::keyboard(&event, running.modifiers)
-            }
-            WindowEvent::ModifiersChanged(modifiers) => {
-                let event = translate::modifiers(modifiers.state());
-                if let InputEvent::Modifiers(modifiers) = event {
-                    running.modifiers = modifiers;
+        if matches!(event, WindowEvent::CloseRequested) {
+            match slot {
+                WindowSlot::Primary => self.close_primary(event_loop),
+                WindowSlot::Popup(index) => {
+                    if let Some(id) = self.popups.get(index).map(|(id, _)| *id) {
+                        self.close_popup(id);
+                    }
                 }
-                vec![event]
             }
-            WindowEvent::Ime(event) => translate::ime(event).into_iter().collect(),
-            _ => Vec::new(),
-        };
-        for input in events {
-            let response = running.host.handle_event(input);
-            apply_cursor(&window, response.cursor);
-            if response.redraw {
-                // `about_to_wait` sleeps until `settle_at`. Leaving the caret blink there
-                // holds this redraw until the caret flips.
-                running.settle_at = Some(Instant::now());
-                window.request_redraw();
-            }
+            return;
         }
+        self.with_slot_mut(slot, |chrome, host| {
+            apply_window_event(chrome, host, event);
+        });
     }
 }
 
@@ -566,27 +756,116 @@ impl cappy_core::Clipboard for PlatformClipboard {
     }
 }
 
-/// Asks for the next animation frame, or sleeps when nothing is moving.
-///
-/// Native waits until the host deadline, then asks winit to redraw. The browser already
-/// delivers frames through `requestAnimationFrame`. A `WaitUntil` timer would wake the page
-/// between those frames and record an update the display cannot show.
-fn schedule_animation(event_loop: &ActiveEventLoop, running: &Running) {
-    #[cfg(target_arch = "wasm32")]
-    {
-        if running.settle_at.is_some() {
-            running.window.request_redraw();
+fn apply_window_event(chrome: &mut WindowChrome, host: &mut WindowHost, event: WindowEvent) {
+    let window = Arc::clone(&chrome.window);
+    let events = match event {
+        WindowEvent::Resized(size) => {
+            host.resize((size.width, size.height));
+            window.request_redraw();
+            Vec::new()
         }
-        event_loop.set_control_flow(ControlFlow::Wait);
+        WindowEvent::ScaleFactorChanged { .. } => {
+            window.request_redraw();
+            Vec::new()
+        }
+        WindowEvent::CursorMoved { position, .. } => {
+            vec![translate::pointer_moved(position, window.scale_factor())]
+        }
+        WindowEvent::CursorLeft { .. } => vec![InputEvent::PointerLeft],
+        WindowEvent::MouseInput { state, button, .. } => translate::pointer_button(button, state)
+            .into_iter()
+            .collect(),
+        WindowEvent::MouseWheel { delta, .. } => {
+            vec![translate::mouse_wheel(delta, window.scale_factor())]
+        }
+        WindowEvent::KeyboardInput { event, .. } if is_debug_toggle(&event) => {
+            host.toggle_debug_damage();
+            window.request_redraw();
+            Vec::new()
+        }
+        WindowEvent::KeyboardInput { event, .. } => translate::keyboard(&event, chrome.modifiers),
+        WindowEvent::ModifiersChanged(modifiers) => {
+            let event = translate::modifiers(modifiers.state());
+            if let InputEvent::Modifiers(modifiers) = event {
+                chrome.modifiers = modifiers;
+            }
+            vec![event]
+        }
+        WindowEvent::Ime(event) => translate::ime(event).into_iter().collect(),
+        _ => Vec::new(),
+    };
+    for input in events {
+        let response = host.handle_event(input);
+        apply_cursor(&window, response.cursor);
+        if response.redraw {
+            // `about_to_wait` sleeps until `settle_at`. Leaving the caret blink there
+            // holds this redraw until the caret flips.
+            chrome.settle_at = Some(Instant::now());
+            window.request_redraw();
+        }
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    match running.settle_at {
-        Some(deadline) if Instant::now() >= deadline => {
-            running.window.request_redraw();
-            event_loop.set_control_flow(ControlFlow::Wait);
-        }
-        Some(deadline) => event_loop.set_control_flow(ControlFlow::WaitUntil(deadline)),
-        None => event_loop.set_control_flow(ControlFlow::Wait),
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn popup_attributes(
+    options: &SurfaceOptions,
+    renderer: RendererKind,
+    owner: Option<&Window>,
+) -> WindowAttributes {
+    let attributes = Window::default_attributes()
+        .with_title(options.title.clone())
+        .with_visible(false)
+        .with_inner_size(LogicalSize::new(
+            options.logical_size.0,
+            options.logical_size.1,
+        ));
+    let attributes = without_redirection_bitmap(attributes, renderer);
+    owned_popup(place_near_owner(attributes, options.offset, owner), owner)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn place_near_owner(
+    attributes: WindowAttributes,
+    offset: (f64, f64),
+    owner: Option<&Window>,
+) -> WindowAttributes {
+    let Some(owner) = owner else {
+        return attributes;
+    };
+    let Ok(position) = owner.outer_position() else {
+        return attributes;
+    };
+    let logical = position.to_logical::<f64>(owner.scale_factor());
+    attributes.with_position(LogicalPosition::new(
+        logical.x + offset.0,
+        logical.y + offset.1,
+    ))
+}
+
+#[cfg(target_os = "windows")]
+fn owned_popup(attributes: WindowAttributes, owner: Option<&Window>) -> WindowAttributes {
+    let Some(owner) = owner else {
+        return attributes.with_skip_taskbar(true);
+    };
+    let Some(hwnd) = hwnd_of(owner) else {
+        log::warn!("popup has no owner handle; it opens as a normal window");
+        return attributes.with_skip_taskbar(true);
+    };
+    attributes.with_owner_window(hwnd).with_skip_taskbar(true)
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "windows")))]
+fn owned_popup(attributes: WindowAttributes, _owner: Option<&Window>) -> WindowAttributes {
+    attributes
+}
+
+#[cfg(target_os = "windows")]
+fn hwnd_of(window: &Window) -> Option<HWND> {
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    let handle = window.window_handle().ok()?;
+    match handle.as_raw() {
+        RawWindowHandle::Win32(win32) => Some(win32.hwnd.get()),
+        _ => None,
     }
 }
 
@@ -616,43 +895,42 @@ fn is_debug_toggle(event: &KeyEvent) -> bool {
         && event.physical_key == PhysicalKey::Code(DEBUG_DAMAGE_KEY)
 }
 
-fn redraw(running: &mut Running) -> Result<(), RunError> {
-    let size = running.window.inner_size();
+fn redraw(chrome: &mut WindowChrome, host: &mut WindowHost) -> Result<(), RunError> {
+    let size = chrome.window.inner_size();
     if size.width == 0 || size.height == 0 {
-        running.settle_at = None;
-        if !running.shown {
+        chrome.settle_at = None;
+        if !chrome.shown {
             // No client area yet. Showing is what lets a later resize deliver a paint.
-            running.window.set_visible(true);
-            running.shown = true;
+            chrome.window.set_visible(true);
+            chrome.shown = true;
         }
         return Ok(());
     }
-    let result = running
-        .host
-        .redraw((size.width, size.height), running.window.scale_factor())
+    let result = host
+        .redraw((size.width, size.height), chrome.window.scale_factor())
         .map_err(RunError::Renderer)?;
-    apply_cursor(&running.window, result.cursor);
-    running.settle_at = result.settle_at;
-    if !running.shown {
+    apply_cursor(&chrome.window, result.cursor);
+    chrome.settle_at = result.settle_at;
+    if !chrome.shown {
         match result.present {
             PresentOutcome::Presented { .. } => {
-                running.window.set_visible(true);
-                running.shown = true;
+                chrome.window.set_visible(true);
+                chrome.shown = true;
                 log::info!("showed the window after the first presented frame");
             }
             // A hidden window receives no WM_PAINT, and some backends report it occluded.
             // Show it and ask for another frame; the device is already open, so this is not
             // the startup wait.
             PresentOutcome::Occluded | PresentOutcome::Retry => {
-                running.window.set_visible(true);
-                running.shown = true;
-                running.window.request_redraw();
+                chrome.window.set_visible(true);
+                chrome.shown = true;
+                chrome.window.request_redraw();
             }
             PresentOutcome::Deferred => {}
         }
     }
     if result.needs_retry() {
-        running.window.request_redraw();
+        chrome.window.request_redraw();
     }
     Ok(())
 }
