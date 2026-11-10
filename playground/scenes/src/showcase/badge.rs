@@ -45,9 +45,9 @@ impl Component for Badge {
     fn render(&self) -> Element {
         let counter = use_store(Counter);
         element! {
-            Container(class = Class::Root, on_click = on(Self::press)) {
+            div(class = Class::Root, on_click = on(Self::press)) {
                 slot(icon)
-                Text(:format!("{} ({}) c:{}", self.label, self.hits, counter.count), key = "badge-label")
+                text(:format!("{} ({}) c:{}", self.label, self.hits, counter.count), key = "badge-label")
                 slot(tail)
             }
         }

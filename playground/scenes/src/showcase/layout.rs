@@ -17,7 +17,7 @@ use super::tiles::TilesTab;
 pub fn root() -> Element {
     let app = use_store(App);
     element! {
-        Container(class = ThemeClass::App) {
+        div(class = ThemeClass::App) {
             { header() }
             { tab_bar(app) }
             show (:app.tab.get() == Tab::Counter) {
@@ -36,14 +36,14 @@ pub fn root() -> Element {
                 { images_tab() }
             }
             { motion_panel(app) }
-            Text("F12 toggles the repaint overlay. Idle frames repaint nothing.", class = ThemeClass::Muted)
+            text("F12 toggles the repaint overlay. Idle frames repaint nothing.", class = ThemeClass::Muted)
         }
     }
 }
 
 fn tab_bar(app: App) -> Element {
     element! {
-        Container(class = Class::TabBar) {
+        div(class = Class::TabBar) {
             { tab(app, Tab::Counter, "Counter", "tab-counter") }
             { tab(app, Tab::Tiles, "Tiles", "tab-tiles") }
             { tab(app, Tab::Checklist, "Checklist", "tab-checklist") }
@@ -81,7 +81,7 @@ fn motion_panel(_app: App) -> Element {
 fn tab(app: App, tab: Tab, title: &'static str, key: &'static str) -> Element {
     let cx = Context::current();
     element! {
-        Container(
+        div(
             class = ThemeClass::Btn,
             :class = class_when(app.tab.get() == tab, Class::TabActive),
             key = key,
@@ -90,7 +90,7 @@ fn tab(app: App, tab: Tab, title: &'static str, key: &'static str) -> Element {
                 start_motion_loops(&cx, tab);
             },
         ) {
-            Text(title)
+            text(title)
         }
     }
 }
@@ -108,17 +108,17 @@ fn start_motion_loops(_cx: &Context, _tab: Tab) {}
 fn header() -> Element {
     let themes = Context::current().themes();
     element! {
-        Container(class = Class::Header) {
-            Container(class = ThemeClass::Column) {
-                Text("cappy playground", class = ThemeClass::Title)
-                Text("Retained UI on wgpu that repaints only what changed", class = ThemeClass::Muted)
+        div(class = Class::Header) {
+            div(class = ThemeClass::Column) {
+                text("cappy playground", class = ThemeClass::Title)
+                text("Retained UI on wgpu that repaints only what changed", class = ThemeClass::Muted)
             }
-            Container(
+            div(
                 class = ThemeClass::Btn,
                 key = "theme-toggle",
                 on_click = move |_| themes.set(themes.cycle()),
             ) {
-                Text(:format!("Theme: {}", themes.with(|current| current.name().to_owned())))
+                text(:format!("Theme: {}", themes.with(|current| current.name().to_owned())))
             }
         }
     }

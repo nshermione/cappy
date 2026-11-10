@@ -755,7 +755,8 @@ pub trait Component: HasContext + Clone {
 /// Converts a builder or component into the [`Element`] stored in the tree.
 ///
 /// [`Element`] returns itself. A [`Component`] renders, then marks that root so a slot walk stops
-/// there. [`Container`], [`Text`] and [`Image`] do not: they call [`div`], [`text`] and [`image`].
+/// there. The `element!` builders for [`div`], [`text`], [`image`] and [`input`] do not: they call
+/// those functions.
 pub trait IntoElement {
     fn into_element(self) -> Element;
 }
@@ -789,13 +790,14 @@ impl<C: Component + 'static> IntoElement for C {
 
 /// `element!` `div` builder. [`IntoElement`] calls [`div`] and leaves `slot_owner` at 0, so a
 /// parent component can still see slot holes nested inside.
-pub struct Container {
+#[doc(hidden)]
+pub struct DivBuilder {
     on_click: Option<ClickHandler>,
     on_hover: Option<HoverHandler>,
     stylesheet: Option<Arc<Stylesheet>>,
 }
 
-impl Container {
+impl DivBuilder {
     #[must_use]
     pub fn open(_cx: &crate::Context) -> Self {
         Self {
@@ -824,7 +826,7 @@ impl Container {
     }
 }
 
-impl IntoElement for Container {
+impl IntoElement for DivBuilder {
     fn into_element(self) -> Element {
         let mut element = div();
         element.on_click = self.on_click;
@@ -834,47 +836,49 @@ impl IntoElement for Container {
     }
 }
 
-/// `element!` `text` builder. [`open`](Text::open) has no content yet, so only [`Text::content`]
-/// implements [`IntoElement`].
-pub struct Text<T> {
+/// `element!` `text` builder. [`open`](TextBuilder::open) has no content yet, so only
+/// [`TextBuilder::content`] implements [`IntoElement`].
+#[doc(hidden)]
+pub struct TextBuilder<T> {
     content: T,
 }
 
-impl Text<()> {
+impl TextBuilder<()> {
     #[must_use]
     pub fn open(_cx: &crate::Context) -> Self {
         Self { content: () }
     }
 }
 
-impl<T> Text<T> {
+impl<T> TextBuilder<T> {
     #[must_use]
-    pub fn content<U>(self, content: U) -> Text<U> {
-        Text { content }
+    pub fn content<U>(self, content: U) -> TextBuilder<U> {
+        TextBuilder { content }
     }
 
     /// Same setter as [`content`](Self::content). `value = "..."` is static. `:value = ...` is
     /// dynamic: a string expression, or a [`Signal`] / [`Reactive`] string.
     #[must_use]
-    pub fn value<U>(self, value: U) -> Text<U> {
-        Text { content: value }
+    pub fn value<U>(self, value: U) -> TextBuilder<U> {
+        TextBuilder { content: value }
     }
 }
 
-impl<T: IntoText> IntoElement for Text<T> {
+impl<T: IntoText> IntoElement for TextBuilder<T> {
     fn into_element(self) -> Element {
         text(self.content)
     }
 }
 
-/// `element!` `image` builder. [`open`](Image::open) has no pixels yet, so only [`Image::content`]
-/// implements [`IntoElement`].
-pub struct Image<T> {
+/// `element!` `image` builder. [`open`](ImageBuilder::open) has no pixels yet, so only
+/// [`ImageBuilder::content`] implements [`IntoElement`].
+#[doc(hidden)]
+pub struct ImageBuilder<T> {
     content: T,
     fit: ObjectFit,
 }
 
-impl Image<()> {
+impl ImageBuilder<()> {
     #[must_use]
     pub fn open(_cx: &crate::Context) -> Self {
         Self {
@@ -884,10 +888,10 @@ impl Image<()> {
     }
 }
 
-impl<T> Image<T> {
+impl<T> ImageBuilder<T> {
     #[must_use]
-    pub fn content<U>(self, content: U) -> Image<U> {
-        Image {
+    pub fn content<U>(self, content: U) -> ImageBuilder<U> {
+        ImageBuilder {
             content,
             fit: self.fit,
         }
@@ -900,14 +904,16 @@ impl<T> Image<T> {
     }
 }
 
-impl<T: Into<ImageSource>> IntoElement for Image<T> {
+impl<T: Into<ImageSource>> IntoElement for ImageBuilder<T> {
     fn into_element(self) -> Element {
         image(self.content).fit(self.fit)
     }
 }
 
-/// `element!` `input` builder. [`Input::open`] starts empty; [`Input::value`] replaces that.
-pub struct Input<T> {
+/// `element!` `input` builder. [`InputBuilder::open`] starts empty; [`InputBuilder::value`]
+/// replaces that.
+#[doc(hidden)]
+pub struct InputBuilder<T> {
     value: T,
     placeholder: String,
     on_input: Option<InputHandler>,
@@ -915,7 +921,7 @@ pub struct Input<T> {
     disabled: bool,
 }
 
-impl Input<()> {
+impl InputBuilder<()> {
     #[must_use]
     pub fn open(_cx: &crate::Context) -> Self {
         Self {
@@ -928,10 +934,10 @@ impl Input<()> {
     }
 }
 
-impl<T> Input<T> {
+impl<T> InputBuilder<T> {
     #[must_use]
-    pub fn value<U>(self, value: U) -> Input<U> {
-        Input {
+    pub fn value<U>(self, value: U) -> InputBuilder<U> {
+        InputBuilder {
             value,
             placeholder: self.placeholder,
             on_input: self.on_input,
@@ -965,13 +971,13 @@ impl<T> Input<T> {
     }
 }
 
-impl IntoElement for Input<()> {
+impl IntoElement for InputBuilder<()> {
     fn into_element(self) -> Element {
         finish_input(self, String::new())
     }
 }
 
-impl<T: IntoInputValue> IntoElement for Input<T> {
+impl<T: IntoInputValue> IntoElement for InputBuilder<T> {
     fn into_element(self) -> Element {
         let value = self.value.into_input_value();
         let mut element = input();
@@ -987,7 +993,7 @@ impl<T: IntoInputValue> IntoElement for Input<T> {
     }
 }
 
-fn finish_input(builder: Input<()>, value: String) -> Element {
+fn finish_input(builder: InputBuilder<()>, value: String) -> Element {
     let mut element = input().value(value);
     apply_input_fields(
         &mut element,
@@ -1079,7 +1085,7 @@ mod tests {
 
     #[test]
     fn container_into_element_is_not_a_slot_boundary() {
-        let element = Container::open(&crate::Application::new().context()).into_element();
+        let element = DivBuilder::open(&crate::Application::new().context()).into_element();
         assert_eq!(element.slot_owner, 0);
     }
 

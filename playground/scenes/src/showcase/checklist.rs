@@ -38,10 +38,10 @@ impl Component for ChecklistTab {
         );
         let next_id = reactive((TASKS.len() + EXTRA_TASKS) as u64);
         element! {
-            Container(class = [ThemeClass::Card, Class::Grow]) {
-                Container(class = ThemeClass::Row) {
-                    Text("Phase 1 checklist", class = ThemeClass::Subtitle)
-                    Container(class = ThemeClass::Btn, key = "add-task", on_click = move |_| {
+            div(class = [ThemeClass::Card, Class::Grow]) {
+                div(class = ThemeClass::Row) {
+                    text("Phase 1 checklist", class = ThemeClass::Subtitle)
+                    div(class = ThemeClass::Btn, key = "add-task", on_click = move |_| {
                         let id = next_id.get();
                         next_id.update(|value| *value += 1);
                         tasks.update(|list| {
@@ -51,13 +51,13 @@ impl Component for ChecklistTab {
                             });
                         });
                     }) {
-                        Text("Add")
+                        text("Add")
                     }
                 }
-                Text("show keeps its count while hidden. if starts over.", class = ThemeClass::Muted),
+                text("show keeps its count while hidden. if starts over.", class = ThemeClass::Muted),
                 { show_row() }
                 { branch_row() }
-                Container(class = Class::ScrollList, key = "tasks") {
+                div(class = Class::ScrollList, key = "tasks") {
                     for (task in :tasks, key = task.id) {
                         { task_row(tasks, reactive(task)) }
                     }
@@ -71,9 +71,9 @@ impl Component for ChecklistTab {
 fn show_row() -> Element {
     let open = reactive(true);
     element! {
-        Container(class = ThemeClass::Row) {
-            Container(class = ThemeClass::Btn, key = "show-toggle", on_click = move |_| open.update(|value| *value = !*value)) {
-                Text(:if open.get() { "Hide kept" } else { "Show kept" }.to_owned())
+        div(class = ThemeClass::Row) {
+            div(class = ThemeClass::Btn, key = "show-toggle", on_click = move |_| open.update(|value| *value = !*value)) {
+                text(:if open.get() { "Hide kept" } else { "Show kept" }.to_owned())
             }
             show (:open.get()) {
                 { kept_count() }
@@ -85,10 +85,10 @@ fn show_row() -> Element {
 fn kept_count() -> Element {
     let count = reactive(0i64);
     element! {
-        Container(class = ThemeClass::Row, key = "kept-count") {
-            Text(:format!("Kept: {}", count), key = "show-count")
-            Container(class = ThemeClass::Btn, key = "show-increment", on_click = move |_| count.update(|value| *value += 1)) {
-                Text("+1")
+        div(class = ThemeClass::Row, key = "kept-count") {
+            text(:format!("Kept: {}", count), key = "show-count")
+            div(class = ThemeClass::Btn, key = "show-increment", on_click = move |_| count.update(|value| *value += 1)) {
+                text("+1")
             }
         }
     }
@@ -98,9 +98,9 @@ fn kept_count() -> Element {
 fn branch_row() -> Element {
     let sent = reactive(false);
     element! {
-        Container(class = ThemeClass::Row) {
-            Container(class = ThemeClass::Btn, key = "branch-toggle", on_click = move |_| sent.update(|value| *value = !*value)) {
-                Text(:if sent.get() { "To draft" } else { "To sent" }.to_owned())
+        div(class = ThemeClass::Row) {
+            div(class = ThemeClass::Btn, key = "branch-toggle", on_click = move |_| sent.update(|value| *value = !*value)) {
+                text(:if sent.get() { "To draft" } else { "To sent" }.to_owned())
             }
             if (:sent.get()) {
                 { branch_count("Sent") }
@@ -114,10 +114,10 @@ fn branch_row() -> Element {
 fn branch_count(name: &'static str) -> Element {
     let count = reactive(0i64);
     element! {
-        Container(class = ThemeClass::Row, key = "branch") {
-            Text(:format!("{name}: {}", count), key = "branch-count")
-            Container(class = ThemeClass::Btn, key = "branch-increment", on_click = move |_| count.update(|value| *value += 1)) {
-                Text("+1")
+        div(class = ThemeClass::Row, key = "branch") {
+            text(:format!("{name}: {}", count), key = "branch-count")
+            div(class = ThemeClass::Btn, key = "branch-increment", on_click = move |_| count.update(|value| *value += 1)) {
+                text("+1")
             }
         }
     }
@@ -127,16 +127,16 @@ fn task_row(tasks: Reactive<Vec<Task>>, task: Reactive<Task>) -> Element {
     let done = reactive(false);
     let id = task.with(|row| row.id);
     element! {
-        Container(class = ThemeClass::Row, key = format!("task-{id}"), on_click = move |_| done.update(|value| *value = !*value)) {
-            Container(class = ThemeClass::Badge, :class = class_when(done.get(), Class::BadgeDone)) {
-                Text(:if done.get() { "done" } else { "todo" }.to_owned())
+        div(class = ThemeClass::Row, key = format!("task-{id}"), on_click = move |_| done.update(|value| *value = !*value)) {
+            div(class = ThemeClass::Badge, :class = class_when(done.get(), Class::BadgeDone)) {
+                text(:if done.get() { "done" } else { "todo" }.to_owned())
             }
-            Text(
+            text(
                 :task.with(|row| row.title.clone()),
                 :class = class_when(done.get(), Class::TaskDone),
                 key = format!("task-title-{id}"),
             ),
-            Container(class = ThemeClass::Btn, key = format!("task-up-{id}"), on_click = move |_| {
+            div(class = ThemeClass::Btn, key = format!("task-up-{id}"), on_click = move |_| {
                 tasks.update(|list| {
                     let Some(index) = list.iter().position(|row| row.id == id) else {
                         return;
@@ -146,12 +146,12 @@ fn task_row(tasks: Reactive<Vec<Task>>, task: Reactive<Task>) -> Element {
                     }
                 });
             }) {
-                Text("Up")
+                text("Up")
             }
-            Container(class = ThemeClass::Btn, key = format!("task-drop-{id}"), on_click = move |_| {
+            div(class = ThemeClass::Btn, key = format!("task-drop-{id}"), on_click = move |_| {
                 tasks.update(|list| list.retain(|row| row.id != id));
             }) {
-                Text("Drop")
+                text("Drop")
             }
         }
     }

@@ -34,9 +34,8 @@ pub use cappy_macros::{slot_self, ui_closure, ui_for_view, ui_view};
 ///
 /// Nodes:
 /// - `Name(field = value, ...) { children }` builds `Name::open(&context)` and sets fields.
-///   `div`, `text` and `image` are the same path, opening [`Container`](cappy_core::Container),
-///   [`Text`](cappy_core::Text) and [`Image`](cappy_core::Image). Writing those type names opens
-///   the same builders. `element! { div() }` opens them with
+///   `div`, `text`, `image` and `input` are that path for the built-in nodes. `element! { div() }`
+///   opens them with
 ///   [`Context::current`](cappy_core::Context::current). `element!((context) { div() })` opens them
 ///   with that binding. A leading value is `content`, so
 ///   `text("Title")` calls `.content("Title")`. `class`, `style` and `key` are applied to the
@@ -151,39 +150,28 @@ macro_rules! __ui_node {
     };
 }
 
-/// Calls `Type::open`. `Text` and `Image` stay value paths so their type parameter can be inferred.
+/// Calls `Type::open`. `div`, `text`, `image` and `input` open the built-in builders. The value
+/// parameter is inferred from `content` or `value`.
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __ui_open {
     (@cx $cx:ident ; div) => {
-        $crate::__private::Container::open(&$cx)
+        $crate::__private::DivBuilder::open(&$cx)
     };
     (@cx $cx:ident ; text) => {
-        $crate::__private::Text::open(&$cx)
+        $crate::__private::TextBuilder::open(&$cx)
     };
     (@cx $cx:ident ; image) => {
-        $crate::__private::Image::open(&$cx)
+        $crate::__private::ImageBuilder::open(&$cx)
     };
     (@cx $cx:ident ; input) => {
-        $crate::__private::Input::open(&$cx)
+        $crate::__private::InputBuilder::open(&$cx)
     };
     (@cx $cx:ident ; $type:ident $(:: $segment:ident)+) => {
         <$type $(:: $segment)*>::open(&$cx)
     };
     (@cx $cx:ident ; $type:ident) => {
         $crate::__ui_open!(@name @cx $cx ; $type ; $type)
-    };
-    (@name @cx $cx:ident ; Container ; $name:ident) => {
-        $name::open(&$cx)
-    };
-    (@name @cx $cx:ident ; Text ; $name:ident) => {
-        $name::open(&$cx)
-    };
-    (@name @cx $cx:ident ; Image ; $name:ident) => {
-        $name::open(&$cx)
-    };
-    (@name @cx $cx:ident ; Input ; $name:ident) => {
-        $name::open(&$cx)
     };
     (@name @cx $cx:ident ; $other:ident ; $name:ident) => {
         <$name>::open(&$cx)
@@ -195,16 +183,16 @@ macro_rules! __ui_open {
 #[macro_export]
 macro_rules! __ui_type_path {
     (div) => {
-        $crate::__private::Container
+        $crate::__private::DivBuilder
     };
     (text) => {
-        $crate::__private::Text
+        $crate::__private::TextBuilder
     };
     (image) => {
-        $crate::__private::Image
+        $crate::__private::ImageBuilder
     };
     (input) => {
-        $crate::__private::Input
+        $crate::__private::InputBuilder
     };
     ($type:ident $(:: $segment:ident)*) => {
         $type $(:: $segment)*

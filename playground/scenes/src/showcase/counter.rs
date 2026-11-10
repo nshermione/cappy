@@ -18,31 +18,31 @@ impl Component for CounterTab {
         let local = use_local_store(Counter);
         let name = reactive(String::new());
         element! {
-            Container(class = [ThemeClass::Card, Class::Grow]) {
-                Text("Counter", class = ThemeClass::Subtitle)
-                Text(:format!("Count: {}", shared.count), key = "count", class = Class::Count)
-                Text(:format!("Count: {}", mirror.count), key = "count-mirror", class = ThemeClass::Muted)
-                Text(:format!("Local: {}", local.count), key = "count-local", class = ThemeClass::Muted)
-                Container(class = ThemeClass::Row) {
-                    Container(class = ThemeClass::Btn, key = "decrement", on_click = move |_| shared.decrement()) {
-                        Text("-1")
+            div(class = [ThemeClass::Card, Class::Grow]) {
+                text("Counter", class = ThemeClass::Subtitle)
+                text(:format!("Count: {}", shared.count), key = "count", class = Class::Count)
+                text(:format!("Count: {}", mirror.count), key = "count-mirror", class = ThemeClass::Muted)
+                text(:format!("Local: {}", local.count), key = "count-local", class = ThemeClass::Muted)
+                div(class = ThemeClass::Row) {
+                    div(class = ThemeClass::Btn, key = "decrement", on_click = move |_| shared.decrement()) {
+                        text("-1")
                     }
-                    Container(class = [ThemeClass::Btn, ThemeClass::BtnPrimary], key = "increment", on_click = move |_| shared.increment()) {
-                        Text("+1")
+                    div(class = [ThemeClass::Btn, ThemeClass::BtnPrimary], key = "increment", on_click = move |_| shared.increment()) {
+                        text("+1")
                     }
-                    Container(class = ThemeClass::Btn, key = "reset", on_click = move |_| shared.reset()) {
-                        Text("Reset")
+                    div(class = ThemeClass::Btn, key = "reset", on_click = move |_| shared.reset()) {
+                        text("Reset")
                     }
-                    Container(class = ThemeClass::Btn, key = "local-increment", on_click = move |_| local.increment()) {
-                        Text("Local +1")
+                    div(class = ThemeClass::Btn, key = "local-increment", on_click = move |_| local.increment()) {
+                        text("Local +1")
                     }
                 }
-                Input(:value = name, placeholder = "Name", key = "name", class = Class::Field)
-                Text(:value = name, key = "name-echo", class = ThemeClass::Muted)
-                Text("The badge shares this counter. Its hits stay on the badge.", class = ThemeClass::Muted)
+                input(:value = name, placeholder = "Name", key = "name", class = Class::Field)
+                text(:value = name, key = "name-echo", class = ThemeClass::Muted)
+                text("The badge shares this counter. Its hits stay on the badge.", class = ThemeClass::Muted)
                 Badge(label = "Badge", key = "counter-badge") {
-                    Text("•", key = "badge-mark", slot = icon)
-                    Text("end", key = "badge-tail", slot = tail)
+                    text("•", key = "badge-mark", slot = icon)
+                    text("end", key = "badge-tail", slot = tail)
                 }
             }
         }

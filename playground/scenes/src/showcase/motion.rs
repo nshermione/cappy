@@ -68,31 +68,31 @@ impl Component for MotionTab {
         let tracks = ease_section();
         let playback = playback_row(cx.clone(), self.sequence, self.parallel);
         element! {
-            Container(class = [ThemeClass::Card, Class::Grow]) {
-                Text("Motion", class = ThemeClass::Subtitle)
-                Text(
+            div(class = [ThemeClass::Card, Class::Grow]) {
+                text("Motion", class = ThemeClass::Subtitle)
+                text(
                     "Loops run on their own. Fade and Slide are one shot. Sequence and Parallel replay from the start.",
                     class = ThemeClass::Muted,
                 )
-                Container(class = Class::ScrollList, key = "motion-scroll") {
-                    Container(class = Class::MotionRow) {
+                div(class = Class::ScrollList, key = "motion-scroll") {
+                    div(class = Class::MotionRow) {
                         { opacity_card(cx.clone(), self.faded) }
                         { slide_card(cx, self.shifted) }
                     }
                     { playback }
-                    Container(class = Class::MotionRow) {
+                    div(class = Class::MotionRow) {
                         { swatch(Class::MotionColor, "motion-color", "color", false) }
                         { swatch(Class::MotionScale, "motion-scale", "scale", false) }
                         { swatch(Class::MotionSpin, "motion-spin", "spin", true) }
                         { swatch(Class::MotionTravel, "motion-shake", "shake", false) }
                         { swatch(Class::MotionTravel, "motion-fly", "fly", false) }
                     }
-                    Text("Easing", class = ThemeClass::Subtitle)
-                    Text(
+                    text("Easing", class = ThemeClass::Subtitle)
+                    text(
                         "Left to right is one cycle, right to left is the next. Both use the same duration.",
                         class = ThemeClass::Muted,
                     )
-                    Container(class = Class::MotionEases) {
+                    div(class = Class::MotionEases) {
                         { tracks }
                     }
                 }
@@ -161,27 +161,27 @@ fn play(ui: &mut MotionCtx, key: &str, motion: Motion) {
 
 fn swatch(class: Class, key: &'static str, label: &'static str, pip: bool) -> Element {
     let mark = if pip {
-        element! { Container(class = Class::MotionPip) }
+        element! { div(class = Class::MotionPip) }
     } else {
-        element! { Text(label) }
+        element! { text(label) }
     };
     element! {
-        Container(class = Class::Specimen) {
-            Container(class = class, key = key) {
+        div(class = Class::Specimen) {
+            div(class = class, key = key) {
                 { mark }
             }
-            Text(label, class = ThemeClass::Muted)
+            text(label, class = ThemeClass::Muted)
         }
     }
 }
 
 fn opacity_card(cx: Context, faded: Reactive<bool>) -> Element {
     element! {
-        Container(class = Class::Specimen) {
-            Container(class = Class::MotionOpacity, key = "motion-opacity") {
-                Text("opacity")
+        div(class = Class::Specimen) {
+            div(class = Class::MotionOpacity, key = "motion-opacity") {
+                text("opacity")
             }
-            Container(
+            div(
                 class = ThemeClass::Btn,
                 key = "motion-fade",
                 on_click = move |_| {
@@ -199,7 +199,7 @@ fn opacity_card(cx: Context, faded: Reactive<bool>) -> Element {
                     });
                 },
             ) {
-                Text("Fade")
+                text("Fade")
             }
         }
     }
@@ -207,11 +207,11 @@ fn opacity_card(cx: Context, faded: Reactive<bool>) -> Element {
 
 fn slide_card(cx: Context, shifted: Reactive<bool>) -> Element {
     element! {
-        Container(class = Class::Specimen) {
-            Container(class = Class::MotionSlide, key = "motion-slide") {
-                Text("transform")
+        div(class = Class::Specimen) {
+            div(class = Class::MotionSlide, key = "motion-slide") {
+                text("transform")
             }
-            Container(
+            div(
                 class = ThemeClass::Btn,
                 key = "motion-shift",
                 on_click = move |_| {
@@ -229,7 +229,7 @@ fn slide_card(cx: Context, shifted: Reactive<bool>) -> Element {
                     });
                 },
             ) {
-                Text("Slide")
+                text("Slide")
             }
         }
     }
@@ -242,7 +242,7 @@ fn playback_row(
 ) -> Element {
     let parallel_cx = cx.clone();
     element! {
-        Container(class = Class::MotionRow) {
+        div(class = Class::MotionRow) {
             { sequence_card(cx, sequence) }
             { parallel_card(parallel_cx, parallel) }
         }
@@ -251,16 +251,16 @@ fn playback_row(
 
 fn sequence_card(cx: Context, running: Reactive<Option<AnimHandle>>) -> Element {
     element! {
-        Container(class = Class::Specimen) {
-            Container(class = Class::MotionPlay, key = "motion-sequence-box") {
-                Text("then")
+        div(class = Class::Specimen) {
+            div(class = Class::MotionPlay, key = "motion-sequence-box") {
+                text("then")
             }
-            Container(
+            div(
                 class = ThemeClass::Btn,
                 key = "motion-sequence",
                 on_click = move |_| replay(cx.clone(), running, sequence_clip),
             ) {
-                Text("Sequence")
+                text("Sequence")
             }
         }
     }
@@ -268,16 +268,16 @@ fn sequence_card(cx: Context, running: Reactive<Option<AnimHandle>>) -> Element 
 
 fn parallel_card(cx: Context, running: Reactive<Option<AnimHandle>>) -> Element {
     element! {
-        Container(class = Class::Specimen) {
-            Container(class = Class::MotionPlay, key = "motion-parallel-box") {
-                Text("both")
+        div(class = Class::Specimen) {
+            div(class = Class::MotionPlay, key = "motion-parallel-box") {
+                text("both")
             }
-            Container(
+            div(
                 class = ThemeClass::Btn,
                 key = "motion-parallel",
                 on_click = move |_| replay(cx.clone(), running, parallel_clip),
             ) {
-                Text("Parallel")
+                text("Parallel")
             }
         }
     }
@@ -354,12 +354,12 @@ fn ease_section() -> Element {
 fn ease_track(row: EaseRow) -> Element {
     let key = row.key;
     element! {
-        Container(class = ThemeClass::Row) {
-            Container(class = Class::EaseName) {
-                Text(row.label, class = ThemeClass::Muted)
+        div(class = ThemeClass::Row) {
+            div(class = Class::EaseName) {
+                text(row.label, class = ThemeClass::Muted)
             }
-            Container(class = Class::EaseTrack) {
-                Container(class = Class::EaseDot, key = key)
+            div(class = Class::EaseTrack) {
+                div(class = Class::EaseDot, key = key)
             }
         }
     }

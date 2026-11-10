@@ -18,21 +18,21 @@ impl Component for PaintTab {
         let pixels = landscape();
         let lifted = self.lifted;
         element! {
-            Container(class = [ThemeClass::Card, Class::Grow]) {
-                Text("Paint", class = ThemeClass::Subtitle)
-                Text("Two-stop gradients, one drop shadow, and a fitted image.", class = ThemeClass::Muted)
-                Container(class = ThemeClass::Row) {
+            div(class = [ThemeClass::Card, Class::Grow]) {
+                text("Paint", class = ThemeClass::Subtitle)
+                text("Two-stop gradients, one drop shadow, and a fitted image.", class = ThemeClass::Muted)
+                div(class = ThemeClass::Row) {
                     { specimen(Class::GradientRight, "Right", "gradient-right") }
                     { specimen(Class::GradientDown, "Down", "gradient-down") }
                     { specimen(Class::GradientLeft, "Left", "gradient-left") }
                 }
-                Container(class = ThemeClass::Row) {
+                div(class = ThemeClass::Row) {
                     { specimen(Class::ShadowSoft, "Soft", "shadow-soft") }
                     { liftable(lifted) }
                     { specimen(Class::ShadowHard, "Hard", "shadow-hard") }
                     { specimen(Class::ShadowGlow, "Glow", "shadow-glow") }
                 }
-                Container(class = ThemeClass::Row) {
+                div(class = ThemeClass::Row) {
                     { picture("Contain", ObjectFit::Contain, pixels.clone(), "picture-contain") }
                     { picture("Cover", ObjectFit::Cover, pixels.clone(), "picture-cover") }
                     { picture("Fill", ObjectFit::Fill, pixels, "picture-fill") }
@@ -44,17 +44,17 @@ impl Component for PaintTab {
 
 fn specimen(class: Class, caption: &'static str, key: &'static str) -> Element {
     element! {
-        Container(class = Class::Specimen) {
-            Container(class = class, key = key)
-            Text(caption, class = ThemeClass::Muted)
+        div(class = Class::Specimen) {
+            div(class = class, key = key)
+            text(caption, class = ThemeClass::Muted)
         }
     }
 }
 
 fn liftable(lifted: Reactive<bool>) -> Element {
     element! {
-        Container(class = Class::Specimen) {
-            Container(
+        div(class = Class::Specimen) {
+            div(
                 class = Class::ShadowCard,
                 key = "shadow-card",
                 :style = style! {
@@ -67,14 +67,14 @@ fn liftable(lifted: Reactive<bool>) -> Element {
                     )
                 },
             ) {
-                Text(:if lifted.get() { "Lifted" } else { "Resting" }.to_owned(), key = "shadow-state")
+                text(:if lifted.get() { "Lifted" } else { "Resting" }.to_owned(), key = "shadow-state")
             }
-            Container(
+            div(
                 class = ThemeClass::Btn,
                 key = "shadow-toggle",
                 on_click = move |_| lifted.update(|value| *value = !*value),
             ) {
-                Text("Lift")
+                text("Lift")
             }
         }
     }
@@ -87,9 +87,9 @@ fn picture(
     key: &'static str,
 ) -> Element {
     element! {
-        Container(class = Class::Specimen) {
-            Image(pixels, fit = fit, class = Class::Picture, key = key)
-            Text(caption, class = ThemeClass::Muted)
+        div(class = Class::Specimen) {
+            image(pixels, fit = fit, class = Class::Picture, key = key)
+            text(caption, class = ThemeClass::Muted)
         }
     }
 }

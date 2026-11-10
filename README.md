@@ -275,7 +275,7 @@ let tree = element!((cx) {
 });
 ```
 
-- `div`, `text` and `image` open `Container`, `Text` and `Image`. A leading value is content, so `text("Title")` calls `.content("Title")`.
+- `div`, `text`, `image` and `input` are the built-in nodes. A leading value is content, so `text("Title")` calls `.content("Title")`.
 - A leading `:` makes the value reactive: `:format!(...)` becomes a `Dynamic` that reruns when a signal it read changes. `self.field` inside that expression is copied out before the closure.
 - `class = [a, b]` is shorthand for two `class` setters. Items can mix strings and typed class names.
 - `show (:cond) { ... }` keeps its nodes and hides them while `cond` is false.
@@ -341,9 +341,9 @@ impl Component for Badge {
     fn render(&self) -> Element {
         let counter = use_store(Counter);
         element! {
-            Container(class = Class::Root, on_click = on(Self::press)) {
+            div(class = Class::Root, on_click = on(Self::press)) {
                 slot(icon)
-                Text(:format!("{} ({})", self.label, self.hits), key = "badge-label")
+                text(:format!("{} ({})", self.label, self.hits), key = "badge-label")
                 slot(tail)
             }
         }
