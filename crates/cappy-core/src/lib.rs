@@ -41,15 +41,15 @@ pub use element::{
 #[doc(hidden)]
 pub use element::{DivBuilder, ImageBuilder, InputBuilder, TextBuilder};
 pub use event::{
-    ButtonState, ClickEvent, CursorIcon, ImeEvent, InputEvent, Key, KeyEvent, Modifiers,
-    PointerButton, PointerEvent, PointerPhase,
+    ButtonState, ClickEvent, ImeEvent, InputEvent, Key, KeyEvent, Modifiers, PointerButton,
+    PointerEvent, PointerPhase,
 };
 pub use image_source::ImageSource;
 pub use listener::Listener;
 pub use paint::{
     ImagePlacement, ImagePrimitive, Primitive, QuadPrimitive, RenderFrame, ShadowPrimitive, Spin,
-    TextPrimitive, image_placement, paint_bounds, rounded_box_distance, scale_about, spun_aabb,
-    unspin_point,
+    TextPrimitive, image_placement, paint_bounds, rounded_box_distance,
+    rounded_box_distance_corners, scale_about, spun_aabb, unspin_point,
 };
 pub use prop::{ByHandle, ByValue, PropInput};
 pub use reactive::{IntoReactive, Reactive, RetirePlaceholder, Signal};

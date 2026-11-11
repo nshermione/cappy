@@ -149,6 +149,8 @@ pub struct Ui {
     /// Instant of the previous [`Ui::update`], used to ease scroll offsets.
     updated_at: Option<Instant>,
     pointer: Option<Point>,
+    /// `pointer-events` changed. The next update rebuilds the hit path without a pointer move.
+    pointer_stale: bool,
     hovered: Vec<NodeId>,
     pressed: Option<NodeId>,
     /// Thumb or track drag. The offset follows the pointer until the button is released.
@@ -232,6 +234,7 @@ impl Ui {
             paint_dirty: true,
             updated_at: None,
             pointer: None,
+            pointer_stale: false,
             hovered: Vec::new(),
             pressed: None,
             scrollbar_drag: None,
@@ -373,9 +376,11 @@ impl Ui {
         self.process_bindings();
         self.drain_scroll_writes();
         self.resolve_styles();
+        self.refresh_pointer_target();
         self.run_layout();
         // Hover changes caused by layout can restyle nodes again.
         self.resolve_styles();
+        self.refresh_pointer_target();
         self.run_layout();
         self.settle_roving_enter();
         self.drain_motions();
@@ -414,29 +419,32 @@ impl Ui {
         })
     }
 
+    /// Rebuilds hover after `pointer-events` changes, without waiting for the pointer to move.
+    fn refresh_pointer_target(&mut self) {
+        if !std::mem::take(&mut self.pointer_stale) || self.pointer.is_none() {
+            return;
+        }
+        self.refresh_hover();
+    }
+
     pub fn cursor(&self) -> CursorIcon {
-        let mut pointer = false;
-        let mut text = false;
-        for id in &self.hovered {
+        for id in self.hovered.iter().rev() {
             if !self.is_current(*id) {
                 continue;
             }
             let node = &self.nodes[id.index()];
+            if let Some(cursor) = node.style.cursor {
+                return cursor;
+            }
             let input = matches!(node.content, NodeContent::Input(_));
-            if input || (node.is_text() && node.caret.is_some()) {
-                text = true;
-            }
             if node.on_click.is_some() && !input && !node.disabled {
-                pointer = true;
+                return CursorIcon::Pointer;
+            }
+            if input || (node.is_text() && node.caret.is_some()) {
+                return CursorIcon::Text;
             }
         }
-        if pointer {
-            CursorIcon::Pointer
-        } else if text {
-            CursorIcon::Text
-        } else {
-            CursorIcon::Default
-        }
+        CursorIcon::Default
     }
 
     pub fn root(&self) -> NodeId {

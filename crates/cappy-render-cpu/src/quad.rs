@@ -2,9 +2,10 @@
 //! background fills the whole shape and the border is painted over it as a ring.
 
 use cappy_core::rounded_box_distance;
+use cappy_core::rounded_box_distance_corners;
 use cappy_core::{
-    Background, BoxShadow, Color, Point, QuadPrimitive, Rect, ShadowPrimitive, Spin, spun_aabb,
-    unspin_point,
+    Background, BoxShadow, Color, Corners, Edges, Point, QuadPrimitive, Rect, ShadowPrimitive,
+    Spin, spun_aabb, unspin_point,
 };
 use tiny_skia::{
     FillRule, GradientStop, LinearGradient, Mask, Paint, Path, PathBuilder, PixmapMut, SpreadMode,
@@ -24,11 +25,15 @@ pub(crate) fn paint_quad(
     scale_factor: f32,
     origin: (f32, f32),
 ) {
+    if !(quad.border_width.is_uniform() && quad.corner_radius.is_uniform()) {
+        paint_edged_quad(target, quad, scale_factor, origin);
+        return;
+    }
     let rect = quad.rect.scale(scale_factor);
     if rect.is_empty() {
         return;
     }
-    let radius = (quad.corner_radius * scale_factor)
+    let radius = (quad.corner_radius.top_left * scale_factor)
         .min(rect.width / 2.0)
         .min(rect.height / 2.0)
         .max(0.0);
@@ -57,7 +62,7 @@ pub(crate) fn paint_quad(
         );
     }
 
-    let border_width = quad.border_width * scale_factor;
+    let border_width = quad.border_width.top * scale_factor;
     if border_width > 0.0
         && !quad.border_color.is_transparent()
         && let Some(ring) = border_ring_path(rect, radius, border_width)
@@ -85,10 +90,12 @@ pub(crate) fn paint_shadow(
         return;
     }
     let blur = shadow.blur * scale_factor;
-    let radius = (shadow.corner_radius * scale_factor)
+    let uniform_radius = shadow.corner_radius.is_uniform();
+    let radius = (shadow.corner_radius.top_left * scale_factor)
         .min(shape.width / 2.0)
         .min(shape.height / 2.0)
         .max(0.0);
+    let corner_radii = shadow.corner_radius.scaled(scale_factor);
     let extent = BoxShadow {
         blur,
         ..BoxShadow::NONE
@@ -137,13 +144,23 @@ pub(crate) fn paint_shadow(
                     unspin_point(Point::new(world_x, world_y), spin.pivot, 1.0, spin.radians);
                 (local.x, local.y)
             };
-            let distance = rounded_box_distance(
-                sample_x - center_x,
-                sample_y - center_y,
-                half_width,
-                half_height,
-                radius,
-            );
+            let distance = if uniform_radius {
+                rounded_box_distance(
+                    sample_x - center_x,
+                    sample_y - center_y,
+                    half_width,
+                    half_height,
+                    radius,
+                )
+            } else {
+                rounded_box_distance_corners(
+                    sample_x - center_x,
+                    sample_y - center_y,
+                    half_width,
+                    half_height,
+                    corner_radii,
+                )
+            };
             let coverage = BoxShadow::coverage(distance, blur);
             if coverage <= 0.0 {
                 continue;
@@ -313,6 +330,161 @@ fn push_rounded_rect(builder: &mut PathBuilder, rect: Rect, radius: f32) {
     builder.close();
 }
 
+/// A box whose edges or corners differ. Uniform boxes stay on [`paint_quad`]'s original path.
+fn paint_edged_quad(
+    target: &mut PixmapMut<'_>,
+    quad: &QuadPrimitive,
+    scale_factor: f32,
+    origin: (f32, f32),
+) {
+    let rect = quad.rect.scale(scale_factor);
+    if rect.is_empty() {
+        return;
+    }
+    let borders = quad.border_width.scaled(scale_factor);
+    let radii = clamp_corners(
+        quad.corner_radius.scaled(scale_factor),
+        rect.width,
+        rect.height,
+    );
+    let mut transform = Transform::from_translate(-origin.0, -origin.1);
+    if !quad.spin.is_none() {
+        transform = transform.pre_concat(Transform::from_rotate_at(
+            quad.spin.radians.to_degrees(),
+            quad.spin.pivot.x * scale_factor,
+            quad.spin.pivot.y * scale_factor,
+        ));
+    }
+    let mask = quad
+        .clip
+        .and_then(|clip| clip_mask(target, clip, scale_factor, origin));
+    if !quad.background.is_transparent()
+        && let Some(path) = corner_path(rect, radii)
+    {
+        fill_background(
+            target,
+            &path,
+            quad.background,
+            rect,
+            transform,
+            mask.as_ref(),
+        );
+    }
+    if borders.any_positive()
+        && !quad.border_color.is_transparent()
+        && let Some(ring) = edge_ring(rect, radii, borders)
+    {
+        fill(
+            target,
+            &ring,
+            quad.border_color,
+            FillRule::EvenOdd,
+            transform,
+            mask.as_ref(),
+        );
+    }
+}
+
+fn clamp_corners(corners: Corners, width: f32, height: f32) -> Corners {
+    let limit = (width * 0.5).min(height * 0.5).max(0.0);
+    Corners {
+        top_left: corners.top_left.clamp(0.0, limit),
+        top_right: corners.top_right.clamp(0.0, limit),
+        bottom_right: corners.bottom_right.clamp(0.0, limit),
+        bottom_left: corners.bottom_left.clamp(0.0, limit),
+    }
+}
+
+fn corner_path(rect: Rect, corners: Corners) -> Option<Path> {
+    let mut builder = PathBuilder::new();
+    push_corner_rect(&mut builder, rect, corners);
+    builder.finish()
+}
+
+fn edge_ring(rect: Rect, radii: Corners, border: Edges) -> Option<Path> {
+    let border = Edges {
+        top: border.top.max(0.0),
+        right: border.right.max(0.0),
+        bottom: border.bottom.max(0.0),
+        left: border.left.max(0.0),
+    };
+    let mut builder = PathBuilder::new();
+    push_corner_rect(&mut builder, rect, radii);
+    let inner = Rect::new(
+        rect.x + border.left,
+        rect.y + border.top,
+        (rect.width - border.horizontal()).max(0.0),
+        (rect.height - border.vertical()).max(0.0),
+    );
+    if inner.width > 0.0 && inner.height > 0.0 {
+        let inner_radii = clamp_corners(
+            Corners {
+                top_left: (radii.top_left - border.top.max(border.left)).max(0.0),
+                top_right: (radii.top_right - border.top.max(border.right)).max(0.0),
+                bottom_right: (radii.bottom_right - border.bottom.max(border.right)).max(0.0),
+                bottom_left: (radii.bottom_left - border.bottom.max(border.left)).max(0.0),
+            },
+            inner.width,
+            inner.height,
+        );
+        push_corner_rect(&mut builder, inner, inner_radii);
+    }
+    builder.finish()
+}
+
+fn push_corner_rect(builder: &mut PathBuilder, rect: Rect, corners: Corners) {
+    let (left, top, right, bottom) = (rect.x, rect.y, rect.right(), rect.bottom());
+    let (tl, tr, br, bl) = (
+        corners.top_left,
+        corners.top_right,
+        corners.bottom_right,
+        corners.bottom_left,
+    );
+    if tl <= 0.0 && tr <= 0.0 && br <= 0.0 && bl <= 0.0 {
+        if let Some(rect) = tiny_skia::Rect::from_ltrb(left, top, right, bottom) {
+            builder.push_rect(rect);
+        }
+        return;
+    }
+    let control = |radius: f32| radius * (1.0 - CIRCLE_CUBIC_KAPPA);
+    builder.move_to(left + tl, top);
+    builder.line_to(right - tr, top);
+    if tr > 0.0 {
+        let curve = control(tr);
+        builder.cubic_to(right - curve, top, right, top + curve, right, top + tr);
+    }
+    builder.line_to(right, bottom - br);
+    if br > 0.0 {
+        let curve = control(br);
+        builder.cubic_to(
+            right,
+            bottom - curve,
+            right - curve,
+            bottom,
+            right - br,
+            bottom,
+        );
+    }
+    builder.line_to(left + bl, bottom);
+    if bl > 0.0 {
+        let curve = control(bl);
+        builder.cubic_to(
+            left + curve,
+            bottom,
+            left,
+            bottom - curve,
+            left,
+            bottom - bl,
+        );
+    }
+    builder.line_to(left, top + tl);
+    if tl > 0.0 {
+        let curve = control(tl);
+        builder.cubic_to(left, top + curve, left + curve, top, left + tl, top);
+    }
+    builder.close();
+}
+
 #[cfg(test)]
 mod tests {
     use tiny_skia::Pixmap;
@@ -337,8 +509,8 @@ mod tests {
             rect: Rect::new(5.0, 5.0, 30.0, 30.0),
             background: Background::Solid(Color::rgb(0, 0, 255)),
             border_color: Color::rgb(255, 0, 0),
-            border_width: 4.0,
-            corner_radius: radius,
+            border_width: Edges::all(4.0),
+            corner_radius: Corners::all(radius),
             clip: None,
             spin: Spin::NONE,
         }
@@ -399,7 +571,7 @@ mod tests {
         use cappy_core::UnitPoint;
 
         let mut quad = bordered(0.0);
-        quad.border_width = 0.0;
+        quad.border_width = Edges::ZERO;
         quad.background = Background::Linear {
             from: Color::rgb(255, 0, 0),
             to: Color::rgb(0, 0, 255),
@@ -418,7 +590,7 @@ mod tests {
         use cappy_core::UnitPoint;
 
         let mut quad = bordered(0.0);
-        quad.border_width = 0.0;
+        quad.border_width = Edges::ZERO;
         quad.rect = Rect::new(40.0, 20.0, 30.0, 10.0);
         quad.background = Background::Linear {
             from: Color::rgb(255, 0, 0),
@@ -443,7 +615,7 @@ mod tests {
             &mut pixmap.as_mut(),
             &ShadowPrimitive {
                 rect: Rect::new(8.0, 8.0, 16.0, 16.0),
-                corner_radius: 0.0,
+                corner_radius: Corners::ZERO,
                 blur: 0.0,
                 color: Color::rgba(0, 0, 0, 255),
                 clip: None,
@@ -459,7 +631,7 @@ mod tests {
     #[test]
     fn a_quarter_turn_swings_a_wide_bar_upright() {
         let mut quad = bordered(0.0);
-        quad.border_width = 0.0;
+        quad.border_width = Edges::ZERO;
         quad.rect = Rect::new(8.0, 16.0, 24.0, 8.0);
         quad.spin = Spin {
             pivot: Point::new(20.0, 20.0),
@@ -468,5 +640,31 @@ mod tests {
         let pixmap = render(&quad);
         assert_eq!(pixel(&pixmap, 20, 30), [0, 0, 255, 255]);
         assert_eq!(pixel(&pixmap, 10, 20), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn a_top_border_does_not_paint_the_left_edge() {
+        let mut quad = bordered(0.0);
+        quad.border_width = Edges {
+            top: 4.0,
+            ..Edges::ZERO
+        };
+        let pixmap = render(&quad);
+        assert_eq!(pixel(&pixmap, 20, 7), [255, 0, 0, 255]);
+        assert_eq!(pixel(&pixmap, 7, 20), [0, 0, 255, 255]);
+        assert_eq!(pixel(&pixmap, 20, 20), [0, 0, 255, 255]);
+    }
+
+    #[test]
+    fn only_the_top_left_corner_is_rounded() {
+        let mut quad = bordered(0.0);
+        quad.border_width = Edges::ZERO;
+        quad.corner_radius = Corners {
+            top_left: 12.0,
+            ..Corners::ZERO
+        };
+        let pixmap = render(&quad);
+        assert_eq!(pixel(&pixmap, 5, 5), [0, 0, 0, 0]);
+        assert_eq!(pixel(&pixmap, 33, 6), [0, 0, 255, 255]);
     }
 }

@@ -4,7 +4,9 @@ use std::collections::HashMap;
 use std::fmt;
 use std::hash::Hash;
 
-use cappy_style::{Align, Display, Edges, Extent, FlexDirection, Justify, LayoutStyle, Overflow};
+use cappy_style::{
+    Align, Display, Edges, Extent, FlexDirection, Justify, LayoutStyle, Overflow, Position,
+};
 use taffy::prelude::{
     AvailableSpace, Dimension as TaffyDimension, LengthPercentage, LengthPercentageAuto, TaffyAuto,
     TaffyTree,
@@ -427,6 +429,15 @@ fn to_taffy_style(style: &LayoutStyle) -> taffy::Style {
         taffy_style.grid_template_columns =
             taffy::style_helpers::evenly_sized_tracks(style.grid_columns);
     }
+    if style.grid_column_span > 1 {
+        taffy_style.grid_column = taffy::style_helpers::span(style.grid_column_span);
+    }
+    if style.grid_row_span > 1 {
+        taffy_style.grid_row = taffy::style_helpers::span(style.grid_row_span);
+    }
+    if style.position == Position::Sticky {
+        taffy_style.position = taffy::Position::Sticky;
+    }
     taffy_style
 }
 
@@ -715,6 +726,87 @@ mod tests {
         assert_eq!(
             tree.local_rect(2).unwrap(),
             Rect::new(50.0, 0.0, 50.0, 10.0)
+        );
+    }
+
+    #[test]
+    fn a_spanned_item_covers_the_columns_and_the_next_starts_after_them() {
+        let mut tree = LayoutTree::new();
+        let grid = LayoutStyle {
+            display: Display::Grid,
+            grid_columns: 3,
+            width: Extent::Px(90.0),
+            ..LayoutStyle::default()
+        };
+        tree.insert(0, &grid).unwrap();
+        let cell = LayoutStyle {
+            height: Extent::Px(10.0),
+            flex_shrink: 0.0,
+            ..LayoutStyle::default()
+        };
+        let mut wide = cell.clone();
+        wide.grid_column_span = 2;
+        tree.insert(1, &wide).unwrap();
+        tree.insert(2, &cell).unwrap();
+        tree.insert(3, &cell).unwrap();
+        tree.set_children(0, &[1, 2, 3]).unwrap();
+        tree.compute(
+            0,
+            Size::new(90.0, 100.0),
+            &mut ApproximateTextMeasurer::default(),
+        )
+        .unwrap();
+
+        assert_eq!(tree.local_rect(1).unwrap(), Rect::new(0.0, 0.0, 60.0, 10.0));
+        assert_eq!(
+            tree.local_rect(2).unwrap(),
+            Rect::new(60.0, 0.0, 30.0, 10.0)
+        );
+        assert_eq!(
+            tree.local_rect(3).unwrap(),
+            Rect::new(0.0, 10.0, 30.0, 10.0)
+        );
+    }
+
+    #[test]
+    fn a_row_span_is_as_tall_as_the_rows_beside_it() {
+        let mut tree = LayoutTree::new();
+        let grid = LayoutStyle {
+            display: Display::Grid,
+            grid_columns: 2,
+            width: Extent::Px(100.0),
+            ..LayoutStyle::default()
+        };
+        tree.insert(0, &grid).unwrap();
+        let mut tall = LayoutStyle {
+            flex_shrink: 0.0,
+            ..LayoutStyle::default()
+        };
+        tall.grid_row_span = 2;
+        let cell = LayoutStyle {
+            height: Extent::Px(10.0),
+            flex_shrink: 0.0,
+            ..LayoutStyle::default()
+        };
+        tree.insert(1, &tall).unwrap();
+        tree.insert(2, &cell).unwrap();
+        tree.insert(3, &cell).unwrap();
+        tree.set_children(0, &[1, 2, 3]).unwrap();
+        tree.compute(
+            0,
+            Size::new(100.0, 100.0),
+            &mut ApproximateTextMeasurer::default(),
+        )
+        .unwrap();
+
+        assert_eq!(tree.local_rect(1).unwrap(), Rect::new(0.0, 0.0, 50.0, 20.0));
+        assert_eq!(
+            tree.local_rect(2).unwrap(),
+            Rect::new(50.0, 0.0, 50.0, 10.0)
+        );
+        assert_eq!(
+            tree.local_rect(3).unwrap(),
+            Rect::new(50.0, 10.0, 50.0, 10.0)
         );
     }
 

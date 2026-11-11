@@ -62,6 +62,62 @@ pub enum TextAlign {
     End,
 }
 
+/// Cursor the host shows while the pointer is over a node that sets one.
+///
+/// `None` on a resolved style leaves the cursor to click and text. `Resize` is the diagonal
+/// northwest-southeast arrow.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum CursorIcon {
+    #[default]
+    Default,
+    Pointer,
+    /// I-beam over text that can take a caret.
+    Text,
+    /// Diagonal resize arrow.
+    Resize,
+    /// Open hand, for something that can be dragged.
+    Grab,
+    /// The action under the pointer is not available.
+    NotAllowed,
+}
+
+/// Whether a node is a hit target. `None` on a resolved style means the node inherits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum PointerEvents {
+    /// The node is a hit target.
+    #[default]
+    Auto,
+    /// The node is not a hit target. Descendants inherit this until one sets [`Self::Auto`].
+    None,
+}
+
+/// How a box is taken out of the scroll, if at all.
+///
+/// [`Self::Sticky`] stays in normal flow. The runtime shifts it against the nearest scrolling
+/// ancestor. Insets are scroll thresholds, not a layout offset.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Position {
+    #[default]
+    Static,
+    Sticky,
+}
+
+/// Optional per-side offsets. `None` means the side is not set.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub struct Insets {
+    pub top: Option<f32>,
+    pub right: Option<f32>,
+    pub bottom: Option<f32>,
+    pub left: Option<f32>,
+}
+
+impl Insets {
+    /// True when every side is unset.
+    pub const fn is_auto(self) -> bool {
+        self.top.is_none() && self.right.is_none() && self.bottom.is_none() && self.left.is_none()
+    }
+}
+
 /// Extra space on the left of a line that is narrower than `box_width`. A wider line stays at 0
 /// so scrolling, not alignment, keeps the caret in view.
 pub fn align_offset(box_width: f32, line_width: f32, align: TextAlign) -> f32 {
@@ -127,6 +183,85 @@ impl Edges {
     pub fn vertical(&self) -> f32 {
         self.top + self.bottom
     }
+
+    /// True when any side is wider than zero.
+    pub fn any_positive(self) -> bool {
+        self.top > 0.0 || self.right > 0.0 || self.bottom > 0.0 || self.left > 0.0
+    }
+
+    /// True when every side is the same value.
+    pub fn is_uniform(self) -> bool {
+        self.right == self.top && self.bottom == self.top && self.left == self.top
+    }
+
+    /// Scales every side. Used when a transformed box paints.
+    pub fn scaled(self, factor: f32) -> Self {
+        Self {
+            top: self.top * factor,
+            right: self.right * factor,
+            bottom: self.bottom * factor,
+            left: self.left * factor,
+        }
+    }
+}
+
+impl std::ops::MulAssign<f32> for Edges {
+    fn mul_assign(&mut self, factor: f32) {
+        *self = self.scaled(factor);
+    }
+}
+
+/// A radius for each corner, in logical pixels. Order is clockwise from the top left.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub struct Corners {
+    pub top_left: f32,
+    pub top_right: f32,
+    pub bottom_right: f32,
+    pub bottom_left: f32,
+}
+
+impl Corners {
+    pub const ZERO: Self = Self::all(0.0);
+
+    pub const fn all(value: f32) -> Self {
+        Self {
+            top_left: value,
+            top_right: value,
+            bottom_right: value,
+            bottom_left: value,
+        }
+    }
+
+    /// True when every corner is the same value.
+    pub fn is_uniform(self) -> bool {
+        self.top_right == self.top_left
+            && self.bottom_right == self.top_left
+            && self.bottom_left == self.top_left
+    }
+
+    /// The largest corner. Image clipping uses one radius, and a shared `radius` stays that value.
+    pub fn max_radius(self) -> f32 {
+        self.top_left
+            .max(self.top_right)
+            .max(self.bottom_right)
+            .max(self.bottom_left)
+    }
+
+    /// Scales every corner. Used when a transformed box paints.
+    pub fn scaled(self, factor: f32) -> Self {
+        Self {
+            top_left: self.top_left * factor,
+            top_right: self.top_right * factor,
+            bottom_right: self.bottom_right * factor,
+            bottom_left: self.bottom_left * factor,
+        }
+    }
+}
+
+impl std::ops::MulAssign<f32> for Corners {
+    fn mul_assign(&mut self, factor: f32) {
+        *self = self.scaled(factor);
+    }
 }
 
 /// Properties that affect layout.
@@ -150,6 +285,13 @@ pub struct LayoutStyle {
     pub flex_shrink: f32,
     /// Number of equal grid columns when `display` is [`Display::Grid`].
     pub grid_columns: u16,
+    /// How many columns this item covers. `0` and `1` are a single cell.
+    pub grid_column_span: u16,
+    /// How many rows this item covers. `0` and `1` are a single cell.
+    pub grid_row_span: u16,
+    pub position: Position,
+    /// Sticky thresholds. Ignored unless [`Self::position`] is [`Position::Sticky`].
+    pub inset: Insets,
     pub overflow_x: Overflow,
     pub overflow_y: Overflow,
 }
@@ -166,9 +308,14 @@ impl LayoutStyle {
 pub struct VisualStyle {
     pub background: Background,
     pub border_color: Color,
-    pub border_width: f32,
-    pub corner_radius: f32,
+    /// Width of each border edge. A uniform value is the old single width.
+    pub border_width: Edges,
+    /// Radius of each corner. A uniform value is the old single radius.
+    pub corner_radius: Corners,
     pub shadow: BoxShadow,
+    /// Multiplier for this node and its descendants, clamped to `0..=1`. Identity is 1.
+    /// Motion opacity multiplies on top of this.
+    pub opacity: f32,
 }
 
 impl Default for VisualStyle {
@@ -176,9 +323,10 @@ impl Default for VisualStyle {
         Self {
             background: Background::Solid(Color::TRANSPARENT),
             border_color: Color::TRANSPARENT,
-            border_width: 0.0,
-            corner_radius: 0.0,
+            border_width: Edges::ZERO,
+            corner_radius: Corners::ZERO,
             shadow: BoxShadow::NONE,
+            opacity: 1.0,
         }
     }
 }
@@ -242,6 +390,11 @@ pub struct Style {
     pub layout: LayoutStyle,
     pub visual: VisualStyle,
     pub text: TextStyle,
+    /// When set, the pointer shows this cursor instead of the one inferred from the node.
+    /// Not inherited. The deepest set value on the hovered path wins.
+    pub cursor: Option<CursorIcon>,
+    /// `None` inherits [`PointerEvents`] from the parent. The root's `None` is [`PointerEvents::Auto`].
+    pub pointer_events: Option<PointerEvents>,
 }
 
 impl Style {
@@ -255,6 +408,8 @@ impl Style {
             },
             visual: VisualStyle::default(),
             text,
+            cursor: None,
+            pointer_events: None,
         }
     }
 
@@ -351,6 +506,44 @@ mod tests {
                 inherited: true
             }
         );
+    }
+
+    #[test]
+    fn opacity_repaints_without_layout() {
+        let mut changed = base();
+        changed.visual.opacity = 0.5;
+        assert_eq!(
+            changed.diff(&base()),
+            StyleChange {
+                layout: false,
+                paint: true,
+                inherited: false
+            }
+        );
+    }
+
+    #[test]
+    fn a_single_border_edge_only_needs_paint() {
+        let mut changed = base();
+        changed.visual.border_width.top = 2.0;
+        assert!(changed.diff(&base()).paint);
+        assert!(!changed.diff(&base()).layout);
+    }
+
+    #[test]
+    fn cursor_and_pointer_events_do_not_invalidate_paint_or_layout() {
+        let mut changed = base();
+        changed.cursor = Some(CursorIcon::Grab);
+        changed.pointer_events = Some(PointerEvents::None);
+        assert!(!changed.diff(&base()).any());
+    }
+
+    #[test]
+    fn column_span_needs_layout() {
+        let mut changed = base();
+        changed.layout.grid_column_span = 2;
+        assert!(changed.diff(&base()).layout);
+        assert!(!changed.diff(&base()).paint);
     }
 
     #[test]

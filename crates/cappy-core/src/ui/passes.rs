@@ -6,7 +6,8 @@ use cappy_layout::{
     LayoutConstraint, Point, Rect, Size, TextLeaf, TextMeasureRequest, TextMeasurer,
 };
 use cappy_style::{
-    Background, BoxShadow, Color, Display, Extent, LayoutStyle, TextStyle, VisualStyle,
+    Background, BoxShadow, Color, Corners, Display, Edges, Extent, LayoutStyle, Position,
+    TextStyle, VisualStyle,
 };
 
 use super::scroll::{self, axis_clip, horizontal_thumb, nest_clip, scrollport, vertical_thumb};
@@ -154,11 +155,15 @@ impl Ui {
             node.stylesheet.as_deref(),
         );
         let change = resolved.diff(&node.style);
+        let pointer_changed = resolved.pointer_events != node.style.pointer_events;
         let is_text = node.is_text();
         let is_input = matches!(node.content, super::NodeContent::Input(_));
         let node = &mut self.nodes[id.index()];
         node.style = resolved;
         node.style_dirty = false;
+        if pointer_changed {
+            self.pointer_stale = true;
+        }
         if change.layout {
             let layout_style = self.layout_style_of(id);
             self.layout
@@ -383,7 +388,8 @@ impl Ui {
                 .expect(LAYOUT_OUT_OF_SYNC)
                 .translate(origin);
             let translation = self.nodes[id.index()].translation;
-            let rect = layout_rect.translate(translation);
+            let flow = layout_rect.translate(translation);
+            let rect = self.stick(id, flow);
             let (previous, shadow, moved) = {
                 let node = &mut self.nodes[id.index()];
                 let moved = node.rect != rect;
@@ -432,6 +438,55 @@ impl Ui {
                 }
             }
         }
+    }
+
+    /// Shifts a sticky item against the nearest scrolling ancestor, then keeps it in its parent.
+    fn stick(&self, id: NodeId, layout_rect: Rect) -> Rect {
+        let node = &self.nodes[id.index()];
+        if node.style.layout.position != Position::Sticky || node.style.layout.inset.is_auto() {
+            return layout_rect;
+        }
+        let Some(parent_id) = node.parent else {
+            return layout_rect;
+        };
+        if !self.is_current(parent_id) {
+            return layout_rect;
+        }
+        let parent = &self.nodes[parent_id.index()];
+        let pad = parent.style.layout.padding;
+        let inner = scrollport(parent.rect, parent.style.visual.border_width);
+        let parent_box = Rect::new(
+            inner.x + pad.left,
+            inner.y + pad.top,
+            (inner.width - pad.horizontal()).max(0.0),
+            (inner.height - pad.vertical()).max(0.0),
+        );
+        let inset = node.style.layout.inset;
+        scroll::sticky_rect(
+            layout_rect,
+            parent_box,
+            self.scrollport_on(id, false),
+            self.scrollport_on(id, true),
+            inset,
+        )
+    }
+
+    /// The scrollport of the nearest ancestor that scrolls on this axis.
+    fn scrollport_on(&self, id: NodeId, vertical: bool) -> Option<Rect> {
+        let mut current = self.nodes[id.index()].parent;
+        while let Some(parent) = current {
+            let node = &self.nodes[parent.index()];
+            let scrolls = if vertical {
+                node.style.layout.overflow_y.scrolls()
+            } else {
+                node.style.layout.overflow_x.scrolls()
+            };
+            if scrolls {
+                return Some(scrollport(node.rect, node.style.visual.border_width));
+            }
+            current = node.parent;
+        }
+        None
     }
 
     /// An overlay's top-left is its anchor. Every other node starts at the origin passed in.
@@ -589,7 +644,8 @@ impl Ui {
                     {
                         continue;
                     }
-                    let opacity = opacity * node.opacity;
+                    let opacity =
+                        opacity * node.opacity * node.style.visual.opacity.clamp(0.0, 1.0);
                     let space = space.inherit(node.rect, node.scale, node.rotation);
                     let mut visual = node.style.visual.clone();
                     if let Some(color) = node.background {
@@ -686,7 +742,7 @@ impl Ui {
                                 rect,
                                 pixels: pixels.clone(),
                                 fit: *fit,
-                                corner_radius: visual.corner_radius,
+                                corner_radius: visual.corner_radius.max_radius(),
                                 clip,
                                 opacity,
                             }));
@@ -906,7 +962,7 @@ fn push_box(
     }
     let background = fade_background(visual.background, opacity);
     let border_color = fade_color(visual.border_color, opacity);
-    let has_border = visual.border_width > 0.0 && !border_color.is_transparent();
+    let has_border = visual.border_width.any_positive() && !border_color.is_transparent();
     if !background.is_transparent() || has_border {
         primitives.push(Primitive::Quad(QuadPrimitive {
             rect,
@@ -925,8 +981,8 @@ fn push_thumb(primitives: &mut Vec<Primitive>, rect: Rect, clip: Option<Rect>, o
         rect,
         background: Background::Solid(fade_color(scroll::THUMB_COLOR, opacity)),
         border_color: Color::TRANSPARENT,
-        border_width: 0.0,
-        corner_radius: 2.0,
+        border_width: Edges::ZERO,
+        corner_radius: Corners::all(2.0),
         clip,
         spin: Spin::NONE,
     }));

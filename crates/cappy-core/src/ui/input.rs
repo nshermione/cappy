@@ -1,7 +1,7 @@
 //! Pointer, keyboard and focus handling.
 
 use cappy_layout::{Point, Rect, TextMeasureRequest};
-use cappy_style::{Display, InteractionState, Overflow, TextAlign};
+use cappy_style::{Display, InteractionState, Overflow, PointerEvents, TextAlign};
 
 use super::edit::{EditChange, TextEdit};
 use super::node::NodeContent;
@@ -126,25 +126,44 @@ impl Ui {
 
     /// `root` to the deepest in-flow descendant under `point`. Overlay children are not entered;
     /// they are their own hit roots.
+    ///
+    /// A node with [`PointerEvents::None`] is left out, and so are descendants that inherit it.
+    /// A miss there falls through to the next sibling, then to an ancestor that still receives
+    /// hits. `None` from this function means the point passes through `root`.
     fn hit_chain(&self, root: NodeId, point: Point) -> Option<Vec<NodeId>> {
-        if !self.is_hit(root, point) {
+        self.hit_receiving(root, point)
+    }
+
+    fn hit_receiving(&self, id: NodeId, point: Point) -> Option<Vec<NodeId>> {
+        if !self.is_hit(id, point) {
             return None;
         }
-        let mut path = vec![root];
-        let mut current = root;
-        loop {
-            let children = self.nodes[current.index()].children.clone();
-            let Some(next) = children
-                .into_iter()
-                .rev()
-                .find(|child| !self.nodes[child.index()].overlay && self.is_hit(*child, point))
-            else {
-                break;
-            };
-            path.push(next);
-            current = next;
+        let children = self.nodes[id.index()].children.clone();
+        for child in children.into_iter().rev() {
+            if self.nodes[child.index()].overlay {
+                continue;
+            }
+            if let Some(mut path) = self.hit_receiving(child, point) {
+                if self.receives_pointer(id) {
+                    path.insert(0, id);
+                }
+                return Some(path);
+            }
         }
-        Some(path)
+        self.receives_pointer(id).then(|| vec![id])
+    }
+
+    /// False when this node, or an ancestor it inherits from, has [`PointerEvents::None`].
+    fn receives_pointer(&self, id: NodeId) -> bool {
+        let mut current = Some(id);
+        while let Some(node_id) = current {
+            let node = &self.nodes[node_id.index()];
+            if let Some(events) = node.style.pointer_events {
+                return events == PointerEvents::Auto;
+            }
+            current = node.parent;
+        }
+        true
     }
 
     /// False when this overlay or an ancestor is hidden. Overflow on an ancestor does not count:

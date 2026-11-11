@@ -54,6 +54,9 @@ pub fn cursor_icon(cursor: CursorIcon) -> winit::window::CursorIcon {
         CursorIcon::Default => winit::window::CursorIcon::Default,
         CursorIcon::Pointer => winit::window::CursorIcon::Pointer,
         CursorIcon::Text => winit::window::CursorIcon::Text,
+        CursorIcon::Resize => winit::window::CursorIcon::NwseResize,
+        CursorIcon::Grab => winit::window::CursorIcon::Grab,
+        CursorIcon::NotAllowed => winit::window::CursorIcon::NotAllowed,
     }
 }
 

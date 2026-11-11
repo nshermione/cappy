@@ -22,8 +22,9 @@ pub use color::{Color, ColorParseError};
 pub use refinement::StyleRefinement;
 pub use shadow::{BoxShadow, ShadowValue, shadow};
 pub use style::{
-    Align, Display, Edges, FlexDirection, FontWeight, Justify, LayoutStyle, Overflow, Style,
-    StyleChange, TextAlign, TextStyle, VisualStyle, align_offset,
+    Align, Corners, CursorIcon, Display, Edges, FlexDirection, FontWeight, Insets, Justify,
+    LayoutStyle, Overflow, PointerEvents, Position, Style, StyleChange, TextAlign, TextStyle,
+    VisualStyle, align_offset,
 };
 pub use theme::{ClassName, InteractionState, Stylesheet, Theme};
 pub use tokens::{

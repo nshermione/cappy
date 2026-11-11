@@ -6,7 +6,7 @@
 use crate::time::{Duration, Instant};
 
 use cappy_layout::{Point, Rect};
-use cappy_style::Color;
+use cappy_style::{Color, Edges, Insets};
 
 /// Time constant of the exponential ease, in seconds.
 pub(crate) const SCROLL_TAU: f32 = 0.05;
@@ -70,14 +70,67 @@ pub(crate) fn scrolling(current: Point, target: Point) -> bool {
     (current.x - target.x).abs() > SCROLL_SNAP || (current.y - target.y).abs() > SCROLL_SNAP
 }
 
-/// The box children are clipped to: the border box inset by the painted border.
-pub(crate) fn scrollport(rect: Rect, border: f32) -> Rect {
-    let border = border.max(0.0);
+/// The box children are clipped to: the border box inset by each painted border edge.
+pub(crate) fn scrollport(rect: Rect, border: Edges) -> Rect {
+    let left = border.left.max(0.0);
+    let top = border.top.max(0.0);
+    let right = border.right.max(0.0);
+    let bottom = border.bottom.max(0.0);
     Rect::new(
-        rect.x + border,
-        rect.y + border,
-        (rect.width - border * 2.0).max(0.0),
-        (rect.height - border * 2.0).max(0.0),
+        rect.x + left,
+        rect.y + top,
+        (rect.width - left - right).max(0.0),
+        (rect.height - top - bottom).max(0.0),
+    )
+}
+
+/// Visual rect of a sticky item. `static_rect` is the in-flow position, already shifted by scroll.
+///
+/// Each set inset sticks to that edge of its scrollport. The start inset wins when the start and
+/// end cannot both hold. The result then stays inside `parent_box`, so the item leaves with its
+/// parent. A missing port leaves that axis on the static position before the parent clamp.
+pub(crate) fn sticky_rect(
+    static_rect: Rect,
+    parent_box: Rect,
+    port_x: Option<Rect>,
+    port_y: Option<Rect>,
+    inset: Insets,
+) -> Rect {
+    let mut x = static_rect.x;
+    let mut y = static_rect.y;
+    if let Some(port) = port_y {
+        if let Some(top) = inset.top {
+            y = y.max(port.y + top);
+        }
+        if let Some(bottom) = inset.bottom {
+            let limit = port.bottom() - static_rect.height - bottom;
+            y = if let Some(top) = inset.top {
+                y.min(limit.max(port.y + top))
+            } else {
+                y.min(limit)
+            };
+        }
+    }
+    if let Some(port) = port_x {
+        if let Some(left) = inset.left {
+            x = x.max(port.x + left);
+        }
+        if let Some(right) = inset.right {
+            let limit = port.right() - static_rect.width - right;
+            x = if let Some(left) = inset.left {
+                x.min(limit.max(port.x + left))
+            } else {
+                x.min(limit)
+            };
+        }
+    }
+    let max_x = (parent_box.right() - static_rect.width).max(parent_box.x);
+    let max_y = (parent_box.bottom() - static_rect.height).max(parent_box.y);
+    Rect::new(
+        x.clamp(parent_box.x, max_x),
+        y.clamp(parent_box.y, max_y),
+        static_rect.width,
+        static_rect.height,
     )
 }
 
@@ -237,5 +290,53 @@ mod tests {
 
         let past = offset_for_grab(port.y, port.height, port.bottom() + 400.0, grab, max);
         assert!((past - max).abs() < 0.01);
+    }
+
+    #[test]
+    fn a_sticky_box_stays_inside_its_parent_when_the_parent_leaves() {
+        let parent = Rect::new(0.0, -30.0, 100.0, 40.0);
+        let port = Rect::new(0.0, 0.0, 100.0, 80.0);
+        let stuck = sticky_rect(
+            Rect::new(0.0, -30.0, 100.0, 20.0),
+            parent,
+            None,
+            Some(port),
+            Insets {
+                top: Some(0.0),
+                ..Insets::default()
+            },
+        );
+        assert_eq!(stuck.y, -10.0);
+
+        let held = sticky_rect(
+            Rect::new(0.0, -10.0, 100.0, 20.0),
+            Rect::new(0.0, -10.0, 100.0, 80.0),
+            None,
+            Some(port),
+            Insets {
+                top: Some(0.0),
+                ..Insets::default()
+            },
+        );
+        assert_eq!(held.y, 0.0);
+    }
+
+    #[test]
+    fn the_start_inset_wins_when_both_edges_cannot_hold() {
+        let port = Rect::new(0.0, 0.0, 100.0, 40.0);
+        let stuck = sticky_rect(
+            Rect::new(-5.0, 30.0, 20.0, 50.0),
+            Rect::new(0.0, 0.0, 100.0, 200.0),
+            Some(port),
+            Some(port),
+            Insets {
+                top: Some(0.0),
+                bottom: Some(0.0),
+                left: Some(0.0),
+                right: None,
+            },
+        );
+        assert_eq!(stuck.y, 0.0);
+        assert_eq!(stuck.x, 0.0);
     }
 }

@@ -26,6 +26,7 @@ impl Component for PaintTab {
                     { specimen(Class::GradientDown, "Down", "gradient-down") }
                     { specimen(Class::GradientLeft, "Left", "gradient-left") }
                 }
+                { style_gaps() }
                 div(class = ThemeClass::Row) {
                     { specimen(Class::ShadowSoft, "Soft", "shadow-soft") }
                     { liftable(lifted) }
@@ -37,6 +38,62 @@ impl Component for PaintTab {
                     { picture("Cover", ObjectFit::Cover, pixels.clone(), "picture-cover") }
                     { picture("Fill", ObjectFit::Fill, pixels, "picture-fill") }
                 }
+            }
+        }
+    }
+}
+
+/// One row of the style that used to be missing: an uneven border, a spanned grid cell,
+/// and a header that sticks inside a short scroller.
+fn style_gaps() -> Element {
+    element! {
+        div(class = ThemeClass::Row) {
+            div(key = "edge-card", style = style! {
+                width: 88,
+                height: 56,
+                background: ColorToken::Surface,
+                border_color: ColorToken::Primary,
+                border_top: 6,
+                radius_top_left: 18,
+                opacity: 0.7,
+            })
+            div(style = style! {
+                display: Display::Grid,
+                grid_columns: 3,
+                width: 96,
+                height: 56,
+                gap: 0,
+            }) {
+                div(key = "span-wide", style = style! {
+                    column_span: 2,
+                    height: 28,
+                    background: ColorToken::Primary,
+                })
+                div(style = style! { height: 28, background: ColorToken::Success })
+                div(style = style! { height: 28, background: ColorToken::Warning })
+            }
+            div(key = "sticky-port", style = style! {
+                width: 120,
+                height: 72,
+                overflow_y: Overflow::Auto,
+                border_width: 1,
+                border_color: ColorToken::Border,
+                direction: FlexDirection::Column,
+            }) {
+                div(key = "sticky-head", style = style! {
+                    position: Position::Sticky,
+                    top: 0,
+                    height: 22,
+                    flex_shrink: 0.0,
+                    background: ColorToken::Surface,
+                    cursor: CursorIcon::Grab,
+                    align: Align::Center,
+                    padding_x: 8,
+                }) {
+                    text("Sticky")
+                }
+                div(style = style! { height: 48, flex_shrink: 0.0, background: ColorToken::Primary, opacity: 0.45 })
+                div(style = style! { height: 48, flex_shrink: 0.0, background: ColorToken::Success, opacity: 0.45 })
             }
         }
     }

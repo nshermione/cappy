@@ -27,7 +27,7 @@ fn custom_token_patch_keeps_unset_slots_and_resolves() {
         InteractionState::default(),
         None,
     );
-    assert_eq!(style.visual.corner_radius, 20.0);
+    assert_eq!(style.visual.corner_radius, cappy::Corners::all(20.0));
 }
 
 #[test]

@@ -5162,3 +5162,378 @@ fn sized_geometry(cx: &Context, width: i32) -> Element {
         rect_label(cx, "box").key("label"),
     ])
 }
+
+#[test]
+fn an_explicit_cursor_wins_on_that_node_and_a_button_stays_a_pointer() {
+    use cappy_style::CursorIcon;
+
+    let cx = context();
+    let mut ui = settled(
+        &cx,
+        div()
+            .key("pad")
+            .style(StyleRefinement::default().size(80).cursor(CursorIcon::Grab))
+            .child(
+                div()
+                    .key("button")
+                    .style(StyleRefinement::default().size(30))
+                    .on_click(|_| {}),
+            ),
+    );
+    ui.handle_event(InputEvent::PointerMoved {
+        position: Point::new(70.0, 70.0),
+    });
+    assert_eq!(ui.cursor(), CursorIcon::Grab);
+    ui.handle_event(InputEvent::PointerMoved {
+        position: Point::new(10.0, 10.0),
+    });
+    assert_eq!(ui.cursor(), CursorIcon::Pointer);
+
+    let mut refused = settled(
+        &cx,
+        div()
+            .key("button")
+            .style(
+                StyleRefinement::default()
+                    .size(30)
+                    .cursor(CursorIcon::NotAllowed),
+            )
+            .on_click(|_| {}),
+    );
+    refused.handle_event(InputEvent::PointerMoved {
+        position: center_of(&refused, "button"),
+    });
+    assert_eq!(refused.cursor(), CursorIcon::NotAllowed);
+
+    let mut resize = settled(
+        &cx,
+        div().key("handle").style(
+            StyleRefinement::default()
+                .size(30)
+                .cursor(CursorIcon::Resize),
+        ),
+    );
+    resize.handle_event(InputEvent::PointerMoved {
+        position: center_of(&resize, "handle"),
+    });
+    assert_eq!(resize.cursor(), CursorIcon::Resize);
+}
+
+#[test]
+fn changing_only_the_cursor_leaves_the_frame_idle() {
+    use cappy_style::CursorIcon;
+
+    let cx = context();
+    let grab = cx.signal(false);
+    let flag = grab.clone();
+    let mut ui = settled(
+        &cx,
+        div().key("box").style_dyn(move || {
+            let style = StyleRefinement::default().size(40);
+            if flag.get() {
+                style.cursor(CursorIcon::Grab)
+            } else {
+                style
+            }
+        }),
+    );
+    grab.set(true);
+    assert_eq!(ui.update(VIEWPORT), UpdateOutcome::Idle);
+    ui.handle_event(InputEvent::PointerMoved {
+        position: center_of(&ui, "box"),
+    });
+    assert_eq!(ui.cursor(), CursorIcon::Grab);
+    assert_eq!(ui.update(VIEWPORT), UpdateOutcome::Idle);
+}
+
+#[test]
+fn pointer_events_none_lets_the_click_reach_the_parent() {
+    use cappy_style::PointerEvents;
+
+    let cx = context();
+    let back = cx.signal(0);
+    let front = cx.signal(0);
+    let back_click = back.clone();
+    let front_click = front.clone();
+    let mut ui = settled(
+        &cx,
+        div()
+            .key("back")
+            .style(StyleRefinement::default().size(80))
+            .on_click(move |_| back_click.update(|count| *count += 1))
+            .child(
+                div()
+                    .key("front")
+                    .style(
+                        StyleRefinement::default()
+                            .size(80)
+                            .pointer_events(PointerEvents::None),
+                    )
+                    .on_click(move |_| front_click.update(|count| *count += 1)),
+            ),
+    );
+    let path = ui.hit_path(center_of(&ui, "front"));
+    assert!(path.contains(&ui.find_by_key("back").unwrap()));
+    assert!(!path.contains(&ui.find_by_key("front").unwrap()));
+    click(&mut ui, "front");
+    assert_eq!(front.get_untracked(), 0);
+    assert_eq!(back.get_untracked(), 1);
+}
+
+#[test]
+fn a_child_can_opt_back_into_pointer_events() {
+    use cappy_style::PointerEvents;
+
+    let cx = context();
+    let wrap_clicks = cx.signal(0);
+    let button_clicks = cx.signal(0);
+    let wrap = wrap_clicks.clone();
+    let button = button_clicks.clone();
+    let mut ui = settled(
+        &cx,
+        div()
+            .key("wrap")
+            .style(
+                StyleRefinement::default()
+                    .size(80)
+                    .pointer_events(PointerEvents::None),
+            )
+            .on_click(move |_| wrap.update(|count| *count += 1))
+            .child(
+                div()
+                    .key("button")
+                    .style(
+                        StyleRefinement::default()
+                            .size(40)
+                            .pointer_events(PointerEvents::Auto),
+                    )
+                    .on_click(move |_| button.update(|count| *count += 1)),
+            ),
+    );
+    click(&mut ui, "button");
+    assert_eq!(button_clicks.get_untracked(), 1);
+    assert_eq!(wrap_clicks.get_untracked(), 0);
+}
+
+#[test]
+fn an_overlay_with_pointer_events_none_does_not_block_the_page() {
+    use cappy_style::PointerEvents;
+
+    let cx = context();
+    let clicks = cx.signal(0);
+    let count = clicks.clone();
+    let mut ui = settled(
+        &cx,
+        div()
+            .key("page")
+            .style(StyleRefinement::default().size(100))
+            .on_click(move |_| count.update(|value| *value += 1))
+            .child(
+                div().key("shade").overlay().style(
+                    StyleRefinement::default()
+                        .size(100)
+                        .pointer_events(PointerEvents::None),
+                ),
+            ),
+    );
+    click(&mut ui, "shade");
+    assert_eq!(clicks.get_untracked(), 1);
+}
+
+#[test]
+fn changing_only_pointer_events_leaves_the_frame_idle() {
+    use cappy_style::PointerEvents;
+
+    let cx = context();
+    let pass = cx.signal(false);
+    let flag = pass.clone();
+    let mut ui = settled(
+        &cx,
+        div().key("box").style_dyn(move || {
+            let style = StyleRefinement::default().size(40).background(Color::BLACK);
+            if flag.get() {
+                style.pointer_events(PointerEvents::None)
+            } else {
+                style
+            }
+        }),
+    );
+    pass.set(true);
+    assert_eq!(ui.update(VIEWPORT), UpdateOutcome::Idle);
+}
+
+#[test]
+fn style_opacity_scales_the_fill_and_a_tween_multiplies_it() {
+    let cx = context();
+    let mut ui = settled(
+        &cx,
+        div().key("box").style(
+            StyleRefinement::default()
+                .size(40)
+                .background(Color::BLACK)
+                .opacity(0.5),
+        ),
+    );
+    assert!((solid_fill(&ui, "box").a - 0.5).abs() < 0.01);
+
+    let id = ui.find_by_key("box").unwrap();
+    let start = Instant::now();
+    ui.animate(
+        id,
+        Motion::opacity(0.0)
+            .duration(Duration::from_millis(1000))
+            .ease(Ease::Linear),
+    );
+    ui.update_at(VIEWPORT, start);
+    ui.update_at(VIEWPORT, start + Duration::from_millis(500));
+    let alpha = solid_fill(&ui, "box").a;
+    let stored = ui.nodes[id.index()].opacity;
+    assert!(
+        (alpha - 0.25).abs() < 0.02,
+        "painted {alpha}, stored {stored}"
+    );
+}
+
+#[test]
+fn a_top_border_is_the_only_edge_on_the_quad() {
+    use cappy_style::Edges;
+
+    let cx = context();
+    let ui = settled(
+        &cx,
+        div().key("box").style(
+            StyleRefinement::default()
+                .size(40)
+                .background(Color::BLACK)
+                .border_color(Color::rgb(255, 0, 0))
+                .border_width(2)
+                .border_top(6),
+        ),
+    );
+    let Primitive::Quad(quad) = &ui.display_list()[quad_index(&ui, "box")] else {
+        panic!("the box is a quad");
+    };
+    assert_eq!(
+        quad.border_width,
+        Edges {
+            top: 6.0,
+            right: 2.0,
+            bottom: 2.0,
+            left: 2.0
+        }
+    );
+}
+
+#[test]
+fn a_sticky_header_stays_at_the_top_until_its_parent_leaves() {
+    let cx = context();
+    let mut ui = settled(&cx, sticky_section());
+    let scroller = ui.node_rect(ui.find_by_key("scroller").unwrap()).unwrap();
+    let header = ui.find_by_key("header").unwrap();
+    assert_eq!(ui.node_rect(header).unwrap().y, scroller.y);
+    assert_eq!(ui.update(VIEWPORT), UpdateOutcome::Idle);
+
+    let scroller_id = ui.find_by_key("scroller").unwrap();
+    ui.jump_scroll(scroller_id, true, 30.0);
+    ui.update(VIEWPORT);
+    assert_eq!(ui.node_rect(header).unwrap().y, scroller.y);
+    let body = ui.node_rect(ui.find_by_key("body").unwrap()).unwrap();
+    assert!((body.y - (scroller.y + 20.0 - 30.0)).abs() < 0.5);
+
+    ui.jump_scroll(scroller_id, true, 50.0);
+    ui.update(VIEWPORT);
+    assert!((ui.node_rect(header).unwrap().y - (scroller.y - 10.0)).abs() < 0.5);
+}
+
+#[test]
+fn a_sticky_child_of_the_scroller_stays_at_the_top_for_the_whole_scroll() {
+    use cappy_style::Position;
+
+    let cx = context();
+    let mut ui = settled(
+        &cx,
+        div().child(
+            div()
+                .key("scroller")
+                .style(
+                    StyleRefinement::default()
+                        .direction(FlexDirection::Column)
+                        .width(120)
+                        .height(80)
+                        .overflow_y(Overflow::Auto),
+                )
+                .children([
+                    div().key("header").style(
+                        StyleRefinement::default()
+                            .position(Position::Sticky)
+                            .top(0)
+                            .height(20)
+                            .flex_shrink(0.0),
+                    ),
+                    div().key("after").style(
+                        StyleRefinement::default()
+                            .height(200)
+                            .flex_shrink(0.0)
+                            .background(Color::BLACK),
+                    ),
+                ]),
+        ),
+    );
+    let scroller_id = ui.find_by_key("scroller").unwrap();
+    let scroller = ui.node_rect(scroller_id).unwrap();
+    ui.jump_scroll(scroller_id, true, 80.0);
+    ui.update(VIEWPORT);
+    assert_eq!(
+        ui.node_rect(ui.find_by_key("header").unwrap()).unwrap().y,
+        scroller.y
+    );
+    let after = ui.node_rect(ui.find_by_key("after").unwrap()).unwrap();
+    assert!(after.y < scroller.y);
+}
+
+fn sticky_section() -> Element {
+    use cappy_style::Position;
+
+    div().child(
+        div()
+            .key("scroller")
+            .style(
+                StyleRefinement::default()
+                    .direction(FlexDirection::Column)
+                    .width(120)
+                    .height(80)
+                    .overflow_y(Overflow::Auto),
+            )
+            .children([
+                div()
+                    .key("section")
+                    .style(
+                        StyleRefinement::default()
+                            .direction(FlexDirection::Column)
+                            .flex_shrink(0.0),
+                    )
+                    .children([
+                        div().key("header").style(
+                            StyleRefinement::default()
+                                .position(Position::Sticky)
+                                .top(0)
+                                .height(20)
+                                .flex_shrink(0.0)
+                                .background(Color::BLACK),
+                        ),
+                        div().key("body").style(
+                            StyleRefinement::default()
+                                .height(40)
+                                .flex_shrink(0.0)
+                                .background(Color::WHITE),
+                        ),
+                    ]),
+                div().key("after").style(
+                    StyleRefinement::default()
+                        .height(200)
+                        .flex_shrink(0.0)
+                        .background(Color::BLACK),
+                ),
+            ]),
+    )
+}

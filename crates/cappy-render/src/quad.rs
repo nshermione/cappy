@@ -24,6 +24,7 @@ pub(crate) struct QuadInstance {
     border_color: [f32; 4],
     color_to: [f32; 4],
     /// x: border width, y: corner radius, z: blur, w: 0 fill or 1 shadow.
+    /// The width and radius are the shared values. Uneven sides use `borders` and `radii`.
     shape: [f32; 4],
     /// start.xy, end.xy in the unit box. A zero-length segment is a solid color.
     gradient: [f32; 4],
@@ -31,10 +32,14 @@ pub(crate) struct QuadInstance {
     clip: [f32; 4],
     /// Pivot in physical pixels, clockwise radians, unused.
     spin: [f32; 4],
+    /// Top, right, bottom, left border widths in physical pixels.
+    borders: [f32; 4],
+    /// Top-left, top-right, bottom-right, bottom-left radii in physical pixels.
+    radii: [f32; 4],
 }
 
 impl QuadInstance {
-    const ATTRIBUTES: [wgpu::VertexAttribute; 8] = wgpu::vertex_attr_array![
+    const ATTRIBUTES: [wgpu::VertexAttribute; 10] = wgpu::vertex_attr_array![
         0 => Float32x4,
         1 => Float32x4,
         2 => Float32x4,
@@ -42,7 +47,9 @@ impl QuadInstance {
         4 => Float32x4,
         5 => Float32x4,
         6 => Float32x4,
-        7 => Float32x4
+        7 => Float32x4,
+        8 => Float32x4,
+        9 => Float32x4
     ];
 
     /// The instance for a display-list quad or shadow, scaled to physical pixels.
@@ -57,39 +64,46 @@ impl QuadInstance {
     fn from_quad(quad: &QuadPrimitive, scale_factor: f32) -> Self {
         let rect = quad.rect.scale(scale_factor);
         let (from, to, gradient) = gradient_stops(quad.background);
+        let borders = quad.border_width.scaled(scale_factor);
+        let radii = quad.corner_radius.scaled(scale_factor);
         Self {
             rect: [rect.x, rect.y, rect.width, rect.height],
             background: from.to_linear_premultiplied(),
             border_color: quad.border_color.to_linear_premultiplied(),
             color_to: to.to_linear_premultiplied(),
-            shape: [
-                quad.border_width * scale_factor,
-                quad.corner_radius * scale_factor,
-                0.0,
-                0.0,
-            ],
+            shape: [borders.top, radii.top_left, 0.0, 0.0],
             gradient,
             clip: physical_clip(quad.clip, scale_factor),
             spin: physical_spin(quad.spin, scale_factor),
+            borders: [borders.top, borders.right, borders.bottom, borders.left],
+            radii: [
+                radii.top_left,
+                radii.top_right,
+                radii.bottom_right,
+                radii.bottom_left,
+            ],
         }
     }
 
     fn from_shadow(shadow: &ShadowPrimitive, scale_factor: f32) -> Self {
         let rect = shadow.rect.scale(scale_factor);
+        let radii = shadow.corner_radius.scaled(scale_factor);
         Self {
             rect: [rect.x, rect.y, rect.width, rect.height],
             background: shadow.color.to_linear_premultiplied(),
             border_color: [0.0; 4],
             color_to: [0.0; 4],
-            shape: [
-                0.0,
-                shadow.corner_radius * scale_factor,
-                shadow.blur * scale_factor,
-                1.0,
-            ],
+            shape: [0.0, radii.top_left, shadow.blur * scale_factor, 1.0],
             gradient: [0.0; 4],
             clip: physical_clip(shadow.clip, scale_factor),
             spin: physical_spin(shadow.spin, scale_factor),
+            borders: [0.0; 4],
+            radii: [
+                radii.top_left,
+                radii.top_right,
+                radii.bottom_right,
+                radii.bottom_left,
+            ],
         }
     }
 
@@ -115,6 +129,8 @@ impl QuadInstance {
             gradient: [0.0; 4],
             clip: UNCLIPPED,
             spin: [0.0; 4],
+            borders: [border_width; 4],
+            radii: [radius; 4],
         }
     }
 

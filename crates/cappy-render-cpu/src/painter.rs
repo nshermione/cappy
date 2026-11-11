@@ -186,8 +186,8 @@ mod tests {
             rect: Rect::new(x, 0.0, 32.0, 32.0),
             background: cappy_core::Background::Solid(color),
             border_color: Color::TRANSPARENT,
-            border_width: 0.0,
-            corner_radius: 0.0,
+            border_width: cappy_core::Edges::ZERO,
+            corner_radius: cappy_core::Corners::ZERO,
             clip: None,
             spin: cappy_core::Spin::NONE,
         })

@@ -99,8 +99,10 @@ pub struct QuadPrimitive {
     pub rect: Rect,
     pub background: Background,
     pub border_color: Color,
-    pub border_width: f32,
-    pub corner_radius: f32,
+    /// Width of each edge. Equal edges take the same path as the old single width.
+    pub border_width: cappy_style::Edges,
+    /// Radius of each corner. Equal corners take the same path as the old single radius.
+    pub corner_radius: cappy_style::Corners,
     /// Ancestor scrollports. `None` means the primitive is not clipped further.
     pub clip: Option<Rect>,
     /// Rotation around [`Spin::pivot`]. [`Spin::NONE`] draws the rect as stored.
@@ -111,7 +113,8 @@ pub struct QuadPrimitive {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ShadowPrimitive {
     pub rect: Rect,
-    pub corner_radius: f32,
+    /// Radius of each corner of the shape that casts the shadow.
+    pub corner_radius: cappy_style::Corners,
     pub blur: f32,
     pub color: Color,
     /// Ancestor scrollports. `None` means the primitive is not clipped further.
@@ -263,6 +266,31 @@ pub fn blur_extent(blur: f32) -> f32 {
         ..BoxShadow::NONE
     }
     .blur_extent()
+}
+
+/// Signed distance to a rounded rectangle with a radius per corner.
+///
+/// `radii` is top-left, top-right, bottom-right, bottom-left. `local` is relative to the center
+/// and `y` grows downward. Equal radii match [`rounded_box_distance`].
+pub fn rounded_box_distance_corners(
+    local_x: f32,
+    local_y: f32,
+    half_width: f32,
+    half_height: f32,
+    radii: cappy_style::Corners,
+) -> f32 {
+    let radius = if local_y < 0.0 {
+        if local_x >= 0.0 {
+            radii.top_right
+        } else {
+            radii.top_left
+        }
+    } else if local_x >= 0.0 {
+        radii.bottom_right
+    } else {
+        radii.bottom_left
+    };
+    rounded_box_distance(local_x, local_y, half_width, half_height, radius)
 }
 
 /// Signed distance to a rounded rectangle. Negative is inside. `local` is relative to the center.

@@ -130,13 +130,3 @@ pub enum InputEvent {
 pub struct ClickEvent {
     pub position: Point,
 }
-
-/// Cursor the host should show for the current pointer position.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum CursorIcon {
-    #[default]
-    Default,
-    Pointer,
-    /// I-beam over text that can take a caret.
-    Text,
-}

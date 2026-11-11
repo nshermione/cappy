@@ -165,8 +165,8 @@ fn decoration_quad(
         rect,
         background: Background::Solid(color),
         border_color: Color::TRANSPARENT,
-        border_width: 0.0,
-        corner_radius: 0.0,
+        border_width: cappy_core::Edges::ZERO,
+        corner_radius: cappy_core::Corners::ZERO,
         clip: text.clip,
         spin: Spin::NONE,
     })
