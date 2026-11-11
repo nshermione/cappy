@@ -75,9 +75,9 @@ pub mod prelude {
         ObjectFit, Overflow, PointerEvents, Position, Radius, Reactive, Signal, Slot, Space,
         StyleRefinement, Stylesheet, SurfaceId, SurfaceOptions, TextAlign, Theme, ThemeCatalog,
         ThemeHandle, Themes, Ui, UpdateOutcome, asset_path, div, for_each, fragment, hex, if_else,
-        image, input, linear, on, on_before_mount, on_before_unmount, on_mounted, on_unmounted,
-        on_updated, percent, reactive, shadow, show, slot, text, text_dyn, use_local_store,
-        use_store,
+        image, input, linear, list_window, on, on_before_mount, on_before_unmount, on_mounted,
+        on_unmounted, on_updated, percent, reactive, shadow, show, slot, text, text_dyn,
+        use_local_store, use_store,
     };
     #[cfg(not(feature = "cpu"))]
     pub use cappy_core::{Anim, AnimHandle, Ease, Motion, Repeat};

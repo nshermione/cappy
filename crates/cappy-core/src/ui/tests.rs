@@ -11,8 +11,8 @@ use crate::{
     Application, ButtonState, Component, Context, Dynamic, Element, FocusScope, HasContext,
     ImeEvent, InputEvent, IntoElement, Key, KeyEvent, Modifiers, PointerButton, PointerPhase,
     Signal, Singleton, SingletonOf, Slot, SurfaceCommand, SurfaceOptions, div, for_each, fragment,
-    if_else, input, on_before_mount, on_before_unmount, on_mounted, on_unmounted, on_updated, show,
-    slot, text, text_dyn, use_store,
+    if_else, input, list_window, on_before_mount, on_before_unmount, on_mounted, on_unmounted,
+    on_updated, show, slot, text, text_dyn, use_store,
 };
 use cappy_style::{Background, Color, FlexDirection, Overflow, StyleRefinement};
 
@@ -1327,6 +1327,310 @@ fn add_and_drop_returns_resources_to_the_baseline() {
     }
     assert_eq!(ui.resources(), baseline);
     assert!(ui.find_by_key("row-0").is_none());
+}
+
+#[test]
+fn a_long_list_mounts_only_the_visible_window_plus_a_buffer() {
+    let cx = context();
+    let calls = Rc::new(Cell::new(0));
+    let mut ui = settled(
+        &cx,
+        scroll_window(80.0, 20.0, 1, || 50, counted_row(&calls)),
+    );
+    assert_eq!(calls.get(), 5);
+    assert_mounted(&ui, &[0, 1, 2, 3, 4]);
+    assert_absent(&ui, &[5, 49]);
+    let scroller = ui.node_rect(ui.find_by_key("scroller").unwrap()).unwrap();
+    let first = ui.node_rect(ui.find_by_key("row-0").unwrap()).unwrap();
+    let buffer = ui.node_rect(ui.find_by_key("row-4").unwrap()).unwrap();
+    close_to(first.y, scroller.y);
+    close_to(first.height, 20.0);
+    close_to(buffer.y, scroller.bottom());
+    assert_eq!(ui.update(VIEWPORT), UpdateOutcome::Idle);
+
+    cx.set_scroll_offset("scroller", Point::new(0.0, 10_000.0));
+    ui.update(VIEWPORT);
+    assert_mounted(&ui, &[45, 46, 49]);
+    assert_absent(&ui, &[0, 44]);
+    let scroller = ui.node_rect(ui.find_by_key("scroller").unwrap()).unwrap();
+    let at_top = ui.node_rect(ui.find_by_key("row-46").unwrap()).unwrap();
+    let last = ui.node_rect(ui.find_by_key("row-49").unwrap()).unwrap();
+    close_to(at_top.y, scroller.y);
+    close_to(last.bottom(), scroller.bottom());
+}
+
+#[test]
+fn scrolling_reuses_rows_that_stay_in_the_window() {
+    let cx = context();
+    let calls = Rc::new(Cell::new(0));
+    let mut ui = settled(
+        &cx,
+        scroll_window(80.0, 20.0, 1, || 50, counted_row(&calls)),
+    );
+    let kept = ui.find_by_key("row-1").unwrap();
+    let edge = ui.find_by_key("row-4").unwrap();
+    assert_eq!(calls.get(), 5);
+
+    cx.set_scroll_offset("scroller", Point::new(0.0, 15.0));
+    ui.update(VIEWPORT);
+    assert_eq!(ui.find_by_key("row-1"), Some(kept));
+    assert_eq!(ui.find_by_key("row-4"), Some(edge));
+    assert!(ui.find_by_key("row-5").is_some());
+    assert!(ui.find_by_key("row-6").is_none());
+    assert_eq!(calls.get(), 6);
+
+    let entered = ui.find_by_key("row-5").unwrap();
+    cx.set_scroll_offset("scroller", Point::new(0.0, 19.0));
+    ui.update(VIEWPORT);
+    assert_eq!(ui.find_by_key("row-1"), Some(kept));
+    assert_eq!(ui.find_by_key("row-5"), Some(entered));
+    assert_eq!(calls.get(), 6);
+    ui.prepare_frame();
+    assert!(!ui.needs_update());
+    assert_eq!(ui.update(VIEWPORT), UpdateOutcome::Idle);
+
+    cx.set_scroll_offset("scroller", Point::new(0.0, 200.0));
+    ui.update(VIEWPORT);
+    assert!(ui.find_by_key("row-1").is_none());
+    assert!(ui.find_by_key("row-5").is_none());
+    assert_mounted(&ui, &[9, 14]);
+    assert_absent(&ui, &[8, 15]);
+    assert_eq!(calls.get(), 12);
+}
+
+#[test]
+fn shrinking_the_list_drops_rows_past_the_end_and_updates_text() {
+    let cx = context();
+    let items = cx.signal(
+        (0..10)
+            .map(|index| format!("row {index}"))
+            .collect::<Vec<_>>(),
+    );
+    let calls = Rc::new(Cell::new(0));
+    let counted = items.clone();
+    let source = items.clone();
+    let built = Rc::clone(&calls);
+    let mut ui = settled(
+        &cx,
+        scroll_window(
+            80.0,
+            20.0,
+            1,
+            move || counted.with(|list| list.len()),
+            move |index| {
+                built.set(built.get() + 1);
+                let source = source.clone();
+                text_dyn(move || source.with(|list| list.get(index).cloned().unwrap_or_default()))
+                    .key(format!("row-{index}"))
+            },
+        ),
+    );
+    let first = ui.find_by_key("row-0").unwrap();
+    assert_eq!(ui.node_text(first), Some("row 0"));
+    assert_eq!(calls.get(), 5);
+
+    items.update(|list| list[0] = "changed".into());
+    ui.update(VIEWPORT);
+    assert_eq!(ui.find_by_key("row-0"), Some(first));
+    assert_eq!(ui.node_text(first), Some("changed"));
+    assert_eq!(calls.get(), 5);
+
+    items.set(vec!["changed".into(), "tail".into()]);
+    ui.update(VIEWPORT);
+    assert_eq!(ui.find_by_key("row-0"), Some(first));
+    assert_eq!(ui.node_text(first), Some("changed"));
+    assert_eq!(ui.node_text(ui.find_by_key("row-1").unwrap()), Some("tail"));
+    assert_absent(&ui, &[2, 3, 4]);
+    assert_eq!(calls.get(), 5);
+}
+
+#[test]
+fn dropping_the_window_disposes_its_rows() {
+    let cx = context();
+    let open = cx.signal(true);
+    let flag = open.clone();
+    let mut ui = settled(
+        &cx,
+        if_else(
+            move || flag.get(),
+            || scroll_window(80.0, 20.0, 1, || 8, row_slot),
+            || text("closed").key("closed"),
+        ),
+    );
+    assert!(ui.find_by_key("row-0").is_some());
+    open.set(false);
+    ui.update(VIEWPORT);
+    assert!(ui.find_by_key("row-0").is_none());
+    assert_eq!(
+        ui.node_text(ui.find_by_key("closed").unwrap()),
+        Some("closed")
+    );
+    let baseline = ui.resources();
+    open.set(true);
+    ui.update(VIEWPORT);
+    assert!(ui.find_by_key("row-0").is_some());
+    assert_absent(&ui, &[5, 6, 7]);
+    open.set(false);
+    ui.update(VIEWPORT);
+    assert_eq!(ui.resources(), baseline);
+}
+
+#[test]
+fn a_taller_scrollport_mounts_more_rows() {
+    let cx = context();
+    let height = cx.signal(40.0);
+    let read = height.clone();
+    let calls = Rc::new(Cell::new(0));
+    let built = Rc::clone(&calls);
+    let mut ui = settled(
+        &cx,
+        div().child(
+            div()
+                .key("scroller")
+                .style_dyn(move || {
+                    StyleRefinement::default()
+                        .direction(FlexDirection::Column)
+                        .width(120)
+                        .height(read.get())
+                        .overflow_y(Overflow::Auto)
+                })
+                .child(list_window(
+                    "scroller",
+                    || 20,
+                    20.0,
+                    1,
+                    move |index| {
+                        built.set(built.get() + 1);
+                        row_slot(index)
+                    },
+                )),
+        ),
+    );
+    assert_mounted(&ui, &[0, 1, 2]);
+    assert_absent(&ui, &[3]);
+    let kept = ui.find_by_key("row-0").unwrap();
+    assert_eq!(calls.get(), 3);
+
+    height.set(80.0);
+    ui.update(VIEWPORT);
+    assert_eq!(ui.find_by_key("row-0"), Some(kept));
+    assert_mounted(&ui, &[0, 1, 2, 3, 4]);
+    assert_absent(&ui, &[5]);
+    assert_eq!(calls.get(), 5);
+}
+
+#[test]
+fn a_missing_scrollport_mounts_no_rows() {
+    let cx = context();
+    let read = cx.clone();
+    let mut ui = settled(
+        &cx,
+        scrolled_offset_probe(list_window("absent", || 10, 20.0, 1, row_slot), read),
+    );
+    assert!(ui.find_by_key("row-0").is_none());
+    assert_eq!(ui.node_text(ui.find_by_key("offset").unwrap()), Some("0"));
+
+    cx.set_scroll_offset("scroller", Point::new(0.0, 1_000.0));
+    ui.update(VIEWPORT);
+    assert!(ui.find_by_key("row-0").is_none());
+    assert_eq!(ui.node_text(ui.find_by_key("offset").unwrap()), Some("120"));
+}
+
+#[test]
+fn a_non_positive_extent_mounts_no_rows() {
+    let cx = context();
+    let read = cx.clone();
+    let mut ui = settled(
+        &cx,
+        scrolled_offset_probe(list_window("scroller", || 10, 0.0, 1, row_slot), read),
+    );
+    assert!(ui.find_by_key("row-0").is_none());
+    cx.set_scroll_offset("scroller", Point::new(0.0, 1_000.0));
+    ui.update(VIEWPORT);
+    assert!(ui.find_by_key("row-0").is_none());
+    assert_eq!(ui.node_text(ui.find_by_key("offset").unwrap()), Some("0"));
+}
+
+fn scroll_window(
+    height: f32,
+    extent: f32,
+    buffer: usize,
+    count: impl Fn() -> usize + 'static,
+    view: impl Fn(usize) -> Element + 'static,
+) -> Element {
+    div().child(
+        div()
+            .key("scroller")
+            .style(
+                StyleRefinement::default()
+                    .direction(FlexDirection::Column)
+                    .width(120)
+                    .height(height)
+                    .overflow_y(Overflow::Auto),
+            )
+            .child(list_window("scroller", count, extent, buffer, view)),
+    )
+}
+
+fn scrolled_offset_probe(window: Element, read: Context) -> Element {
+    div().children([
+        div()
+            .key("scroller")
+            .style(
+                StyleRefinement::default()
+                    .direction(FlexDirection::Column)
+                    .width(120)
+                    .height(80)
+                    .overflow_y(Overflow::Auto),
+            )
+            .child(window),
+        text_dyn(move || {
+            read.scroll_offset("scroller")
+                .map(|offset| format!("{}", offset.y as i32))
+                .unwrap_or_else(|| "none".into())
+        })
+        .key("offset"),
+    ])
+}
+
+fn counted_row(calls: &Rc<Cell<usize>>) -> impl Fn(usize) -> Element + 'static {
+    let calls = Rc::clone(calls);
+    move |index| {
+        calls.set(calls.get() + 1);
+        row_slot(index)
+    }
+}
+
+fn row_slot(index: usize) -> Element {
+    div()
+        .key(format!("row-{index}"))
+        .style(StyleRefinement::default().height(20.0).flex_shrink(0.0))
+        .child(text(index.to_string()))
+}
+
+fn assert_mounted(ui: &Ui, indexes: &[usize]) {
+    for index in indexes {
+        assert!(
+            ui.find_by_key(&format!("row-{index}")).is_some(),
+            "row {index} should be mounted"
+        );
+    }
+}
+
+fn assert_absent(ui: &Ui, indexes: &[usize]) {
+    for index in indexes {
+        assert!(
+            ui.find_by_key(&format!("row-{index}")).is_none(),
+            "row {index} should be unmounted"
+        );
+    }
+}
+
+fn close_to(actual: f32, expected: f32) {
+    assert!(
+        (actual - expected).abs() < 0.5,
+        "{actual} is not near {expected}"
+    );
 }
 
 fn scroll_column(overflow: Overflow) -> Element {

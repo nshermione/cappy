@@ -1,6 +1,6 @@
 //! Declarative description of a UI tree. An [`Element`] is mounted into a [`crate::Ui`] once.
-//! Text, class and style bindings keep running after that. [`show`](crate::show), [`if_else`]
-//! and [`for_each`] can still change structure: `show` only hides, and `if_else` / `for_each`
+//! Text, class and style bindings keep running after that. [`show`](crate::show), [`if_else`],
+//! [`for_each`] and [`list_window`] can still change structure: `show` only hides, and the others
 //! dispose the parts they remove.
 
 use std::fmt;
@@ -447,6 +447,42 @@ where
 {
     Element::new(ElementContent::Flow(crate::ui::flow::repeat_spec(
         read, key_of, view,
+    )))
+}
+
+/// Mounts the rows that intersect the scrollport named `scroller`, plus `buffer` rows on each side.
+///
+/// Table rows, Select options, and Tree rows share this window. [`for_each`] still mounts every
+/// item. A long list of uniform rows uses this instead.
+///
+/// `count` is the number of rows. It runs again when a signal it reads changes. `extent` is the
+/// height of every row, in logical pixels. The list lays out `count * extent` tall, so the scroll
+/// range matches a list that mounted every row. `view` runs when an index enters the window, and
+/// not again while that index stays. Read signals inside `view` to refresh a row that stays.
+///
+/// `scroller` is a key. This element is that node's only child. The node is a column with no gap,
+/// padding, or border. Scroll offset `0` is the top of row `0`. The window reads
+/// [`Context::scroll_offset`](crate::Context::scroll_offset) and
+/// [`Context::node_rect`](crate::Context::node_rect). Before that node has a rect, no row is
+/// mounted and a spacer holds the full height. Border and padding are not subtracted from the
+/// rect. A non-positive `extent` mounts no rows and adds no height.
+///
+/// Each row sits in a slot of height `extent` that does not shrink. A row binding can run in the
+/// same turn the index leaves the window, so `view` should tolerate a missing item.
+#[must_use]
+pub fn list_window(
+    scroller: impl Into<String>,
+    count: impl Fn() -> usize + 'static,
+    extent: f32,
+    buffer: usize,
+    view: impl Fn(usize) -> Element + 'static,
+) -> Element {
+    Element::new(ElementContent::Flow(crate::ui::flow::window_spec(
+        scroller.into(),
+        count,
+        extent,
+        buffer,
+        view,
     )))
 }
 

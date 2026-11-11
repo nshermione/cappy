@@ -1,11 +1,13 @@
-//! `show`, `if` / `else` and `for`. Each block is one binding on the parent. `show` hides.
-//! `if` and `for` dispose what they drop, walking every nested block the same way.
+//! `show`, `if` / `else`, `for` and the list window. Each block is one binding on the parent.
+//! `show` hides. `if`, `for` and the window dispose what they drop, walking every nested block
+//! the same way.
 
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
+use std::rc::Rc;
 
-use cappy_style::{Style, TextStyle};
+use cappy_style::{Dimension, FlexDirection, Style, StyleRefinement, TextStyle};
 
 use super::Ui;
 use super::bindings::BindingKind;
@@ -27,6 +29,7 @@ pub(crate) enum FlowSpec {
         else_branch: Box<dyn Fn() -> Element>,
     },
     Repeat(Box<dyn RepeatRuntime>),
+    Window(WindowRuntime),
 }
 
 pub(crate) fn show_spec(
@@ -70,6 +73,29 @@ where
     }))
 }
 
+pub(crate) fn window_spec(
+    scroller: String,
+    count: impl Fn() -> usize + 'static,
+    extent: f32,
+    buffer: usize,
+    view: impl Fn(usize) -> Element + 'static,
+) -> FlowSpec {
+    FlowSpec::Window(WindowRuntime {
+        scroller,
+        count: Box::new(count),
+        extent,
+        buffer,
+        view: Box::new(view),
+        rows: Vec::new(),
+        before: None,
+        after: None,
+        placed: false,
+        start: 0,
+        end: 0,
+        len: 0,
+    })
+}
+
 pub(crate) trait RepeatRuntime {
     fn reconcile(&mut self, ui: &mut Ui, flow: FlowId);
     fn dispose(&mut self, ui: &mut Ui);
@@ -105,6 +131,7 @@ enum FlowRuntime {
     Show(ShowRuntime),
     Branch(BranchRuntime),
     Repeat(Box<dyn RepeatRuntime>),
+    Window(WindowRuntime),
     Busy,
 }
 
@@ -156,6 +183,7 @@ impl FlowSpec {
                 current: None,
             }),
             Self::Repeat(runtime) => FlowRuntime::Repeat(runtime),
+            Self::Window(runtime) => FlowRuntime::Window(runtime),
         }
     }
 }
@@ -467,6 +495,10 @@ impl Ui {
             paint_dirty: true,
         };
         let id = self.insert_node(node);
+        // The node flag alone does not run resolve. A mount during an update, such as
+        // opening a branch, has to resolve before layout or a list window reads the
+        // unresolved rect.
+        self.style_dirty = true;
         let layout_style = self.layout_style_of(id);
         self.layout
             .insert(id, &layout_style)
@@ -574,6 +606,7 @@ impl Ui {
             FlowRuntime::Show(state) => self.sync_show(id, state),
             FlowRuntime::Branch(state) => self.sync_branch(id, state),
             FlowRuntime::Repeat(runtime) => self.sync_repeat(id, runtime),
+            FlowRuntime::Window(runtime) => self.sync_window(id, runtime),
             FlowRuntime::Busy => panic!("flow synced while it was already syncing"),
         }
     }
@@ -647,6 +680,12 @@ impl Ui {
     fn sync_repeat(&mut self, id: FlowId, mut runtime: Box<dyn RepeatRuntime>) {
         runtime.reconcile(self, id);
         self.flows[id.index()].runtime = FlowRuntime::Repeat(runtime);
+        self.flows[id.index()].ready = true;
+    }
+
+    fn sync_window(&mut self, id: FlowId, mut runtime: WindowRuntime) {
+        runtime.reconcile(self, id);
+        self.flows[id.index()].runtime = FlowRuntime::Window(runtime);
         self.flows[id.index()].ready = true;
     }
 
@@ -826,6 +865,11 @@ impl Ui {
         let runtime = std::mem::replace(&mut flow.runtime, FlowRuntime::Busy);
         match runtime {
             FlowRuntime::Repeat(mut runtime) => {
+                self.flows[id.index()].parts.clear();
+                self.reflatten(parent);
+                runtime.dispose(self);
+            }
+            FlowRuntime::Window(mut runtime) => {
                 self.flows[id.index()].parts.clear();
                 self.reflatten(parent);
                 runtime.dispose(self);
@@ -1118,4 +1162,266 @@ where
         parts,
         owner,
     }
+}
+
+/// Rows mounted for the current scroll window. The index is the row's identity.
+pub(crate) struct WindowRuntime {
+    scroller: String,
+    count: Box<dyn Fn() -> usize>,
+    extent: f32,
+    buffer: usize,
+    view: Box<dyn Fn(usize) -> Element>,
+    rows: Vec<WindowRow>,
+    before: Option<NodeId>,
+    after: Option<NodeId>,
+    /// The scrollport has published a rect. Until then the trailing spacer holds the full height.
+    placed: bool,
+    start: usize,
+    end: usize,
+    len: usize,
+}
+
+struct WindowRow {
+    index: usize,
+    parts: Vec<ChildPart>,
+    owner: crate::reactive::OwnerId,
+}
+
+#[derive(Clone, Copy)]
+struct WindowSpan {
+    start: usize,
+    end: usize,
+    before: f32,
+    after: f32,
+}
+
+impl WindowRuntime {
+    fn reconcile(&mut self, ui: &mut Ui, flow: FlowId) {
+        let binding = ui.flows[flow.index()].binding;
+        let queue_runtime = Rc::clone(&ui.queue.runtime);
+        let (count, scroll, rect) = track(Observer::new(&ui.queue, binding), || {
+            let count = (self.count)();
+            let scroll = ui.board.read_scroll(&queue_runtime, &self.scroller);
+            let rect = ui.board.read_rect(&queue_runtime, &self.scroller);
+            (count, scroll, rect)
+        });
+        let placed = rect.is_some();
+        let span = window_span(
+            count,
+            self.extent,
+            rect.map(|rect| rect.height).unwrap_or(0.0),
+            scroll.map(|offset| offset.y).unwrap_or(0.0),
+            self.buffer,
+            placed,
+        );
+        // Scroll eases every frame. The same index range must not allocate or relayout.
+        if self.before.is_some()
+            && self.placed == placed
+            && self.len == count
+            && self.start == span.start
+            && self.end == span.end
+        {
+            return;
+        }
+        let rows_held = self.before.is_some()
+            && self.placed == placed
+            && self.start == span.start
+            && self.end == span.end;
+        self.placed = placed;
+        self.len = count;
+        self.start = span.start;
+        self.end = span.end;
+        if rows_held {
+            assign_height(ui, self.before.expect("leading spacer"), span.before);
+            assign_height(ui, self.after.expect("trailing spacer"), span.after);
+            return;
+        }
+        self.rebuild(ui, flow, span);
+    }
+
+    fn rebuild(&mut self, ui: &mut Ui, flow: FlowId, span: WindowSpan) {
+        let parent = ui.flows[flow.index()].parent;
+        let suppressed = ui.flow_is_suppressed(flow);
+        ui.flows[flow.index()].parts.clear();
+        ui.reflatten(parent);
+        self.ensure_spacers(ui, parent, span, suppressed);
+        let extent = self.extent;
+        let mut old = std::mem::take(&mut self.rows).into_iter().peekable();
+        let mut rows = Vec::new();
+        for index in span.start..span.end {
+            while old.peek().is_some_and(|row| row.index < index) {
+                release_row(ui, old.next().expect("row"));
+            }
+            if old.peek().is_some_and(|row| row.index == index) {
+                rows.push(old.next().expect("row"));
+            } else {
+                rows.push(mount_window_row(
+                    ui,
+                    parent,
+                    self.view.as_ref(),
+                    index,
+                    extent,
+                    suppressed,
+                ));
+            }
+        }
+        for row in old {
+            release_row(ui, row);
+        }
+        self.rows = rows;
+        self.link(ui, flow, parent);
+    }
+
+    fn ensure_spacers(&mut self, ui: &mut Ui, parent: NodeId, span: WindowSpan, suppressed: bool) {
+        if let (Some(before), Some(after)) = (self.before, self.after) {
+            assign_height(ui, before, span.before);
+            assign_height(ui, after, span.after);
+            return;
+        }
+        self.before = Some(mount_spacer(ui, parent, span.before, suppressed));
+        self.after = Some(mount_spacer(ui, parent, span.after, suppressed));
+    }
+
+    fn link(&self, ui: &mut Ui, flow: FlowId, parent: NodeId) {
+        let before = self.before.expect("leading spacer");
+        let after = self.after.expect("trailing spacer");
+        let mut parts = Vec::with_capacity(self.rows.len() + 2);
+        parts.push(ChildPart::Node(before));
+        for row in &self.rows {
+            parts.extend(row.parts.iter().copied());
+        }
+        parts.push(ChildPart::Node(after));
+        ui.flows[flow.index()].parts = parts;
+        ui.reflatten(parent);
+        ui.refresh_pointer();
+    }
+
+    fn dispose(&mut self, ui: &mut Ui) {
+        for row in self.rows.drain(..) {
+            release_row(ui, row);
+        }
+        if let Some(id) = self.before.take() {
+            ui.dispose_node(id);
+        }
+        if let Some(id) = self.after.take() {
+            ui.dispose_node(id);
+        }
+    }
+}
+
+/// Visible rows are `[floor(offset / extent), ceil((offset + viewport) / extent))`, then `buffer`
+/// rows on each side. The spacers make the sum `count * extent`.
+fn window_span(
+    count: usize,
+    extent: f32,
+    viewport: f32,
+    offset: f32,
+    buffer: usize,
+    placed: bool,
+) -> WindowSpan {
+    let total = if extent.is_finite() && extent > 0.0 {
+        (count as f32 * extent).max(0.0)
+    } else {
+        0.0
+    };
+    if !placed || count == 0 || total == 0.0 {
+        return WindowSpan {
+            start: 0,
+            end: 0,
+            before: 0.0,
+            after: total,
+        };
+    }
+    let offset = if offset.is_finite() {
+        offset.max(0.0)
+    } else {
+        0.0
+    };
+    let viewport = if viewport.is_finite() {
+        viewport.max(0.0)
+    } else {
+        0.0
+    };
+    let mut start = finite_index((offset / extent).floor()).saturating_sub(buffer);
+    let mut end = finite_index(((offset + viewport) / extent).ceil()).saturating_add(buffer);
+    if start > count {
+        start = count;
+    }
+    if end > count {
+        end = count;
+    }
+    if start > end {
+        start = end;
+    }
+    let before = start as f32 * extent;
+    let covered = (end - start) as f32 * extent;
+    WindowSpan {
+        start,
+        end,
+        before,
+        after: (total - before - covered).max(0.0),
+    }
+}
+
+fn finite_index(value: f32) -> usize {
+    if !value.is_finite() || value <= 0.0 {
+        return 0;
+    }
+    if value >= usize::MAX as f32 {
+        return usize::MAX;
+    }
+    value as usize
+}
+
+fn spacer_element(height: f32) -> Element {
+    div().style(StyleRefinement::default().height(height).flex_shrink(0.0))
+}
+
+fn mount_spacer(ui: &mut Ui, parent: NodeId, height: f32, suppressed: bool) -> NodeId {
+    let parts = ui.adopt(parent, spacer_element(height), suppressed);
+    let &[ChildPart::Node(id)] = parts.as_slice() else {
+        panic!("spacer mounts one node");
+    };
+    id
+}
+
+fn assign_height(ui: &mut Ui, id: NodeId, height: f32) {
+    let height = Dimension::from(height);
+    if ui.nodes[id.index()].inline_style.height == Some(height) {
+        return;
+    }
+    ui.nodes[id.index()].inline_style.height = Some(height);
+    ui.mark_style_dirty(id);
+}
+
+fn mount_window_row(
+    ui: &mut Ui,
+    parent: NodeId,
+    view: &dyn Fn(usize) -> Element,
+    index: usize,
+    extent: f32,
+    suppressed: bool,
+) -> WindowRow {
+    let guard = enter_owner(&ui.queue.runtime);
+    let owner = guard.id();
+    let element = div()
+        .style(
+            StyleRefinement::default()
+                .direction(FlexDirection::Column)
+                .height(extent)
+                .flex_shrink(0.0),
+        )
+        .child(view(index));
+    drop(guard);
+    let parts = ui.adopt(parent, element, suppressed);
+    WindowRow {
+        index,
+        parts,
+        owner,
+    }
+}
+
+fn release_row(ui: &mut Ui, row: WindowRow) {
+    ui.dispose_parts(row.parts);
+    dispose_owner(&ui.queue.runtime, row.owner);
 }

@@ -44,7 +44,7 @@ impl Component for PaintTab {
 }
 
 /// One row of the style that used to be missing: an uneven border, a spanned grid cell,
-/// and a header that sticks inside a short scroller.
+/// a header that sticks inside a short scroller, and a windowed list.
 fn style_gaps() -> Element {
     element! {
         div(class = ThemeClass::Row) {
@@ -95,8 +95,34 @@ fn style_gaps() -> Element {
                 div(style = style! { height: 48, flex_shrink: 0.0, background: ColorToken::Primary, opacity: 0.45 })
                 div(style = style! { height: 48, flex_shrink: 0.0, background: ColorToken::Success, opacity: 0.45 })
             }
+            div(key = "window-port", style = style! {
+                width: 120,
+                height: 72,
+                overflow_y: Overflow::Auto,
+                direction: FlexDirection::Column,
+                background: ColorToken::Background,
+            }) {
+                { list_window("window-port", || 40, 24.0, 1, window_row) }
+            }
         }
     }
+}
+
+fn window_row(index: usize) -> Element {
+    let background = if index % 2 == 0 {
+        ColorToken::SurfaceAlt
+    } else {
+        ColorToken::Surface
+    };
+    div()
+        .style(style! {
+            height: 24,
+            flex_shrink: 0.0,
+            justify: Justify::Center,
+            padding_x: 8,
+            background: background,
+        })
+        .child(text(format!("Row {index}")))
 }
 
 fn specimen(class: Class, caption: &'static str, key: &'static str) -> Element {
