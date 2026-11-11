@@ -29,6 +29,7 @@ pub(crate) type CaretBinding = Box<dyn Fn() -> Option<usize>>;
 pub(crate) type SelectionBinding = Box<dyn Fn() -> Option<(usize, usize)>>;
 pub(crate) type ClassBinding = Box<dyn Fn() -> Vec<ClassName>>;
 pub(crate) type StyleBinding = Box<dyn Fn() -> StyleRefinement>;
+pub(crate) type DisabledBinding = Box<dyn Fn() -> bool>;
 
 pub(crate) enum ElementContent {
     Container,
@@ -67,7 +68,7 @@ pub struct InputSpec {
     pub on_input: Option<InputHandler>,
     pub on_submit: Option<InputHandler>,
     pub disabled: bool,
-    pub disabled_when: Option<Box<dyn Fn() -> bool>>,
+    pub disabled_when: Option<DisabledBinding>,
 }
 
 impl InputSpec {
@@ -243,7 +244,7 @@ pub struct Element {
     /// Fixed disabled flag. A [`disabled_when`](Element::disabled_when) binding overwrites this
     /// after mount.
     pub(crate) disabled: bool,
-    pub(crate) disabled_when: Option<Box<dyn Fn() -> bool>>,
+    pub(crate) disabled_when: Option<DisabledBinding>,
     pub(crate) caret: Option<usize>,
     pub(crate) caret_binding: Option<CaretBinding>,
     pub(crate) selection: Option<(usize, usize)>,
