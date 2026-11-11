@@ -19,6 +19,8 @@ pub struct TextLeaf {
     pub font_size: f32,
     pub line_height: f32,
     pub weight: u16,
+    /// One line per explicit newline. The paint clips a line that is wider than the box.
+    pub ellipsis: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -303,21 +305,52 @@ fn measure_leaf(
     if let (Some(width), Some(height)) = (known.width, known.height) {
         return taffy::Size { width, height };
     }
-    let max_width = known.width.or(match available.width {
-        AvailableSpace::Definite(width) => Some(width),
-        AvailableSpace::MinContent => Some(0.0),
-        AvailableSpace::MaxContent => None,
-    });
     let request = TextMeasureRequest {
         text: &leaf.text,
         font_size: leaf.font_size,
         line_height: leaf.line_height,
         weight: leaf.weight,
     };
+    if leaf.ellipsis {
+        return measure_ellipsis(&request, known, available, measurer);
+    }
+    let max_width = known.width.or(match available.width {
+        AvailableSpace::Definite(width) => Some(width),
+        AvailableSpace::MinContent => Some(0.0),
+        AvailableSpace::MaxContent => None,
+    });
     let measured = measurer.measure(&request, max_width);
     taffy::Size {
         width: known.width.unwrap_or(measured.width),
         height: known.height.unwrap_or(measured.height),
+    }
+}
+
+fn measure_ellipsis(
+    request: &TextMeasureRequest<'_>,
+    known: taffy::Size<Option<f32>>,
+    available: taffy::Size<AvailableSpace>,
+    measurer: &mut dyn TextMeasurer,
+) -> taffy::Size<f32> {
+    let full = measurer.measure(request, None);
+    let width = if let Some(width) = known.width {
+        width
+    } else {
+        match available.width {
+            AvailableSpace::Definite(width) => width.min(full.width),
+            AvailableSpace::MinContent => {
+                let mark = TextMeasureRequest {
+                    text: "…",
+                    ..*request
+                };
+                measurer.measure(&mark, None).width
+            }
+            AvailableSpace::MaxContent => full.width,
+        }
+    };
+    taffy::Size {
+        width,
+        height: known.height.unwrap_or(full.height),
     }
 }
 
@@ -472,6 +505,7 @@ mod tests {
             font_size: 10.0,
             line_height: 14.0,
             weight: 400,
+            ellipsis: false,
         }
     }
 
@@ -598,6 +632,29 @@ mod tests {
         .unwrap();
 
         assert_eq!(tree.local_rect(1).unwrap().size(), Size::new(25.0, 14.0));
+    }
+
+    #[test]
+    fn ellipsis_keeps_a_narrow_line_one_line_tall() {
+        let mut tree = LayoutTree::new();
+        tree.insert(
+            0,
+            &LayoutStyle {
+                width: Extent::Px(40.0),
+                ..LayoutStyle::default()
+            },
+        )
+        .unwrap();
+        let mut leaf = text_leaf("hello world");
+        leaf.ellipsis = true;
+        tree.set_text(0, Some(leaf)).unwrap();
+        tree.compute(
+            0,
+            Size::new(200.0, 100.0),
+            &mut ApproximateTextMeasurer::default(),
+        )
+        .unwrap();
+        assert_eq!(tree.local_rect(0).unwrap().size(), Size::new(40.0, 14.0));
     }
 
     #[test]

@@ -147,6 +147,10 @@ pub struct TextPrimitive {
     pub wrap: bool,
     /// Logical pixels the glyphs are shifted left so a caret past `rect` stays visible.
     pub scroll_x: f32,
+    /// Logical pixels the glyphs are shifted up so a caret below `rect` stays visible.
+    pub scroll_y: f32,
+    /// Shifts each line inside `rect` when the line is narrower than the box.
+    pub align: cappy_style::TextAlign,
 }
 
 /// Where an image is drawn inside its box, and which part of the texture that shows.

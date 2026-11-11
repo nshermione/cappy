@@ -149,7 +149,7 @@ fn decoration_quad(
 ) -> Option<QuadPrimitive> {
     let rect = Rect::new(
         text.rect.x + x - text.scroll_x,
-        text.rect.y + y,
+        text.rect.y + y - text.scroll_y,
         width,
         height,
     );
@@ -196,7 +196,7 @@ fn text_area<'a>(buffer: &'a Buffer, text: &TextPrimitive, scale_factor: f32) ->
     TextArea {
         buffer,
         left: (text.rect.x - text.scroll_x) * scale_factor,
-        top: text.rect.y * scale_factor,
+        top: (text.rect.y - text.scroll_y) * scale_factor,
         scale: scale_factor,
         bounds: TextBounds {
             left: clip.x as i32,

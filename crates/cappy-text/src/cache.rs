@@ -23,6 +23,7 @@ struct BufferKey {
     weight: u16,
     width_bits: u32,
     wrap: bool,
+    align: u8,
 }
 
 impl BufferKey {
@@ -32,12 +33,17 @@ impl BufferKey {
             font_size_bits: text.font_size.to_bits(),
             line_height_bits: text.line_height.to_bits(),
             weight: text.weight,
-            width_bits: if text.wrap {
+            width_bits: if text.wrap || text.align != cappy_core::TextAlign::Start {
                 text.rect.width.to_bits()
             } else {
                 0
             },
             wrap: text.wrap,
+            align: match text.align {
+                cappy_core::TextAlign::Start => 0,
+                cappy_core::TextAlign::Center => 1,
+                cappy_core::TextAlign::End => 2,
+            },
         }
     }
 }
@@ -81,6 +87,8 @@ impl ShapedTextCache {
                         weight: text.weight,
                     },
                     text.wrap.then_some(text.rect.width + WRAP_SLACK),
+                    text.align,
+                    text.rect.width,
                 ),
                 last_used: paint_count,
             });
@@ -141,6 +149,8 @@ mod tests {
             selection: None,
             wrap: true,
             scroll_x: 0.0,
+            scroll_y: 0.0,
+            align: cappy_core::TextAlign::Start,
         }
     }
 

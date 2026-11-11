@@ -5,5 +5,5 @@ mod text;
 mod tree;
 
 pub use geometry::{Point, Rect, Size};
-pub use text::{ApproximateTextMeasurer, TextMeasureRequest, TextMeasurer};
+pub use text::{ApproximateTextMeasurer, CaretGeometry, TextMeasureRequest, TextMeasurer};
 pub use tree::{LayoutConstraint, LayoutError, LayoutTree, ScrollableOverflow, TextLeaf};

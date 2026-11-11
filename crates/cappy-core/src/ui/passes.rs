@@ -2,7 +2,9 @@
 
 use std::sync::Arc;
 
-use cappy_layout::{LayoutConstraint, Point, Rect, Size, TextLeaf};
+use cappy_layout::{
+    LayoutConstraint, Point, Rect, Size, TextLeaf, TextMeasureRequest, TextMeasurer,
+};
 use cappy_style::{
     Background, BoxShadow, Color, Display, Extent, LayoutStyle, TextStyle, VisualStyle,
 };
@@ -56,18 +58,49 @@ impl Ui {
         let Some(sample) = self.input_sample(node) else {
             return;
         };
+        if let super::NodeContent::Input(field) = &mut self.nodes[node.index()].content {
+            field.layout_sample = sample.clone();
+        }
         let style = &self.nodes[node.index()].style.text;
-        let leaf = text_leaf(&sample, style);
+        let mut leaf = text_leaf(&sample, style);
+        // An input scrolls; ellipsis is for text nodes.
+        leaf.ellipsis = false;
         self.layout
             .set_text(node, Some(leaf))
             .expect(LAYOUT_OUT_OF_SYNC);
         self.layout_dirty = true;
     }
 
+    pub(super) fn sync_multiline_sample(&mut self, node: NodeId) {
+        let multiline = matches!(
+            &self.nodes[node.index()].content,
+            super::NodeContent::Input(field) if field.multiline
+        );
+        if !multiline {
+            return;
+        }
+        let Some(sample) = self.input_sample(node) else {
+            return;
+        };
+        let unchanged = matches!(
+            &self.nodes[node.index()].content,
+            super::NodeContent::Input(field) if field.layout_sample == sample
+        );
+        if !unchanged {
+            self.sync_input_leaf(node);
+        }
+    }
+
     fn input_sample(&self, node: NodeId) -> Option<String> {
         let super::NodeContent::Input(field) = &self.nodes[node.index()].content else {
             return None;
         };
+        if field.multiline {
+            let shown = field.edit.paint(field.mask).text;
+            if !shown.is_empty() {
+                return Some(shown);
+            }
+        }
         if field.placeholder.is_empty() {
             Some(" ".to_owned())
         } else {
@@ -488,6 +521,31 @@ impl Ui {
         space
     }
 
+    /// Clipped text for one node, measured before the paint walk borrows the tree.
+    fn ellipsized_text(&mut self, id: NodeId, space: PaintSpace) -> Option<String> {
+        let (source, style, width) = {
+            let node = &self.nodes[id.index()];
+            if !node.alive || node.suppressed || node.style.layout.display == Display::None {
+                return None;
+            }
+            let super::NodeContent::Text(text) = &node.content else {
+                return None;
+            };
+            if !node.style.text.ellipsis {
+                return None;
+            }
+            let space = space.inherit(node.rect, node.scale, node.rotation);
+            let width = text_content_rect(node, space).width;
+            (text.clone(), node.style.text.clone(), width)
+        };
+        Some(ellipsize_text(
+            self.measurer.as_mut(),
+            &source,
+            &style,
+            width,
+        ))
+    }
+
     pub(super) fn rebuild_display_list(&mut self) {
         if !std::mem::take(&mut self.display_list_stale) {
             return;
@@ -525,6 +583,7 @@ impl Ui {
                     opacity,
                     space,
                 } => {
+                    let ellipsized = self.ellipsized_text(id, space);
                     let node = &self.nodes[id.index()];
                     if !node.alive || node.suppressed || node.style.layout.display == Display::None
                     {
@@ -545,29 +604,41 @@ impl Ui {
                     match &node.content {
                         super::NodeContent::Text(text) => {
                             let content = text_content_rect(node, space);
-                            let text_style = &node.style.text;
+                            let text_style = node.style.text.clone();
+                            let source = text.clone();
+                            let caret = node.caret;
+                            let selection = node.selection;
+                            let shown = ellipsized.unwrap_or(source.to_string());
+                            let caret = caret.map(|index| clamp_marker(&shown, index));
+                            let selection = selection.and_then(|(start, end)| {
+                                let start = clamp_marker(&shown, start);
+                                let end = clamp_marker(&shown, end);
+                                (start < end).then_some((start, end))
+                            });
                             primitives.push(Primitive::Text(TextPrimitive {
                                 rect: content,
-                                text: text.clone(),
+                                text: Arc::from(shown),
                                 color: fade_color(text_style.color, opacity),
                                 font_size: text_style.font_size * space.scale,
                                 line_height: text_style.line_height_px() * space.scale,
                                 weight: text_style.weight.0,
                                 clip,
-                                caret: node.caret,
-                                selection: node.selection,
-                                wrap: true,
+                                caret,
+                                selection,
+                                wrap: !text_style.ellipsis,
                                 scroll_x: 0.0,
+                                scroll_y: 0.0,
+                                align: text_style.align,
                             }));
                         }
                         super::NodeContent::Input(field) => {
                             let content = text_content_rect(node, space);
                             let text_style = &node.style.text;
                             let focused = self.focused == Some(id);
+                            let display = field.edit.paint(field.mask);
                             let placeholder = field.edit.text().is_empty()
-                                && field.edit.display().selection.is_none()
-                                && field.edit.display().text == field.edit.text();
-                            let display = field.edit.display();
+                                && display.selection.is_none()
+                                && display.text == field.edit.text();
                             let (shown, color, caret, selection) = if placeholder {
                                 (
                                     field.placeholder.clone(),
@@ -604,8 +675,10 @@ impl Ui {
                                 clip,
                                 caret,
                                 selection,
-                                wrap: false,
+                                wrap: field.multiline,
                                 scroll_x: field.scroll_x * space.scale,
+                                scroll_y: field.scroll_y * space.scale,
+                                align: text_style.align,
                             }));
                         }
                         super::NodeContent::Image { pixels, fit, .. } => {
@@ -1019,5 +1092,78 @@ fn text_leaf(text: &str, style: &TextStyle) -> TextLeaf {
         font_size: style.font_size,
         line_height: style.line_height_px(),
         weight: style.weight.0,
+        ellipsis: style.ellipsis,
     }
+}
+
+const ELLIPSIS: char = '\u{2026}';
+
+pub(super) fn ellipsize_text(
+    measurer: &mut dyn TextMeasurer,
+    text: &str,
+    style: &TextStyle,
+    width: f32,
+) -> String {
+    text.split('\n')
+        .map(|line| ellipsize_line(measurer, line, style, width))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn ellipsize_line(
+    measurer: &mut dyn TextMeasurer,
+    line: &str,
+    style: &TextStyle,
+    width: f32,
+) -> String {
+    let fits = |measurer: &mut dyn TextMeasurer, sample: &str| {
+        measurer
+            .measure(
+                &TextMeasureRequest {
+                    text: sample,
+                    font_size: style.font_size,
+                    line_height: style.line_height_px(),
+                    weight: style.weight.0,
+                },
+                None,
+            )
+            .width
+            <= width + 0.5
+    };
+    if fits(measurer, line) {
+        return line.to_owned();
+    }
+    let ends: Vec<usize> = unicode_segmentation::UnicodeSegmentation::grapheme_indices(line, true)
+        .map(|(index, grapheme)| index + grapheme.len())
+        .collect();
+    let mut low = 0usize;
+    let mut high = ends.len();
+    let mut best = ELLIPSIS.to_string();
+    while low < high {
+        let mid = (low + high + 1) / 2;
+        if mid == 0 {
+            break;
+        }
+        let mut candidate = line[..ends[mid - 1]].to_owned();
+        candidate.push(ELLIPSIS);
+        if fits(measurer, &candidate) {
+            best = candidate;
+            low = mid;
+        } else {
+            high = mid - 1;
+        }
+    }
+    if low == 0 { ELLIPSIS.to_string() } else { best }
+}
+
+fn clamp_marker(text: &str, index: usize) -> usize {
+    let index = index.min(text.len());
+    if text.is_char_boundary(index) {
+        return index;
+    }
+    text.char_indices()
+        .map(|(offset, _)| offset)
+        .take_while(|offset| *offset <= index)
+        .last()
+        .unwrap_or(0)
 }

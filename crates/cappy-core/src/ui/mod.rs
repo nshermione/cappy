@@ -185,6 +185,8 @@ pub struct Ui {
     overlay_order_dirty: Cell<bool>,
     /// One-shot callbacks armed on keyed nodes. Empty while nothing is waiting.
     timers: Vec<timer::ArmedTimer>,
+    /// Last caret rect reported to the OS, skipped while the field has not moved.
+    ime_caret: Option<input::ImeCaretCache>,
 }
 
 impl Ui {
@@ -251,6 +253,7 @@ impl Ui {
             overlay_order_dirty: Cell::new(true),
             roving_enter: Vec::new(),
             timers: Vec::new(),
+            ime_caret: None,
         };
         ui.root = ui.mount(root.into_element(), None);
         ui.add_binding(ui.root, BindingKind::Theme);
@@ -264,12 +267,20 @@ impl Ui {
     /// Replaces the text measurer (normally the renderer's font system) and re-measures text.
     pub fn set_text_measurer(&mut self, measurer: impl TextMeasurer + 'static) {
         self.measurer = Box::new(measurer);
+        self.ime_caret = None;
         for index in 0..self.nodes.len() {
             if self.nodes[index].alive {
                 let id = NodeId::new(index as u32, self.nodes[index].generation);
                 self.sync_text_leaf(id);
+                self.sync_input_leaf(id);
             }
         }
+    }
+
+    /// Caret rectangle of the focused input, in logical viewport pixels. `None` when no input is
+    /// focused. The rect is cached, so pointer motion does not measure the field again.
+    pub fn ime_caret_rect(&mut self) -> Option<Rect> {
+        self.cached_ime_caret()
     }
 
     /// Called whenever a signal change makes the UI need an update, so a host sleeping in an

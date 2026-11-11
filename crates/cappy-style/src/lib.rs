@@ -23,7 +23,7 @@ pub use refinement::StyleRefinement;
 pub use shadow::{BoxShadow, ShadowValue, shadow};
 pub use style::{
     Align, Display, Edges, FlexDirection, FontWeight, Justify, LayoutStyle, Overflow, Style,
-    StyleChange, TextStyle, VisualStyle,
+    StyleChange, TextAlign, TextStyle, VisualStyle, align_offset,
 };
 pub use theme::{ClassName, InteractionState, Stylesheet, Theme};
 pub use tokens::{

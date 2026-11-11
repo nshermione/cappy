@@ -53,6 +53,26 @@ impl Overflow {
     }
 }
 
+/// Horizontal alignment of a line inside its box. `Start` is the current left edge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum TextAlign {
+    #[default]
+    Start,
+    Center,
+    End,
+}
+
+/// Extra space on the left of a line that is narrower than `box_width`. A wider line stays at 0
+/// so scrolling, not alignment, keeps the caret in view.
+pub fn align_offset(box_width: f32, line_width: f32, align: TextAlign) -> f32 {
+    let extra = (box_width - line_width).max(0.0);
+    match align {
+        TextAlign::Start => 0.0,
+        TextAlign::Center => extra * 0.5,
+        TextAlign::End => extra,
+    }
+}
+
 /// Placement of children along the cross axis.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Align {
@@ -171,6 +191,9 @@ pub struct TextStyle {
     /// Line height as a multiple of `font_size`.
     pub line_height: f32,
     pub weight: FontWeight,
+    pub align: TextAlign,
+    /// When set, text stays one line per explicit newline and the paint clips the tail with `…`.
+    pub ellipsis: bool,
 }
 
 impl TextStyle {
@@ -180,6 +203,8 @@ impl TextStyle {
             font_size: tokens.font_sizes.md,
             line_height: tokens.line_height,
             weight: FontWeight::NORMAL,
+            align: TextAlign::Start,
+            ellipsis: false,
         }
     }
 
@@ -192,6 +217,7 @@ impl TextStyle {
         self.font_size != other.font_size
             || self.line_height != other.line_height
             || self.weight != other.weight
+            || self.ellipsis != other.ellipsis
     }
 }
 
@@ -311,5 +337,35 @@ mod tests {
         changed.text.font_size = 30.0;
         let change = changed.diff(&base());
         assert!(change.layout && change.inherited);
+    }
+
+    #[test]
+    fn text_align_repaints_and_is_inherited_without_layout() {
+        let mut changed = base();
+        changed.text.align = TextAlign::Center;
+        assert_eq!(
+            changed.diff(&base()),
+            StyleChange {
+                layout: false,
+                paint: true,
+                inherited: true
+            }
+        );
+    }
+
+    #[test]
+    fn ellipsis_changes_the_measured_height() {
+        let mut changed = base();
+        changed.text.ellipsis = true;
+        let change = changed.diff(&base());
+        assert!(change.layout && change.inherited);
+    }
+
+    #[test]
+    fn a_centered_line_shifts_by_half_the_leftover_width() {
+        assert_eq!(align_offset(100.0, 40.0, TextAlign::Start), 0.0);
+        assert_eq!(align_offset(100.0, 40.0, TextAlign::Center), 30.0);
+        assert_eq!(align_offset(100.0, 40.0, TextAlign::End), 60.0);
+        assert_eq!(align_offset(40.0, 100.0, TextAlign::Center), 0.0);
     }
 }

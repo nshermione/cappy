@@ -2,7 +2,7 @@
 
 use crate::{
     Align, BackgroundValue, ColorValue, Dimension, Display, Edges, FlexDirection, FontWeight,
-    Justify, Length, Overflow, ShadowValue, Style, Tokens,
+    Justify, Length, Overflow, ShadowValue, Style, TextAlign, Tokens,
 };
 
 /// A partial style. Every field is optional; `None` keeps whatever an earlier layer set.
@@ -44,6 +44,8 @@ pub struct StyleRefinement {
     pub font_size: Option<Length>,
     pub line_height: Option<f32>,
     pub font_weight: Option<FontWeight>,
+    pub text_align: Option<TextAlign>,
+    pub ellipsis: Option<bool>,
 }
 
 macro_rules! setters {
@@ -143,6 +145,7 @@ impl StyleRefinement {
         text_color => text_color: ColorValue,
         font_size => font_size: Length,
         font_weight => font_weight: FontWeight,
+        text_align => text_align: TextAlign,
     }
 
     plain_setters! {
@@ -153,6 +156,8 @@ impl StyleRefinement {
         overflow_y => overflow_y: Overflow,
         /// Line height as a multiple of the font size.
         line_height => line_height: f32,
+        /// Clips each explicit line with `…` instead of wrapping.
+        ellipsis => ellipsis: bool,
     }
 
     sided_setters!(padding, padding_x, padding_y =>
@@ -182,7 +187,7 @@ impl StyleRefinement {
             width, height, min_width, min_height, max_width, max_height,
             flex_grow, flex_shrink, grid_columns, overflow_x, overflow_y,
             background, border_color, border_width, corner_radius, shadow,
-            text_color, font_size, line_height, font_weight,
+            text_color, font_size, line_height, font_weight, text_align, ellipsis,
         );
     }
 
@@ -269,6 +274,8 @@ impl StyleRefinement {
         );
         assign(&mut text.line_height, self.line_height);
         assign(&mut text.weight, self.font_weight);
+        assign(&mut text.align, self.text_align);
+        assign(&mut text.ellipsis, self.ellipsis);
     }
 }
 

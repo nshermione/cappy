@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use cappy_core::{Size, TextMeasureRequest, TextMeasurer};
+use cappy_core::{CaretGeometry, Size, TextAlign, TextMeasureRequest, TextMeasurer};
 
 use crate::geometry::hit_index;
 use cosmic_text::FontSystem;
@@ -47,6 +47,28 @@ impl CosmicTextMeasurer {
         }
     }
 
+    fn shaped(
+        &mut self,
+        request: &TextMeasureRequest<'_>,
+        max_width: Option<f32>,
+        align: TextAlign,
+        align_width: f32,
+    ) -> cosmic_text::Buffer {
+        let font = TextFont {
+            font_size: request.font_size,
+            line_height: request.line_height,
+            weight: request.weight,
+        };
+        shape_text(
+            &mut self.font_system,
+            request.text,
+            font,
+            max_width,
+            align,
+            align_width,
+        )
+    }
+
     fn measure_uncached(
         &mut self,
         request: &TextMeasureRequest<'_>,
@@ -57,7 +79,14 @@ impl CosmicTextMeasurer {
             line_height: request.line_height,
             weight: request.weight,
         };
-        let buffer = shape_text(&mut self.font_system, request.text, font, max_width);
+        let buffer = shape_text(
+            &mut self.font_system,
+            request.text,
+            font,
+            max_width,
+            TextAlign::Start,
+            0.0,
+        );
         let (width, height) = shaped_extent(&buffer);
         // Rounding up keeps the text from wrapping again when laid out in exactly this width.
         Size::new(width.ceil(), height)
@@ -69,16 +98,40 @@ impl TextMeasurer for CosmicTextMeasurer {
         &mut self,
         request: &TextMeasureRequest<'_>,
         max_width: Option<f32>,
+        align: TextAlign,
+        align_width: f32,
         x: f32,
         y: f32,
     ) -> usize {
-        let font = TextFont {
-            font_size: request.font_size,
-            line_height: request.line_height,
-            weight: request.weight,
-        };
-        let buffer = shape_text(&mut self.font_system, request.text, font, max_width);
+        let buffer = self.shaped(request, max_width, align, align_width);
         hit_index(&buffer, x, y)
+    }
+
+    fn caret_geometry(
+        &mut self,
+        request: &TextMeasureRequest<'_>,
+        max_width: Option<f32>,
+        align: TextAlign,
+        align_width: f32,
+        index: usize,
+    ) -> CaretGeometry {
+        let buffer = self.shaped(request, max_width, align, align_width);
+        let (x, y, line_height) = crate::geometry::caret_origin(&buffer, index).unwrap_or((
+            0.0,
+            0.0,
+            request.line_height,
+        ));
+        let line_width = buffer
+            .layout_runs()
+            .find(|run| (run.line_top - y).abs() < 0.5)
+            .map(|run| run.line_w)
+            .unwrap_or(0.0);
+        CaretGeometry {
+            x,
+            y,
+            line_width,
+            line_height,
+        }
     }
 
     fn measure(&mut self, request: &TextMeasureRequest<'_>, max_width: Option<f32>) -> Size {

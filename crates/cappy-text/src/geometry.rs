@@ -129,6 +129,8 @@ mod tests {
                 weight: 400,
             },
             None,
+            cappy_core::TextAlign::Start,
+            0.0,
         )
     }
 

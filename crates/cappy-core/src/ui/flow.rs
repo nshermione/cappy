@@ -383,12 +383,22 @@ impl Ui {
                         (String::new(), Some(write))
                     }
                 };
-                let published = text.clone();
+                let edit = if spec.multiline {
+                    TextEdit::from_lines(text)
+                } else {
+                    TextEdit::new(text)
+                };
+                let published = edit.text().to_owned();
                 NodeContent::Input(InputField {
-                    edit: TextEdit::new(text),
+                    edit,
                     placeholder: spec.placeholder,
                     disabled: disabled || spec.disabled,
+                    multiline: spec.multiline,
+                    mask: spec.mask,
                     scroll_x: 0.0,
+                    scroll_y: 0.0,
+                    goal_x: None,
+                    layout_sample: String::new(),
                     on_input: spec.on_input,
                     on_submit: spec.on_submit,
                     writer,

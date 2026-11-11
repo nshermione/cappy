@@ -100,12 +100,20 @@ pub(crate) enum NodeContent {
     Input(InputField),
 }
 
-/// Editing state of one single-line input.
+/// Editing state of one input. A multiline field keeps newlines and scrolls vertically.
 pub(crate) struct InputField {
     pub(crate) edit: TextEdit,
     pub(crate) placeholder: String,
     pub(crate) disabled: bool,
+    pub(crate) multiline: bool,
+    /// Committed graphemes draw as bullets. The stored value stays plain.
+    pub(crate) mask: bool,
     pub(crate) scroll_x: f32,
+    pub(crate) scroll_y: f32,
+    /// Horizontal aim for the next Up or Down, in text coordinates. Cleared by any other move.
+    pub(crate) goal_x: Option<f32>,
+    /// Sample last given to layout, so a caret move does not measure the field again.
+    pub(crate) layout_sample: String,
     pub(crate) on_input: Option<InputHandler>,
     pub(crate) on_submit: Option<InputHandler>,
     pub(crate) writer: Option<Box<dyn Fn(String)>>,

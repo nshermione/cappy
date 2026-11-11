@@ -53,7 +53,6 @@ use cappy_host::{
 };
 use cappy_text::FontContext;
 use winit::application::ApplicationHandler;
-#[cfg(not(target_arch = "wasm32"))]
 use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
@@ -235,6 +234,8 @@ struct WindowChrome {
     /// Set once the first presented frame has been followed by [`Window::set_visible`].
     shown: bool,
     modifiers: Modifiers,
+    /// Last caret rect sent to the OS. `None` means no input is focused.
+    ime_caret: Option<cappy_core::Rect>,
 }
 
 enum WindowSlot {
@@ -330,6 +331,7 @@ impl WinitHost {
                 settle_at: None,
                 shown: false,
                 modifiers: Modifiers::default(),
+                ime_caret: None,
             },
         )
     }
@@ -803,6 +805,7 @@ fn apply_window_event(chrome: &mut WindowChrome, host: &mut WindowHost, event: W
     for input in events {
         let response = host.handle_event(input);
         apply_cursor(&window, response.cursor);
+        apply_ime_caret(chrome, host);
         if response.redraw {
             // `about_to_wait` sleeps until `settle_at`. Leaving the caret blink there
             // holds this redraw until the caret flips.
@@ -897,6 +900,25 @@ fn apply_cursor(window: &Window, cursor: Option<CursorIcon>) {
     }
 }
 
+/// Moves the OS IME window when the caret rect changes. `None` leaves the last area in place.
+fn apply_ime_caret(chrome: &mut WindowChrome, host: &mut WindowHost) {
+    let rect = host.ui_mut().ime_caret_rect();
+    if chrome.ime_caret == rect {
+        return;
+    }
+    chrome.ime_caret = rect;
+    let Some(rect) = rect else {
+        return;
+    };
+    chrome.window.set_ime_cursor_area(
+        LogicalPosition::new(f64::from(rect.x), f64::from(rect.y)),
+        LogicalSize::new(
+            f64::from(rect.width.max(1.0)),
+            f64::from(rect.height.max(1.0)),
+        ),
+    );
+}
+
 fn is_debug_toggle(event: &KeyEvent) -> bool {
     event.state == ElementState::Pressed
         && !event.repeat
@@ -918,6 +940,7 @@ fn redraw(chrome: &mut WindowChrome, host: &mut WindowHost) -> Result<(), RunErr
         .redraw((size.width, size.height), chrome.window.scale_factor())
         .map_err(RunError::Renderer)?;
     apply_cursor(&chrome.window, result.cursor);
+    apply_ime_caret(chrome, host);
     chrome.settle_at = result.settle_at;
     if !chrome.shown {
         match result.present {

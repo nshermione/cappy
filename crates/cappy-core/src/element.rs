@@ -71,6 +71,8 @@ pub struct InputSpec {
     pub on_submit: Option<InputHandler>,
     pub disabled: bool,
     pub disabled_when: Option<DisabledBinding>,
+    pub multiline: bool,
+    pub mask: bool,
 }
 
 impl InputSpec {
@@ -82,6 +84,8 @@ impl InputSpec {
             on_submit: None,
             disabled: false,
             disabled_when: None,
+            multiline: false,
+            mask: false,
         }
     }
 }
@@ -697,7 +701,30 @@ impl Element {
         self
     }
 
-    /// Called with the value when Enter is pressed. Enter does not insert a newline.
+    /// Keeps newlines when `on` is set. Enter inserts a line instead of submitting, and Up and
+    /// Down move the caret.
+    ///
+    /// # Panics
+    /// Panics when the element is not an input.
+    #[must_use]
+    pub fn multiline(mut self, on: bool) -> Self {
+        self.input_spec().multiline = on;
+        self
+    }
+
+    /// Draws each committed grapheme as `•` when `on` is set. The value, copy and paste stay the
+    /// real text. A preedit stays visible until it commits.
+    ///
+    /// # Panics
+    /// Panics when the element is not an input.
+    #[must_use]
+    pub fn mask(mut self, on: bool) -> Self {
+        self.input_spec().mask = on;
+        self
+    }
+
+    /// Called with the value when Enter is pressed on a single-line input. Enter does not insert
+    /// a newline there. A multiline input inserts a newline and does not submit.
     ///
     /// # Panics
     /// Panics when the element is not an input.
@@ -1116,6 +1143,8 @@ pub struct InputBuilder<T> {
     on_input: Option<InputHandler>,
     on_submit: Option<InputHandler>,
     disabled: bool,
+    multiline: bool,
+    mask: bool,
 }
 
 impl InputBuilder<()> {
@@ -1127,6 +1156,8 @@ impl InputBuilder<()> {
             on_input: None,
             on_submit: None,
             disabled: false,
+            multiline: false,
+            mask: false,
         }
     }
 }
@@ -1140,7 +1171,21 @@ impl<T> InputBuilder<T> {
             on_input: self.on_input,
             on_submit: self.on_submit,
             disabled: self.disabled,
+            multiline: self.multiline,
+            mask: self.mask,
         }
+    }
+
+    #[must_use]
+    pub fn multiline(mut self, on: bool) -> Self {
+        self.multiline = on;
+        self
+    }
+
+    #[must_use]
+    pub fn mask(mut self, on: bool) -> Self {
+        self.mask = on;
+        self
     }
 
     #[must_use]
@@ -1185,6 +1230,8 @@ impl<T: IntoInputValue> IntoElement for InputBuilder<T> {
             self.on_input,
             self.on_submit,
             self.disabled,
+            self.multiline,
+            self.mask,
         );
         element
     }
@@ -1198,6 +1245,8 @@ fn finish_input(builder: InputBuilder<()>, value: String) -> Element {
         builder.on_input,
         builder.on_submit,
         builder.disabled,
+        builder.multiline,
+        builder.mask,
     );
     element
 }
@@ -1208,12 +1257,16 @@ fn apply_input_fields(
     on_input: Option<InputHandler>,
     on_submit: Option<InputHandler>,
     disabled: bool,
+    multiline: bool,
+    mask: bool,
 ) {
     let spec = element.input_spec();
     spec.placeholder = placeholder;
     spec.on_input = on_input;
     spec.on_submit = on_submit;
     spec.disabled = disabled;
+    spec.multiline = multiline;
+    spec.mask = mask;
     element.disabled = disabled;
 }
 

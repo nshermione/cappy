@@ -73,7 +73,7 @@ impl TextPainter {
             .expect("the buffer was shaped just above");
         let color = text.color.to_rgba8();
         let left = (text.rect.x - text.scroll_x) * scale_factor;
-        let top = text.rect.y * scale_factor;
+        let top = (text.rect.y - text.scroll_y) * scale_factor;
         let target_width = target.width() as usize;
         let pixels = target.data_mut();
         if let Some((start, end)) = text.selection {
@@ -139,7 +139,7 @@ fn logical_rect(
 ) -> ClipBounds {
     let rect = Rect::new(
         text.rect.x + x - text.scroll_x,
-        text.rect.y + y,
+        text.rect.y + y - text.scroll_y,
         width,
         height,
     );
@@ -276,6 +276,8 @@ mod tests {
             selection: None,
             wrap: true,
             scroll_x: 0.0,
+            scroll_y: 0.0,
+            align: cappy_core::TextAlign::Start,
         }
     }
 

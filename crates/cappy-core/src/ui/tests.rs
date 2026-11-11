@@ -3068,6 +3068,296 @@ fn ime_commit_inserts_at_the_caret() {
 }
 
 #[test]
+fn a_single_line_input_strips_newlines_and_enter_submits() {
+    let cx = context();
+    let name = cx.reactive(String::new());
+    let submitted = Rc::new(Cell::new(false));
+    let flag = Rc::clone(&submitted);
+    let mut ui = settled(
+        &cx,
+        input()
+            .value(Dynamic(move || name))
+            .on_submit(move |_| flag.set(true))
+            .key("field"),
+    );
+    key(&mut ui, Key::Tab, Modifiers::default());
+    ui.handle_event(InputEvent::Text("a\nb".into()));
+    key(&mut ui, Key::Enter, Modifiers::default());
+    assert_eq!(name.get(), "ab");
+    assert!(submitted.get());
+}
+
+#[test]
+fn a_multiline_input_keeps_newlines_and_enter_does_not_submit() {
+    let cx = context();
+    let name = cx.reactive(String::new());
+    let submitted = Rc::new(Cell::new(false));
+    let flag = Rc::clone(&submitted);
+    let mut ui = settled(
+        &cx,
+        div()
+            .style(StyleRefinement::default().direction(FlexDirection::Column))
+            .child(
+                input()
+                    .multiline(true)
+                    .value(Dynamic(move || name))
+                    .on_submit(move |_| flag.set(true))
+                    .key("field")
+                    .style(
+                        StyleRefinement::default()
+                            .width(80)
+                            .font_size(10)
+                            .line_height(1.0),
+                    ),
+            ),
+    );
+    key(&mut ui, Key::Tab, Modifiers::default());
+    ui.handle_event(InputEvent::Text("a\nb".into()));
+    ui.update(VIEWPORT);
+    assert_eq!(name.get(), "a\nb");
+    let two_lines = ui
+        .node_rect(ui.find_by_key("field").unwrap())
+        .unwrap()
+        .height;
+    key(&mut ui, Key::Enter, Modifiers::default());
+    ui.update(VIEWPORT);
+    assert_eq!(name.get(), "a\nb\n");
+    assert!(!submitted.get());
+    let three_lines = ui
+        .node_rect(ui.find_by_key("field").unwrap())
+        .unwrap()
+        .height;
+    assert!(three_lines > two_lines + 5.0);
+}
+
+#[test]
+fn up_and_down_in_a_multiline_input_stay_out_of_a_vertical_scope() {
+    let cx = context();
+    let name = cx.reactive(String::from("ab\ncd"));
+    let current = cx.reactive(String::new());
+    let mut ui = settled(
+        &cx,
+        div().focus_scope(FocusScope::Vertical).children([
+            focus_mark("mark", &current),
+            input()
+                .multiline(true)
+                .value(Dynamic(move || name))
+                .key("field")
+                .style(
+                    StyleRefinement::default()
+                        .width(80)
+                        .font_size(10)
+                        .line_height(1.0),
+                ),
+        ]),
+    );
+    let field = ui.node_rect(ui.find_by_key("field").unwrap()).unwrap();
+    click_at(&mut ui, field.x + 2.0, field.y + 2.0);
+    key(&mut ui, Key::Down, Modifiers::default());
+    ui.handle_event(InputEvent::Text("X".into()));
+    assert_eq!(name.get(), "ab\nXcd");
+    assert_eq!(current.get_untracked(), "");
+}
+
+#[test]
+fn a_masked_input_draws_bullets_copies_the_real_text_and_shows_preedit() {
+    let cx = context();
+    let name = cx.reactive(String::from("ab"));
+    let mut ui = settled(
+        &cx,
+        input()
+            .mask(true)
+            .value(Dynamic(move || name))
+            .key("field")
+            .style(StyleRefinement::default().width(80).font_size(10)),
+    );
+    key(&mut ui, Key::Tab, Modifiers::default());
+    ui.update(VIEWPORT);
+    let bullets = "\u{2022}\u{2022}";
+    assert!(painted_text(&ui).iter().any(|text| text == bullets));
+    key(&mut ui, Key::Character('a'), ctrl());
+    key(&mut ui, Key::Character('c'), ctrl());
+    assert_eq!(ui.clipboard_mut().read_text().as_deref(), Some("ab"));
+    key(&mut ui, Key::Right, Modifiers::default());
+    ui.handle_event(InputEvent::Ime(ImeEvent::Preedit {
+        text: "ế".into(),
+        cursor: None,
+    }));
+    ui.update(VIEWPORT);
+    assert!(
+        painted_text(&ui)
+            .iter()
+            .any(|text| text.contains('ế') && text.contains('\u{2022}'))
+    );
+    ui.handle_event(InputEvent::Ime(ImeEvent::Commit("ế".into())));
+    ui.update(VIEWPORT);
+    assert_eq!(name.get(), "abế");
+    assert!(
+        painted_text(&ui)
+            .iter()
+            .any(|text| text == "\u{2022}\u{2022}\u{2022}")
+    );
+}
+
+#[test]
+fn ellipsis_clips_a_line_instead_of_wrapping_it() {
+    let mut ui = settled(
+        &context(),
+        div()
+            .style(StyleRefinement::default().direction(FlexDirection::Column))
+            .child(
+                text("hello world").key("label").style(
+                    StyleRefinement::default()
+                        .width(40)
+                        .font_size(10)
+                        .line_height(1.0)
+                        .ellipsis(true),
+                ),
+            ),
+    );
+    ui.update(VIEWPORT);
+    let rect = ui.node_rect(ui.find_by_key("label").unwrap()).unwrap();
+    assert!(rect.height < 16.0, "height {}", rect.height);
+    let painted = painted_text(&ui);
+    assert!(
+        painted
+            .iter()
+            .any(|text| text.ends_with('\u{2026}') && !text.contains('\n'))
+    );
+}
+
+#[test]
+fn the_caret_rect_follows_the_caret_and_clears_when_the_input_blurs() {
+    let mut ui = settled(
+        &context(),
+        div().children([
+            input().value("hi").key("field").style(
+                StyleRefinement::default()
+                    .width(80)
+                    .font_size(10)
+                    .line_height(1.0),
+            ),
+            div()
+                .key("next")
+                .focusable()
+                .style(StyleRefinement::default().size(20)),
+        ]),
+    );
+    key(&mut ui, Key::Tab, Modifiers::default());
+    let before = ui.ime_caret_rect().expect("focused input");
+    key(&mut ui, Key::Left, Modifiers::default());
+    let after = ui.ime_caret_rect().expect("caret moved");
+    assert!(after.x < before.x - 1.0);
+    key(&mut ui, Key::Tab, Modifiers::default());
+    assert_eq!(ui.ime_caret_rect(), None);
+}
+
+#[test]
+fn centering_shifts_the_caret_rect() {
+    let mut ui = settled(
+        &context(),
+        input().value("aa").key("field").style(
+            StyleRefinement::default()
+                .width(40)
+                .font_size(10)
+                .line_height(1.0)
+                .text_align(crate::TextAlign::Center),
+        ),
+    );
+    key(&mut ui, Key::Tab, Modifiers::default());
+    let rect = ui.ime_caret_rect().expect("caret");
+    assert!((rect.x - 25.0).abs() < 1.0, "x {}", rect.x);
+}
+
+#[test]
+fn a_fixed_height_multiline_input_scrolls_the_caret_into_view() {
+    let mut ui = settled(
+        &context(),
+        div()
+            .style(StyleRefinement::default().direction(FlexDirection::Column))
+            .child(
+                input().multiline(true).value("a\nb\nc").key("field").style(
+                    StyleRefinement::default()
+                        .width(80)
+                        .height(12)
+                        .font_size(10)
+                        .line_height(1.0),
+                ),
+            ),
+    );
+    key(&mut ui, Key::Tab, Modifiers::default());
+    ui.update(VIEWPORT);
+    let scroll_y = ui
+        .display_list()
+        .iter()
+        .find_map(|primitive| match primitive {
+            Primitive::Text(text) => Some(text.scroll_y),
+            Primitive::Quad(_) | Primitive::Shadow(_) | Primitive::Image(_) => None,
+        });
+    assert!(
+        scroll_y.is_some_and(|offset| offset > 1.0),
+        "scroll {scroll_y:?}"
+    );
+}
+
+#[test]
+fn end_moves_to_the_end_of_the_visual_line() {
+    let cx = context();
+    let name = cx.reactive(String::from("ab\ncd"));
+    let mut ui = settled(
+        &cx,
+        div()
+            .style(StyleRefinement::default().direction(FlexDirection::Column))
+            .child(
+                input()
+                    .multiline(true)
+                    .value(Dynamic(move || name))
+                    .key("field")
+                    .style(
+                        StyleRefinement::default()
+                            .width(80)
+                            .font_size(10)
+                            .line_height(1.0),
+                    ),
+            ),
+    );
+    let field = ui.node_rect(ui.find_by_key("field").unwrap()).unwrap();
+    click_at(&mut ui, field.x + 2.0, field.y + 2.0);
+    key(&mut ui, Key::End, Modifiers::default());
+    ui.handle_event(InputEvent::Text("X".into()));
+    assert_eq!(name.get(), "abX\ncd");
+}
+
+#[test]
+fn an_unchanged_input_frame_stays_idle() {
+    let (element, _) = field("hi");
+    let mut ui = settled(&context(), element);
+    key(&mut ui, Key::Tab, Modifiers::default());
+    ui.update(VIEWPORT);
+    ui.prepare_frame();
+    assert!(!ui.needs_update());
+    let caret = ui.ime_caret_rect();
+    assert!(caret.is_some());
+    assert!(!ui.needs_update());
+    let rect = ui.node_rect(ui.find_by_key("field").unwrap()).unwrap();
+    ui.handle_event(InputEvent::PointerMoved {
+        position: Point::new(rect.x + 8.0, rect.y + 4.0),
+    });
+    assert_eq!(ui.update(VIEWPORT), UpdateOutcome::Idle);
+    assert_eq!(ui.ime_caret_rect(), caret);
+}
+
+fn painted_text(ui: &Ui) -> Vec<String> {
+    ui.display_list()
+        .iter()
+        .filter_map(|primitive| match primitive {
+            Primitive::Text(text) => Some(text.text.to_string()),
+            Primitive::Quad(_) | Primitive::Shadow(_) | Primitive::Image(_) => None,
+        })
+        .collect()
+}
+
+#[test]
 fn a_disabled_input_does_not_take_focus_or_text() {
     let (element, seen) = field("hi");
     let element = element.disabled(true);

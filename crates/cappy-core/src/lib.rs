@@ -60,6 +60,6 @@ pub use ui::{Anim, AnimHandle, Ease, Motion, MotionCtx, Repeat};
 pub use ui::{FrameInput, NodeId, ResourceCensus, Ui, UpdateOutcome};
 
 pub use cappy_layout::{
-    ApproximateTextMeasurer, Point, Rect, Size, TextMeasureRequest, TextMeasurer,
+    ApproximateTextMeasurer, CaretGeometry, Point, Rect, Size, TextMeasureRequest, TextMeasurer,
 };
 pub use cappy_style::*;

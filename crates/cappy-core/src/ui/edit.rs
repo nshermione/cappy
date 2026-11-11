@@ -38,8 +38,18 @@ pub(crate) struct TextEdit {
 }
 
 impl TextEdit {
+    /// A single-line buffer. Newlines in `text` are dropped.
     pub(crate) fn new(text: impl Into<String>) -> Self {
-        let text = text.into();
+        Self::opening(text, false)
+    }
+
+    /// A multiline buffer. Carriage returns are dropped and newlines stay.
+    pub(crate) fn from_lines(text: impl Into<String>) -> Self {
+        Self::opening(text, true)
+    }
+
+    fn opening(text: impl Into<String>, multiline: bool) -> Self {
+        let text = normalize_newlines(&text.into(), multiline);
         let end = text.len();
         Self {
             caret: end,
@@ -58,6 +68,16 @@ impl TextEdit {
     /// Replaces the string. `keep_caret` clamps the current caret; otherwise the caret goes to
     /// the end, which is the initial value before the field is focused.
     pub(crate) fn set_text(&mut self, text: String, keep_caret: bool) {
+        self.write_text(text, keep_caret, false);
+    }
+
+    /// Replaces the string and keeps newlines. Carriage returns are dropped.
+    pub(crate) fn set_lines(&mut self, text: String, keep_caret: bool) {
+        self.write_text(text, keep_caret, true);
+    }
+
+    fn write_text(&mut self, text: String, keep_caret: bool, multiline: bool) {
+        let text = normalize_newlines(&text, multiline);
         if keep_caret {
             self.caret = floor_grapheme(&text, self.caret);
             self.anchor = floor_grapheme(&text, self.anchor);
@@ -75,6 +95,62 @@ impl TextEdit {
         } else {
             Some((self.caret.min(self.anchor), self.caret.max(self.anchor)))
         }
+    }
+
+    /// Text as drawn. `mask` replaces each committed grapheme with `•` and leaves a preedit visible.
+    pub(crate) fn paint(&self, mask: bool) -> DisplayText {
+        if !mask {
+            return self.display();
+        }
+        let before = mask_text(&self.text[..self.caret]);
+        let after = mask_text(&self.text[self.caret..]);
+        let Some(preedit) = &self.preedit else {
+            let caret = before.len();
+            let selection = self.selection().map(|(start, end)| {
+                (
+                    mask_prefix_len(&self.text, start),
+                    mask_prefix_len(&self.text, end),
+                )
+            });
+            let mut text = before;
+            text.push_str(&after);
+            return DisplayText {
+                text,
+                caret,
+                selection,
+            };
+        };
+        let mut text = before;
+        let caret = text.len() + preedit.cursor;
+        text.push_str(&preedit.text);
+        text.push_str(&after);
+        DisplayText {
+            text,
+            caret,
+            selection: None,
+        }
+    }
+
+    /// Maps a byte index in [`Self::paint`] back to a byte index in the real value.
+    pub(crate) fn index_from_paint(&self, paint_index: usize, mask: bool) -> usize {
+        if !mask {
+            return paint_index;
+        }
+        let before = &self.text[..self.caret];
+        let after = &self.text[self.caret..];
+        let before_end = mask_text(before).len();
+        let preedit_len = self
+            .preedit
+            .as_ref()
+            .map(|item| item.text.len())
+            .unwrap_or(0);
+        if paint_index <= before_end {
+            return unmask_index(before, paint_index);
+        }
+        if paint_index <= before_end + preedit_len {
+            return self.caret;
+        }
+        self.caret + unmask_index(after, paint_index - before_end - preedit_len)
     }
 
     /// Text as drawn: the value with the IME preedit spliced in at the caret.
@@ -140,7 +216,20 @@ impl TextEdit {
     }
 
     pub(crate) fn insert(&mut self, extra: &str) -> EditChange {
-        let extra = single_line(extra);
+        self.insert_mode(extra, false)
+    }
+
+    /// Inserts `extra`, keeping newlines and dropping carriage returns.
+    pub(crate) fn insert_lines(&mut self, extra: &str) -> EditChange {
+        self.insert_mode(extra, true)
+    }
+
+    fn insert_mode(&mut self, extra: &str, multiline: bool) -> EditChange {
+        let extra = if multiline {
+            keep_lines(extra)
+        } else {
+            single_line(extra)
+        };
         self.preedit = None;
         if extra.is_empty() && self.caret == self.anchor {
             return EditChange::None;
@@ -336,10 +425,51 @@ pub(crate) struct DisplayText {
     pub(crate) selection: Option<(usize, usize)>,
 }
 
+fn normalize_newlines(text: &str, multiline: bool) -> String {
+    if multiline {
+        keep_lines(text)
+    } else {
+        single_line(text)
+    }
+}
+
 fn single_line(text: &str) -> String {
     text.chars()
         .filter(|ch| *ch != '\n' && *ch != '\r')
         .collect()
+}
+
+fn keep_lines(text: &str) -> String {
+    text.chars().filter(|ch| *ch != '\r').collect()
+}
+
+const MASK: char = '\u{2022}';
+
+fn mask_text(text: &str) -> String {
+    let mut masked = String::new();
+    for grapheme in text.graphemes(true) {
+        if grapheme == "\n" {
+            masked.push('\n');
+        } else {
+            masked.push(MASK);
+        }
+    }
+    masked
+}
+
+fn mask_prefix_len(text: &str, byte: usize) -> usize {
+    mask_text(&text[..byte.min(text.len())]).len()
+}
+
+fn unmask_index(text: &str, masked_byte: usize) -> usize {
+    let mut covered = 0usize;
+    for (offset, grapheme) in text.grapheme_indices(true) {
+        if covered >= masked_byte {
+            return offset;
+        }
+        covered += if grapheme == "\n" { 1 } else { MASK.len_utf8() };
+    }
+    text.len()
 }
 
 fn floor_grapheme(text: &str, index: usize) -> usize {

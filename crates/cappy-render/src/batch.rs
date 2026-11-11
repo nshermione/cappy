@@ -114,6 +114,8 @@ mod tests {
             selection: None,
             wrap: true,
             scroll_x: 0.0,
+            scroll_y: 0.0,
+            align: cappy_core::TextAlign::Start,
         })
     }
 

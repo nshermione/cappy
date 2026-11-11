@@ -1,7 +1,7 @@
 //! Pointer, keyboard and focus handling.
 
 use cappy_layout::{Point, Rect, TextMeasureRequest};
-use cappy_style::{Display, InteractionState, Overflow};
+use cappy_style::{Display, InteractionState, Overflow, TextAlign};
 
 use super::edit::{EditChange, TextEdit};
 use super::node::NodeContent;
@@ -591,6 +591,7 @@ impl Ui {
             } else {
                 self.edit_input(id, |edit| edit.place(index, extend));
             }
+            self.drop_input_goal(id);
             self.reveal_input_caret(id);
             self.show_caret(id);
         }
@@ -608,6 +609,7 @@ impl Ui {
         if self.is_input(id) && phase == PointerPhase::Move {
             let index = self.input_hit(id);
             self.edit_input(id, |edit| edit.place(index, true));
+            self.drop_input_goal(id);
             self.reveal_input_caret(id);
             self.show_caret(id);
         }
@@ -713,7 +715,7 @@ impl Ui {
                 if let NodeContent::Input(field) = &mut self.nodes[id.index()].content {
                     field.swallow_text = None;
                 }
-            } else if self.edit_input(id, |edit| edit.insert(text)) == EditChange::Value {
+            } else if self.insert_input(id, text) == EditChange::Value {
                 self.publish_input(id);
                 self.reveal_input_caret(id);
                 self.show_caret(id);
@@ -741,7 +743,7 @@ impl Ui {
                     self.edit_input(id, |edit| edit.set_preedit(text, *cursor))
                 }
                 ImeEvent::Commit(text) => {
-                    let change = self.edit_input(id, |edit| edit.insert(text));
+                    let change = self.insert_input(id, text);
                     if let NodeContent::Input(field) = &mut self.nodes[id.index()].content {
                         field.swallow_text = Some(text.clone());
                     }
@@ -773,10 +775,37 @@ impl Ui {
             Key::Delete => self.edit_input(id, |edit| edit.delete_forward(word)),
             Key::Left => self.edit_input(id, |edit| edit.move_left(shift, word)),
             Key::Right => self.edit_input(id, |edit| edit.move_right(shift, word)),
+            Key::Home if self.is_multiline(id) => {
+                self.move_input_line_edge(id, false, shift);
+                return;
+            }
+            Key::End if self.is_multiline(id) => {
+                self.move_input_line_edge(id, true, shift);
+                return;
+            }
             Key::Home => self.edit_input(id, |edit| edit.move_home(shift)),
             Key::End => self.edit_input(id, |edit| edit.move_end(shift)),
+            Key::Up if self.is_multiline(id) => {
+                self.move_input_vertically(id, false, shift);
+                return;
+            }
+            Key::Down if self.is_multiline(id) => {
+                self.move_input_vertically(id, true, shift);
+                return;
+            }
             Key::Enter => {
-                self.submit_input(id);
+                if self.is_multiline(id) {
+                    let change = self.insert_input(id, "\n");
+                    if change == EditChange::Value {
+                        self.publish_input(id);
+                    }
+                    if change != EditChange::None {
+                        self.reveal_input_caret(id);
+                        self.show_caret(id);
+                    }
+                } else {
+                    self.submit_input(id);
+                }
                 return;
             }
             Key::Character(ch) if event.modifiers.primary() => match ch.to_ascii_lowercase() {
@@ -804,6 +833,7 @@ impl Ui {
             self.publish_input(id);
         }
         if change != EditChange::None {
+            self.drop_input_goal(id);
             self.reveal_input_caret(id);
             self.show_caret(id);
         }
@@ -947,6 +977,9 @@ impl Ui {
             return false;
         };
         if matches!(key, Key::Left | Key::Right) && self.is_input(focused) {
+            return false;
+        }
+        if matches!(key, Key::Up | Key::Down) && self.is_multiline(focused) {
             return false;
         }
         let Some(scope) = self.scope_from(focused, kind) else {
@@ -1190,6 +1223,9 @@ impl Ui {
         self.focused = Some(id);
         self.set_interaction(id, |state| state.focused = true);
         self.call_focus(id, true);
+        if self.is_input(id) {
+            self.reveal_input_caret(id);
+        }
         self.show_caret(id);
     }
 
@@ -1288,7 +1324,7 @@ impl Ui {
         let Some(text) = self.clipboard.read_text() else {
             return;
         };
-        if self.edit_input(id, |edit| edit.insert(&text)) == EditChange::Value {
+        if self.insert_input(id, &text) == EditChange::Value {
             self.publish_input(id);
             self.reveal_input_caret(id);
             self.show_caret(id);
@@ -1365,9 +1401,14 @@ impl Ui {
         if unchanged {
             return;
         }
+        let multiline = self.is_multiline(id);
         if let NodeContent::Input(field) = &mut self.nodes[id.index()].content {
-            field.edit.set_text(value.clone(), focused);
-            field.published = value;
+            if multiline {
+                field.edit.set_lines(value.clone(), focused);
+            } else {
+                field.edit.set_text(value.clone(), focused);
+            }
+            field.published = field.edit.text().to_owned();
         }
         self.reveal_input_caret(id);
         self.mark_paint_dirty(id);
@@ -1436,34 +1477,41 @@ impl Ui {
             return 0;
         };
         let local = self.local_point(id, point);
-        let (display, scroll, origin, text_style) = {
+        let (display, scroll, origin, text_style, multiline, mask) = {
             let node = &self.nodes[id.index()];
             let NodeContent::Input(field) = &node.content else {
                 return 0;
             };
-            if field.edit.text().is_empty() && field.edit.display().text.is_empty() {
+            let display = field.edit.paint(field.mask);
+            if display.text.is_empty() {
                 return 0;
             }
             (
-                field.edit.display(),
-                field.scroll_x,
+                display,
+                Point::new(field.scroll_x, field.scroll_y),
                 content_box(node),
                 node.style.text.clone(),
+                field.multiline,
+                field.mask,
             )
         };
-        let x = local.x - origin.x + scroll;
-        let y = local.y - origin.y;
-        self.measurer.hit_test(
-            &TextMeasureRequest {
-                text: &display.text,
-                font_size: text_style.font_size,
-                line_height: text_style.line_height_px(),
-                weight: text_style.weight.0,
-            },
-            None,
-            x,
-            y,
-        )
+        let paint_index = self.measurer.hit_test(
+            &text_request(
+                &display.text,
+                text_style.font_size,
+                text_style.line_height_px(),
+                text_style.weight.0,
+            ),
+            multiline.then_some(origin.width),
+            text_style.align,
+            origin.width,
+            local.x - origin.x + scroll.x,
+            local.y - origin.y + scroll.y,
+        );
+        let NodeContent::Input(field) = &self.nodes[id.index()].content else {
+            return 0;
+        };
+        field.edit.index_from_paint(paint_index, mask)
     }
 
     fn text_hit(&mut self, id: NodeId, point: Point) -> usize {
@@ -1475,15 +1523,27 @@ impl Ui {
             };
             (text.to_owned(), content_box(node), node.style.text.clone())
         };
+        let shown = if text_style.ellipsis {
+            super::passes::ellipsize_text(
+                self.measurer.as_mut(),
+                &text,
+                &text_style,
+                origin_rect.width,
+            )
+        } else {
+            text
+        };
         let width = origin_rect.width;
         self.measurer.hit_test(
-            &TextMeasureRequest {
-                text: &text,
-                font_size: text_style.font_size,
-                line_height: text_style.line_height_px(),
-                weight: text_style.weight.0,
-            },
-            Some(width),
+            &text_request(
+                &shown,
+                text_style.font_size,
+                text_style.line_height_px(),
+                text_style.weight.0,
+            ),
+            (!text_style.ellipsis).then_some(width),
+            text_style.align,
+            width,
             local.x - origin_rect.x,
             local.y - origin_rect.y,
         )
@@ -1493,45 +1553,256 @@ impl Ui {
         if !self.is_input(id) {
             return;
         }
-        let (prefix, scroll, view, text_style) = {
+        self.sync_multiline_sample(id);
+        let (display, scroll, view, text_style, multiline) = {
             let node = &self.nodes[id.index()];
             let NodeContent::Input(field) = &node.content else {
                 return;
             };
-            let display = field.edit.display();
-            let caret = display.caret.min(display.text.len());
+            let display = field.edit.paint(field.mask);
             (
-                display.text.get(..caret).unwrap_or("").to_owned(),
-                field.scroll_x,
-                content_box(node).width,
+                display,
+                Point::new(field.scroll_x, field.scroll_y),
+                content_box(node),
                 node.style.text.clone(),
+                field.multiline,
             )
         };
-        let width = self
-            .measurer
-            .measure(
-                &TextMeasureRequest {
-                    text: &prefix,
-                    font_size: text_style.font_size,
-                    line_height: text_style.line_height_px(),
-                    weight: text_style.weight.0,
-                },
-                None,
-            )
-            .width;
-        let next = if width < scroll {
-            width
-        } else if width > scroll + view {
-            (width - view).max(0.0)
+        if view.width <= 0.0 || view.height <= 0.0 {
+            return;
+        }
+        let caret = display.caret.min(display.text.len());
+        let geometry = self.measurer.caret_geometry(
+            &text_request(
+                &display.text,
+                text_style.font_size,
+                text_style.line_height_px(),
+                text_style.weight.0,
+            ),
+            multiline.then_some(view.width),
+            text_style.align,
+            view.width,
+            caret,
+        );
+        let measured = self.measurer.measure(
+            &text_request(
+                &display.text,
+                text_style.font_size,
+                text_style.line_height_px(),
+                text_style.weight.0,
+            ),
+            multiline.then_some(view.width),
+        );
+        let next_x = reveal_offset(geometry.x, scroll.x, view.width)
+            .min((measured.width - view.width).max(0.0));
+        let next_y = if multiline {
+            reveal_span(geometry.y, geometry.line_height, scroll.y, view.height)
+                .min((measured.height - view.height).max(0.0))
         } else {
-            scroll
+            0.0
         };
         if let NodeContent::Input(field) = &mut self.nodes[id.index()].content
-            && (field.scroll_x - next).abs() > f32::EPSILON
+            && ((field.scroll_x - next_x).abs() > f32::EPSILON
+                || (field.scroll_y - next_y).abs() > f32::EPSILON)
         {
-            field.scroll_x = next;
+            field.scroll_x = next_x;
+            field.scroll_y = next_y;
             self.mark_paint_dirty(id);
         }
+    }
+
+    fn insert_input(&mut self, id: NodeId, text: &str) -> EditChange {
+        let multiline = self.is_multiline(id);
+        self.edit_input(id, |edit| {
+            if multiline {
+                edit.insert_lines(text)
+            } else {
+                edit.insert(text)
+            }
+        })
+    }
+
+    fn is_multiline(&self, id: NodeId) -> bool {
+        matches!(
+            &self.nodes[id.index()].content,
+            NodeContent::Input(field) if field.multiline
+        )
+    }
+
+    fn drop_input_goal(&mut self, id: NodeId) {
+        if let NodeContent::Input(field) = &mut self.nodes[id.index()].content {
+            field.goal_x = None;
+        }
+    }
+
+    fn move_input_vertically(&mut self, id: NodeId, down: bool, extend: bool) {
+        let Some(probe) = self.input_probe(id) else {
+            return;
+        };
+        let geometry = self.caret_at(&probe, probe.caret);
+        let goal_x = probe.goal_x.unwrap_or(geometry.x);
+        let y = if down {
+            geometry.y + geometry.line_height + 0.5
+        } else {
+            geometry.y - 0.5
+        };
+        let paint_index = self.measurer.hit_test(
+            &text_request(
+                &probe.text,
+                probe.font_size,
+                probe.line_height,
+                probe.weight,
+            ),
+            Some(probe.width),
+            probe.align,
+            probe.width,
+            goal_x,
+            y,
+        );
+        self.place_painted(id, paint_index, probe.mask, extend);
+        if let NodeContent::Input(field) = &mut self.nodes[id.index()].content {
+            field.goal_x = Some(goal_x);
+        }
+        self.reveal_input_caret(id);
+        self.show_caret(id);
+    }
+
+    fn move_input_line_edge(&mut self, id: NodeId, end: bool, extend: bool) {
+        let Some(probe) = self.input_probe(id) else {
+            return;
+        };
+        let geometry = self.caret_at(&probe, probe.caret);
+        let x = if end { probe.width + 1000.0 } else { -1000.0 };
+        let paint_index = self.measurer.hit_test(
+            &text_request(
+                &probe.text,
+                probe.font_size,
+                probe.line_height,
+                probe.weight,
+            ),
+            Some(probe.width),
+            probe.align,
+            probe.width,
+            x,
+            geometry.y + geometry.line_height * 0.5,
+        );
+        self.drop_input_goal(id);
+        self.place_painted(id, paint_index, probe.mask, extend);
+        self.reveal_input_caret(id);
+        self.show_caret(id);
+    }
+
+    fn place_painted(&mut self, id: NodeId, paint_index: usize, mask: bool, extend: bool) {
+        let real = match &self.nodes[id.index()].content {
+            NodeContent::Input(field) => field.edit.index_from_paint(paint_index, mask),
+            NodeContent::Container | NodeContent::Text(_) | NodeContent::Image { .. } => return,
+        };
+        self.edit_input(id, |edit| edit.place(real, extend));
+    }
+
+    fn caret_at(&mut self, probe: &InputProbe, index: usize) -> cappy_layout::CaretGeometry {
+        self.measurer.caret_geometry(
+            &text_request(
+                &probe.text,
+                probe.font_size,
+                probe.line_height,
+                probe.weight,
+            ),
+            probe.multiline.then_some(probe.width),
+            probe.align,
+            probe.width,
+            index,
+        )
+    }
+
+    fn input_probe(&self, id: NodeId) -> Option<InputProbe> {
+        let node = &self.nodes[id.index()];
+        let NodeContent::Input(field) = &node.content else {
+            return None;
+        };
+        let display = field.edit.paint(field.mask);
+        let origin = content_box(node);
+        let style = &node.style.text;
+        let caret = display.caret.min(display.text.len());
+        Some(InputProbe {
+            text: display.text,
+            caret,
+            mask: field.mask,
+            multiline: field.multiline,
+            goal_x: field.goal_x,
+            width: origin.width,
+            align: style.align,
+            font_size: style.font_size,
+            line_height: style.line_height_px(),
+            weight: style.weight.0,
+        })
+    }
+
+    pub(super) fn cached_ime_caret(&mut self) -> Option<Rect> {
+        let Some(id) = self.focused else {
+            self.ime_caret = None;
+            return None;
+        };
+        if !self.is_current(id) || !self.is_input(id) {
+            self.ime_caret = None;
+            return None;
+        }
+        let node = &self.nodes[id.index()];
+        let NodeContent::Input(field) = &node.content else {
+            self.ime_caret = None;
+            return None;
+        };
+        if node.rect.width <= 0.0 && node.rect.height <= 0.0 {
+            self.ime_caret = None;
+            return None;
+        }
+        let display = field.edit.paint(field.mask);
+        let origin = content_box(node);
+        let style = &node.style.text;
+        let key = ImeCaretKey {
+            text: display.text.clone(),
+            caret: display.caret.min(display.text.len()),
+            scroll_x: field.scroll_x.to_bits(),
+            scroll_y: field.scroll_y.to_bits(),
+            origin_x: origin.x.to_bits(),
+            origin_y: origin.y.to_bits(),
+            origin_w: origin.width.to_bits(),
+            origin_h: origin.height.to_bits(),
+            align: align_tag(style.align),
+            font_size: style.font_size.to_bits(),
+            line_height: style.line_height_px().to_bits(),
+            weight: style.weight.0,
+            multiline: field.multiline,
+        };
+        if let Some(cache) = &self.ime_caret
+            && cache.key == key
+        {
+            return Some(cache.rect);
+        }
+        let scroll = Point::new(field.scroll_x, field.scroll_y);
+        let multiline = field.multiline;
+        let align = style.align;
+        let font_size = style.font_size;
+        let line_height = style.line_height_px();
+        let weight = style.weight.0;
+        let origin_x = origin.x;
+        let origin_y = origin.y;
+        let origin_width = origin.width;
+        let geometry = self.measurer.caret_geometry(
+            &text_request(&key.text, font_size, line_height, weight),
+            multiline.then_some(origin_width),
+            align,
+            origin_width,
+            key.caret,
+        );
+        let rect = Rect::new(
+            origin_x + geometry.x - scroll.x,
+            origin_y + geometry.y - scroll.y,
+            1.0,
+            geometry.line_height,
+        );
+        self.ime_caret = Some(ImeCaretCache { key, rect });
+        Some(rect)
     }
 
     fn show_caret(&mut self, id: NodeId) {
@@ -1556,6 +1827,93 @@ impl Ui {
         {
             self.mark_paint_dirty(id);
         }
+    }
+}
+
+struct InputProbe {
+    text: String,
+    caret: usize,
+    mask: bool,
+    multiline: bool,
+    goal_x: Option<f32>,
+    width: f32,
+    align: TextAlign,
+    font_size: f32,
+    line_height: f32,
+    weight: u16,
+}
+
+pub(super) struct ImeCaretCache {
+    key: ImeCaretKey,
+    rect: Rect,
+}
+
+#[derive(PartialEq)]
+struct ImeCaretKey {
+    text: String,
+    caret: usize,
+    scroll_x: u32,
+    scroll_y: u32,
+    origin_x: u32,
+    origin_y: u32,
+    origin_w: u32,
+    origin_h: u32,
+    align: u8,
+    font_size: u32,
+    line_height: u32,
+    weight: u16,
+    multiline: bool,
+}
+
+fn align_tag(align: TextAlign) -> u8 {
+    match align {
+        TextAlign::Start => 0,
+        TextAlign::Center => 1,
+        TextAlign::End => 2,
+    }
+}
+
+fn text_request(
+    text: &str,
+    font_size: f32,
+    line_height: f32,
+    weight: u16,
+) -> TextMeasureRequest<'_> {
+    TextMeasureRequest {
+        text,
+        font_size,
+        line_height,
+        weight,
+    }
+}
+
+/// Scroll that keeps a caret point in view. A point already inside the first view stays at zero,
+/// so a measurement made before the box had a size does not stick.
+fn reveal_offset(position: f32, scroll: f32, view: f32) -> f32 {
+    if view <= 0.0 || position <= view {
+        return 0.0;
+    }
+    if position < scroll {
+        position.max(0.0)
+    } else if position > scroll + view {
+        (position - view).max(0.0)
+    } else {
+        scroll
+    }
+}
+
+/// Scroll that keeps one line in view. A line that fits from the origin stays at zero.
+fn reveal_span(top: f32, height: f32, scroll: f32, view: f32) -> f32 {
+    let bottom = top + height;
+    if view <= 0.0 || bottom <= view {
+        return 0.0;
+    }
+    if top < scroll {
+        top.max(0.0)
+    } else if bottom > scroll + view {
+        (bottom - view).max(0.0)
+    } else {
+        scroll
     }
 }
 
