@@ -4489,6 +4489,330 @@ fn a_roving_scope_mounted_with_nothing_focused_does_not_take_focus() {
     assert!(ui.frame_deadline(Instant::now()).is_none());
 }
 
+#[test]
+fn a_zero_delay_runs_on_the_update_that_arms_it() {
+    let cx = context();
+    let mut ui = settled(&cx, div().key("box"));
+    let fired = Rc::new(Cell::new(false));
+    let flag = Rc::clone(&fired);
+    cx.timeout("box", Duration::ZERO, move || flag.set(true));
+    assert!(!fired.get());
+    let start = Instant::now();
+    assert_eq!(ui.update_at(VIEWPORT, start), UpdateOutcome::Idle);
+    assert!(fired.get());
+    assert!(ui.frame_deadline(start).is_none());
+    assert!(!ui.needs_update());
+}
+
+#[test]
+fn a_timeout_waits_and_fires_once() {
+    let cx = context();
+    let mut ui = settled(&cx, div().key("box"));
+    let fired = Rc::new(Cell::new(0));
+    let flag = Rc::clone(&fired);
+    let start = Instant::now();
+    cx.timeout("box", Duration::from_millis(100), move || {
+        flag.set(flag.get() + 1);
+    });
+    assert!(ui.needs_update());
+    assert_eq!(ui.update_at(VIEWPORT, start), UpdateOutcome::Idle);
+    assert_eq!(fired.get(), 0);
+    assert!(!ui.needs_update());
+    assert_eq!(
+        ui.frame_deadline(start),
+        Some(start + Duration::from_millis(100))
+    );
+    assert_eq!(
+        ui.update_at(VIEWPORT, start + Duration::from_millis(99)),
+        UpdateOutcome::Idle
+    );
+    assert_eq!(fired.get(), 0);
+    assert_eq!(
+        ui.update_at(VIEWPORT, start + Duration::from_millis(100)),
+        UpdateOutcome::Idle
+    );
+    assert_eq!(fired.get(), 1);
+    assert!(
+        ui.frame_deadline(start + Duration::from_millis(100))
+            .is_none()
+    );
+    assert_eq!(
+        ui.update_at(VIEWPORT, start + Duration::from_millis(200)),
+        UpdateOutcome::Idle
+    );
+    assert_eq!(fired.get(), 1);
+}
+
+#[test]
+fn the_frame_deadline_is_the_earliest_timeout() {
+    let cx = context();
+    let mut ui = settled(&cx, div().children([div().key("soon"), div().key("later")]));
+    let start = Instant::now();
+    cx.timeout("later", Duration::from_millis(100), || {});
+    cx.timeout("soon", Duration::from_millis(40), || {});
+    ui.update_at(VIEWPORT, start);
+    assert_eq!(
+        ui.frame_deadline(start),
+        Some(start + Duration::from_millis(40))
+    );
+    ui.update_at(VIEWPORT, start + Duration::from_millis(40));
+    assert_eq!(
+        ui.frame_deadline(start + Duration::from_millis(40)),
+        Some(start + Duration::from_millis(100))
+    );
+    ui.update_at(VIEWPORT, start + Duration::from_millis(100));
+    assert!(
+        ui.frame_deadline(start + Duration::from_millis(100))
+            .is_none()
+    );
+}
+
+#[test]
+fn a_second_timeout_on_the_same_key_replaces_the_first() {
+    let cx = context();
+    let mut ui = settled(&cx, div().key("box"));
+    let which = Rc::new(Cell::new(0));
+    let first = Rc::clone(&which);
+    let second = Rc::clone(&which);
+    let start = Instant::now();
+    cx.timeout("box", Duration::from_millis(100), move || first.set(1));
+    ui.update_at(VIEWPORT, start);
+    cx.timeout("box", Duration::from_millis(100), move || second.set(2));
+    ui.update_at(VIEWPORT, start + Duration::from_millis(50));
+    assert_eq!(
+        ui.frame_deadline(start + Duration::from_millis(50)),
+        Some(start + Duration::from_millis(150))
+    );
+    ui.update_at(VIEWPORT, start + Duration::from_millis(100));
+    assert_eq!(which.get(), 0);
+    ui.update_at(VIEWPORT, start + Duration::from_millis(150));
+    assert_eq!(which.get(), 2);
+}
+
+#[test]
+fn clear_timeout_drops_the_callback() {
+    let cx = context();
+    let mut ui = settled(&cx, div().key("box"));
+    let fired = Rc::new(Cell::new(false));
+    let flag = Rc::clone(&fired);
+    let start = Instant::now();
+    cx.timeout("box", Duration::from_millis(100), move || flag.set(true));
+    ui.update_at(VIEWPORT, start);
+    cx.clear_timeout("box");
+    assert_eq!(ui.update_at(VIEWPORT, start), UpdateOutcome::Idle);
+    assert!(ui.frame_deadline(start).is_none());
+    ui.update_at(VIEWPORT, start + Duration::from_millis(100));
+    assert!(!fired.get());
+}
+
+#[test]
+fn disposing_the_node_drops_its_timeout() {
+    let cx = context();
+    let open = cx.signal(true);
+    let visible = open.clone();
+    let mut ui = settled(
+        &cx,
+        if_else(move || visible.get(), || div().key("box"), || div()),
+    );
+    let fired = Rc::new(Cell::new(false));
+    let flag = Rc::clone(&fired);
+    let start = Instant::now();
+    cx.timeout("box", Duration::from_millis(100), move || flag.set(true));
+    ui.update_at(VIEWPORT, start);
+    open.set(false);
+    ui.update_at(VIEWPORT, start);
+    assert!(ui.find_by_key("box").is_none());
+    assert!(ui.frame_deadline(start).is_none());
+    ui.update_at(VIEWPORT, start + Duration::from_millis(100));
+    assert!(!fired.get());
+}
+
+#[test]
+fn hiding_with_show_does_not_cancel_a_timeout() {
+    let cx = context();
+    let open = cx.signal(true);
+    let visible = open.clone();
+    let mut ui = settled(&cx, show(move || visible.get(), || div().key("box")));
+    let fired = Rc::new(Cell::new(false));
+    let flag = Rc::clone(&fired);
+    let start = Instant::now();
+    cx.timeout("box", Duration::from_millis(100), move || flag.set(true));
+    ui.update_at(VIEWPORT, start);
+    open.set(false);
+    ui.update_at(VIEWPORT, start);
+    assert!(ui.find_by_key("box").is_some());
+    assert_eq!(
+        ui.frame_deadline(start),
+        Some(start + Duration::from_millis(100))
+    );
+    ui.update_at(VIEWPORT, start + Duration::from_millis(100));
+    assert!(fired.get());
+}
+
+#[test]
+fn a_timeout_callback_paints_the_signal_it_writes() {
+    let cx = context();
+    let count = cx.signal(0);
+    let mut ui = settled(&cx, counter(count.clone()));
+    let label = ui.find_by_key("label").unwrap();
+    let before = ui.node_rect(label).unwrap();
+    let write = count.clone();
+    let start = Instant::now();
+    cx.timeout("label", Duration::from_millis(40), move || write.set(5));
+    assert_eq!(ui.update_at(VIEWPORT, start), UpdateOutcome::Idle);
+    let damaged = regions(ui.update_at(VIEWPORT, start + Duration::from_millis(40)));
+    assert_eq!(ui.node_text(label), Some("Count: 5"));
+    assert_eq!(damaged, vec![before.union(&ui.node_rect(label).unwrap())]);
+    assert!(!ui.needs_update());
+}
+
+#[test]
+fn an_unknown_key_does_not_run_and_does_not_stay_awake() {
+    let cx = context();
+    let mut ui = settled(&cx, div().key("box"));
+    let fired = Rc::new(Cell::new(false));
+    let flag = Rc::clone(&fired);
+    cx.timeout("missing", Duration::from_millis(10), move || flag.set(true));
+    assert!(ui.needs_update());
+    let start = Instant::now();
+    assert_eq!(ui.update_at(VIEWPORT, start), UpdateOutcome::Idle);
+    assert!(!fired.get());
+    assert!(!ui.needs_update());
+    assert!(ui.frame_deadline(start).is_none());
+}
+
+#[test]
+fn a_timeout_before_any_ui_does_nothing() {
+    let cx = context();
+    let fired = Rc::new(Cell::new(false));
+    let flag = Rc::clone(&fired);
+    cx.timeout("box", Duration::from_millis(10), move || flag.set(true));
+    let mut ui = settled(&cx, div().key("box"));
+    let start = Instant::now();
+    ui.update_at(VIEWPORT, start + Duration::from_secs(1));
+    assert!(!fired.get());
+    assert!(ui.frame_deadline(start).is_none());
+}
+
+#[test]
+fn two_windows_do_not_share_a_timeout() {
+    let cx = context();
+    let mut first = settled(&cx, div().key("box"));
+    let target = cx.clone();
+    let fired = Rc::new(Cell::new(0));
+    let flag = Rc::clone(&fired);
+    let mut second = settled(
+        &cx,
+        div().key("box").on_click(move |_| {
+            let flag = Rc::clone(&flag);
+            target.timeout("box", Duration::from_millis(50), move || {
+                flag.set(flag.get() + 1);
+            });
+        }),
+    );
+    click(&mut second, "box");
+    let start = Instant::now();
+    second.update_at(VIEWPORT, start);
+    first.update_at(VIEWPORT, start + Duration::from_millis(50));
+    assert_eq!(fired.get(), 0);
+    second.update_at(VIEWPORT, start + Duration::from_millis(50));
+    assert_eq!(fired.get(), 1);
+    assert!(
+        first
+            .frame_deadline(start + Duration::from_millis(50))
+            .is_none()
+    );
+}
+
+#[test]
+fn a_timeout_scheduled_from_a_callback_waits_for_the_next_update() {
+    let cx = context();
+    let mut ui = settled(&cx, div().key("box"));
+    let count = Rc::new(Cell::new(0));
+    let seen = Rc::clone(&count);
+    let again = cx.clone();
+    cx.timeout("box", Duration::ZERO, move || {
+        seen.set(seen.get() + 1);
+        let seen = Rc::clone(&seen);
+        again.timeout("box", Duration::ZERO, move || seen.set(seen.get() + 1));
+    });
+    let start = Instant::now();
+    ui.update_at(VIEWPORT, start);
+    assert_eq!(count.get(), 1);
+    assert!(ui.needs_update());
+    ui.update_at(VIEWPORT, start);
+    assert_eq!(count.get(), 2);
+    assert!(!ui.needs_update());
+}
+
+#[test]
+fn timeout_wakes_the_host_once_until_the_next_update() {
+    let cx = context();
+    let mut ui = settled(&cx, div().key("box"));
+    let wakes = Rc::new(Cell::new(0));
+    let flag = Rc::clone(&wakes);
+    ui.set_waker(move || flag.set(flag.get() + 1));
+    cx.timeout("box", Duration::from_millis(20), || {});
+    assert_eq!(wakes.get(), 1);
+    cx.timeout("box", Duration::from_millis(20), || {});
+    assert_eq!(wakes.get(), 1);
+    let start = Instant::now();
+    ui.update_at(VIEWPORT, start);
+    cx.clear_timeout("box");
+    assert_eq!(wakes.get(), 2);
+}
+
+#[test]
+fn on_mounted_arms_a_timeout_before_layout() {
+    #[derive(Clone)]
+    struct Note {
+        context: Context,
+        fired: Rc<Cell<bool>>,
+    }
+
+    impl HasContext for Note {
+        fn context(&self) -> &Context {
+            &self.context
+        }
+    }
+
+    impl Component for Note {
+        fn render(&self) -> Element {
+            let cx = self.context.clone();
+            let fired = Rc::clone(&self.fired);
+            on_mounted(move || {
+                let fired = Rc::clone(&fired);
+                cx.timeout("note", Duration::from_millis(100), move || fired.set(true));
+            });
+            div().key("note")
+        }
+    }
+
+    let cx = context();
+    let fired = Rc::new(Cell::new(false));
+    let mut ui = Ui::new(
+        &cx,
+        Note {
+            context: cx.clone(),
+            fired: Rc::clone(&fired),
+        },
+        Theme::light(),
+    );
+    let start = Instant::now();
+    ui.update_at(VIEWPORT, start);
+    ui.prepare_frame();
+    assert!(!fired.get());
+    assert_eq!(
+        ui.frame_deadline(start),
+        Some(start + Duration::from_millis(100))
+    );
+    assert_eq!(
+        ui.update_at(VIEWPORT, start + Duration::from_millis(100)),
+        UpdateOutcome::Idle
+    );
+    assert!(fired.get());
+}
+
 fn quad_index(ui: &Ui, key: &str) -> usize {
     let layout = ui.node_rect(ui.find_by_key(key).unwrap()).unwrap();
     let center_x = layout.x + layout.width * 0.5;

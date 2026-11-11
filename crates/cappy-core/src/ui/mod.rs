@@ -10,6 +10,7 @@ mod motion;
 mod node;
 mod passes;
 mod scroll;
+mod timer;
 
 use crate::time::Instant;
 use std::cell::{Cell, RefCell};
@@ -182,6 +183,8 @@ pub struct Ui {
     /// Roving scopes that became visible and may take focus once style has resolved.
     roving_enter: Vec<NodeId>,
     overlay_order_dirty: Cell<bool>,
+    /// One-shot callbacks armed on keyed nodes. Empty while nothing is waiting.
+    timers: Vec<timer::ArmedTimer>,
 }
 
 impl Ui {
@@ -247,6 +250,7 @@ impl Ui {
             overlay_order: RefCell::new(Vec::new()),
             overlay_order_dirty: Cell::new(true),
             roving_enter: Vec::new(),
+            timers: Vec::new(),
         };
         ui.root = ui.mount(root.into_element(), None);
         ui.add_binding(ui.root, BindingKind::Theme);
@@ -309,17 +313,19 @@ impl Ui {
             || self.motion_animating()
             || self.queue.runtime.has_motions()
             || self.board.has_writes()
+            || self.board.has_timer_commands()
             || !self.roving_enter.is_empty()
     }
 
-    /// When the host should draw the next animation frame. `None` once scroll and tweens rest.
+    /// When the host should update next. `None` once scroll, tweens, and timers rest.
     pub fn frame_deadline(&self, now: Instant) -> Option<Instant> {
         let paced =
             (self.scroll_animating() || self.motion_animating() || !self.ticking.is_empty())
                 .then_some(now + scroll::SCROLL_FRAME);
         let image = self.image_frame_deadline(now);
         let caret = self.caret_deadline.filter(|_| self.focused.is_some());
-        [paced, image, caret].into_iter().flatten().min()
+        let timer = self.timer_deadline();
+        [paced, image, caret, timer].into_iter().flatten().min()
     }
 
     /// Replaces the clipboard. The default keeps text in memory, which is what tests paste from.
@@ -347,6 +353,8 @@ impl Ui {
         let _entered = self.queue.runtime.enter_board(&self.board);
         let dt = scroll::scroll_dt(self.updated_at, now);
         self.updated_at = Some(now);
+        self.drain_timer_commands(now);
+        self.fire_due_timers(now);
         self.apply_viewport(input);
         self.drain_scroll_writes();
         self.process_bindings();

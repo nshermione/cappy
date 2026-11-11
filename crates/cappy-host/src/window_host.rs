@@ -108,6 +108,11 @@ pub struct InputResponse {
     pub redraw: bool,
     /// Set when the cursor icon must change.
     pub cursor: Option<CursorIcon>,
+    /// Set when this event applied an update and that update did not need a redraw.
+    /// The host then sleeps until [`Self::wake_at`]. `None` waits for the next input.
+    pub idle: bool,
+    /// Next time the host should update. Meaningful when [`Self::idle`] is set.
+    pub wake_at: Option<Instant>,
 }
 
 /// What the host window should do after a redraw.
@@ -212,35 +217,46 @@ impl WindowHost {
     /// hovering plain text) does not cost a frame.
     pub fn handle_event(&mut self, event: InputEvent) -> InputResponse {
         self.ui.handle_event(event);
+        let (redraw, idle, wake_at) = self.settle();
         InputResponse {
-            redraw: self.settle(),
+            redraw,
             cursor: self.take_cursor_change(),
+            idle,
+            wake_at,
         }
     }
 
-    /// Runs pending updates at the last known size. Returns whether a redraw is needed.
+    /// Runs pending updates at the last known size.
     ///
-    /// A motion or scroll frame due within [`PROMPT_FRAME`] applies this input. Updating
-    /// again here would restyle and rebuild the display list on every cursor event. The caret
-    /// blink is hundreds of milliseconds later, so a key that moves the caret paints now.
-    fn settle(&mut self) -> bool {
+    /// Returns whether a redraw is needed, whether the update settled with nothing to paint, and
+    /// when that idle update should be woken. A motion or scroll frame due within [`PROMPT_FRAME`]
+    /// applies this input on the frame already scheduled. Updating again here would restyle and
+    /// rebuild the display list on every cursor event. The caret blink is hundreds of milliseconds
+    /// later, so a key that moves the caret paints now. A timer armed by the event leaves
+    /// `wake_at` at its deadline so the host can sleep until then.
+    fn settle(&mut self) -> (bool, bool, Option<Instant>) {
         let now = Instant::now();
         if self
             .animation_due
             .is_some_and(|due| due <= now + PROMPT_FRAME)
         {
-            return false;
+            return (false, false, None);
         }
         if !self.ui.needs_update() {
-            return false;
+            return (false, false, None);
         }
-        let redraw = match self.last_input {
-            Some(input) => matches!(self.ui.update(input), UpdateOutcome::Redraw { .. }),
-            None => true,
+        let Some(input) = self.last_input else {
+            #[cfg(debug_assertions)]
+            self.trace_memory();
+            return (true, false, None);
         };
+        let redraw = matches!(self.ui.update(input), UpdateOutcome::Redraw { .. });
         #[cfg(debug_assertions)]
         self.trace_memory();
-        redraw
+        if redraw {
+            return (true, false, None);
+        }
+        (false, true, self.ui.frame_deadline(Instant::now()))
     }
 
     /// Records a window-size change for the present pace. The surface is resized in

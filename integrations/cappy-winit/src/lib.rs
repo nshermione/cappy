@@ -31,6 +31,8 @@
 mod renderer;
 mod translate;
 
+#[cfg(target_arch = "wasm32")]
+use cappy_core::time::Duration;
 use cappy_core::time::Instant;
 use std::fmt;
 use std::sync::Arc;
@@ -597,16 +599,20 @@ impl WinitHost {
     fn schedule(&mut self, event_loop: &ActiveEventLoop) {
         #[cfg(target_arch = "wasm32")]
         {
-            if self
-                .primary
-                .as_ref()
-                .is_some_and(|chrome| chrome.settle_at.is_some())
-            {
-                if let Some(chrome) = &self.primary {
-                    chrome.window.request_redraw();
+            // Motion's deadline is one 8 ms frame ahead, so it still asks the browser for a frame.
+            // A later timer or caret waits until that instant instead of redrawing every frame.
+            const ANIMATION_FRAME: Duration = Duration::from_millis(8);
+            let now = Instant::now();
+            match self.primary.as_ref().and_then(|chrome| chrome.settle_at) {
+                Some(deadline) if deadline <= now + ANIMATION_FRAME => {
+                    if let Some(chrome) = &self.primary {
+                        chrome.window.request_redraw();
+                    }
+                    event_loop.set_control_flow(ControlFlow::Wait);
                 }
+                Some(deadline) => event_loop.set_control_flow(ControlFlow::WaitUntil(deadline)),
+                None => event_loop.set_control_flow(ControlFlow::Wait),
             }
-            event_loop.set_control_flow(ControlFlow::Wait);
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -802,6 +808,8 @@ fn apply_window_event(chrome: &mut WindowChrome, host: &mut WindowHost, event: W
             // holds this redraw until the caret flips.
             chrome.settle_at = Some(Instant::now());
             window.request_redraw();
+        } else if response.idle {
+            chrome.settle_at = response.wake_at;
         }
     }
 }

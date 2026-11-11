@@ -3,7 +3,8 @@
 //! Each [`crate::Ui`] owns one [`GeometryBoard`]. Layout copies the rect and scroll of every keyed
 //! node into that board. A binding that reads a key subscribes, and the next change queues it
 //! again. A write is applied on the next update of the UI that was current, or of the first UI
-//! when the call is outside an update, and that write wakes the host.
+//! when the call is outside an update, and that write wakes the host. Timer commands wait on the
+//! same board, so a component can schedule one from an event without holding a [`crate::Ui`].
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -12,7 +13,20 @@ use std::rc::Rc;
 use cappy_layout::{Point, Rect};
 
 use crate::reactive::{BindingId, BindingQueue, Observer, Runtime};
+use crate::time::Duration;
 use crate::{Context, NodeId};
+
+/// A timer command waiting for the next update of one UI.
+pub(crate) enum TimerCommand {
+    /// Replace the one-shot callback on the node named `key`.
+    Arm {
+        key: String,
+        delay: Duration,
+        callback: Box<dyn FnOnce()>,
+    },
+    /// Drop that callback without running it.
+    Clear { key: String },
+}
 
 /// One key a binding read the last time it ran.
 struct ReadKey {
@@ -37,8 +51,10 @@ pub(crate) struct GeometryBoard {
     /// Keys each binding subscribed to, so the next run can drop the ones it no longer reads.
     reads: RefCell<HashMap<BindingId, Vec<ReadKey>>>,
     writes: RefCell<Vec<(String, Point)>>,
-    /// Fires when `writes` goes from empty to occupied. The UI installs the same waker as its
-    /// binding queue.
+    /// Timer arm and clear commands. Applied on the next update, same wake rule as `writes`.
+    timer_commands: RefCell<Vec<TimerCommand>>,
+    /// Fires when `writes` or `timer_commands` goes from empty to occupied. The UI installs the
+    /// same waker as its binding queue.
     waker: RefCell<Option<Rc<dyn Fn()>>>,
     /// A publish notified at least one binding. The UI flushes those bindings before paint.
     notified: Cell<bool>,
@@ -51,6 +67,34 @@ impl GeometryBoard {
 
     pub(crate) fn has_writes(&self) -> bool {
         !self.writes.borrow().is_empty()
+    }
+
+    pub(crate) fn has_timer_commands(&self) -> bool {
+        !self.timer_commands.borrow().is_empty()
+    }
+
+    pub(crate) fn take_timer_commands(&self) -> Vec<TimerCommand> {
+        std::mem::take(&mut *self.timer_commands.borrow_mut())
+    }
+
+    /// Queues `command`. The waker fires when the queue was empty.
+    pub(crate) fn push_timer_command(&self, command: TimerCommand) {
+        let wake = {
+            let mut commands = self.timer_commands.borrow_mut();
+            let wake = commands.is_empty();
+            commands.push(command);
+            wake
+        };
+        if wake {
+            self.wake();
+        }
+    }
+
+    fn wake(&self) {
+        let waker = self.waker.borrow().clone();
+        if let Some(waker) = waker {
+            waker();
+        }
     }
 
     pub(crate) fn take_writes(&self) -> Vec<(String, Point)> {
@@ -102,10 +146,7 @@ impl GeometryBoard {
             wake
         };
         if wake {
-            let waker = self.waker.borrow().clone();
-            if let Some(waker) = waker {
-                waker();
-            }
+            self.wake();
         }
     }
 

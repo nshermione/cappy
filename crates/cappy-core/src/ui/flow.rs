@@ -841,6 +841,7 @@ impl Ui {
         if !node.alive || node.generation != id.generation() {
             return;
         }
+        self.cancel_timer(id);
         let parts = std::mem::take(&mut self.nodes[id.index()].parts);
         self.dispose_parts(parts);
         let bindings = std::mem::take(&mut self.nodes[id.index()].bindings);
