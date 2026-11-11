@@ -31,6 +31,7 @@ pub(crate) type SelectionBinding = Box<dyn Fn() -> Option<(usize, usize)>>;
 pub(crate) type ClassBinding = Box<dyn Fn() -> Vec<ClassName>>;
 pub(crate) type StyleBinding = Box<dyn Fn() -> StyleRefinement>;
 pub(crate) type DisabledBinding = Box<dyn Fn() -> bool>;
+pub(crate) type PlaceBinding = Box<dyn Fn() -> Point>;
 
 pub(crate) enum ElementContent {
     Container,
@@ -286,7 +287,7 @@ pub struct Element {
     pub(crate) overlay: bool,
     /// Fixed top-left for [`Element::overlay`]. A binding overwrites this after mount.
     pub(crate) place: Option<Point>,
-    pub(crate) place_binding: Option<Box<dyn Fn() -> Point>>,
+    pub(crate) place_binding: Option<PlaceBinding>,
 }
 
 /// A container element.

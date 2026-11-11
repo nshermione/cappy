@@ -7,7 +7,8 @@ use super::flow::FlowId;
 use super::{NodeId, Ui};
 use crate::ThemeHandle;
 use crate::element::{
-    CaretBinding, ClassBinding, DisabledBinding, SelectionBinding, StyleBinding, TextBinding,
+    CaretBinding, ClassBinding, DisabledBinding, PlaceBinding, SelectionBinding, StyleBinding,
+    TextBinding,
 };
 use crate::reactive::{BindingId, Observer, detach_binding, track};
 
@@ -21,7 +22,7 @@ pub(super) enum BindingKind {
     Disabled(DisabledBinding),
     Caret(CaretBinding),
     Selection(SelectionBinding),
-    Place(Box<dyn Fn() -> Point>),
+    Place(PlaceBinding),
     Disposed,
 }
 
