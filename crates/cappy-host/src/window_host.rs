@@ -256,7 +256,9 @@ impl WindowHost {
         if redraw {
             return (true, false, None);
         }
-        (false, true, self.ui.frame_deadline(Instant::now()))
+        let wake_at = self.ui.frame_deadline(now);
+        self.animation_due = wake_at;
+        (false, true, wake_at)
     }
 
     /// Records a window-size change for the present pace. The surface is resized in
@@ -367,12 +369,15 @@ impl WindowHost {
         })
     }
 
-    /// When the next animation frame is due. GPU keeps the core's 8 ms deadline, because vsync
-    /// absorbs it. CPU steps on [`CPU_FRAME`] from the previous deadline so a slow paint does
-    /// not stretch the gap before the next one.
+    /// When the next animation frame is due. GPU keeps the core's deadline, because vsync absorbs
+    /// an 8 ms step. CPU paces a near deadline on [`CPU_FRAME`] so a slow paint does not stretch
+    /// the gap. A later deadline, such as a timer or the caret, waits until that instant.
     fn next_frame_at(&self, now: Instant) -> Option<Instant> {
         let deadline = self.ui.frame_deadline(now)?;
-        if self.renderer.kind() != RendererKind::Cpu {
+        if self.renderer.kind() != RendererKind::Cpu
+            || deadline <= now
+            || deadline > now + CPU_FRAME
+        {
             return Some(deadline);
         }
         Some(match self.animation_due {

@@ -4650,6 +4650,37 @@ fn hiding_with_show_does_not_cancel_a_timeout() {
 }
 
 #[test]
+fn display_none_does_not_cancel_a_timeout() {
+    let cx = context();
+    let hidden = cx.signal(false);
+    let flag = hidden.clone();
+    let mut ui = settled(
+        &cx,
+        div().key("box").style_dyn(move || {
+            if flag.get() {
+                StyleRefinement::default().display(cappy_style::Display::None)
+            } else {
+                StyleRefinement::default()
+            }
+        }),
+    );
+    let fired = Rc::new(Cell::new(false));
+    let seen = Rc::clone(&fired);
+    let start = Instant::now();
+    cx.timeout("box", Duration::from_millis(100), move || seen.set(true));
+    ui.update_at(VIEWPORT, start);
+    hidden.set(true);
+    ui.update_at(VIEWPORT, start);
+    assert!(ui.find_by_key("box").is_some());
+    assert_eq!(
+        ui.frame_deadline(start),
+        Some(start + Duration::from_millis(100))
+    );
+    ui.update_at(VIEWPORT, start + Duration::from_millis(100));
+    assert!(fired.get());
+}
+
+#[test]
 fn a_timeout_callback_paints_the_signal_it_writes() {
     let cx = context();
     let count = cx.signal(0);
