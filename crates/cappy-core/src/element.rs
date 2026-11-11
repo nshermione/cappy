@@ -8,6 +8,7 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use cappy_layout::Point;
 use cappy_style::{ClassName, StyleRefinement, Stylesheet};
 
 use crate::binding::{Dynamic, IntoClasses, IntoStyle, IntoText, LiveText};
@@ -115,6 +116,29 @@ where
             read: Box::new(move || (*read)().read_text()),
             write: Box::new(move |value| (*source)().write_text(value)),
         }
+    }
+}
+
+/// A fixed top-left, or a [`Dynamic`] one, for [`Element::place`].
+pub trait IntoPlace {
+    fn apply_place(self, element: &mut Element);
+}
+
+impl IntoPlace for Point {
+    fn apply_place(self, element: &mut Element) {
+        element.place = Some(self);
+        element.place_binding = None;
+    }
+}
+
+impl<F> IntoPlace for Dynamic<F>
+where
+    F: Fn() -> Point + 'static,
+{
+    fn apply_place(self, element: &mut Element) {
+        let Dynamic(read) = self;
+        element.place = None;
+        element.place_binding = Some(Box::new(read));
     }
 }
 
@@ -256,6 +280,11 @@ pub struct Element {
     pub(crate) accepts_slots: bool,
     /// Hooks from the component that rendered this element. Mount moves them onto the runtime.
     pub(crate) lifecycle: Option<crate::lifecycle::Lifecycle>,
+    /// Painted and hit above the tree, outside ancestor overflow, and out of parent flow.
+    pub(crate) overlay: bool,
+    /// Fixed top-left for [`Element::overlay`]. A binding overwrites this after mount.
+    pub(crate) place: Option<Point>,
+    pub(crate) place_binding: Option<Box<dyn Fn() -> Point>>,
 }
 
 /// A container element.
@@ -411,6 +440,9 @@ impl Element {
             slot_owner: 0,
             accepts_slots: false,
             lifecycle: None,
+            overlay: false,
+            place: None,
+            place_binding: None,
         }
     }
 
@@ -488,6 +520,30 @@ impl Element {
     #[must_use]
     pub fn focusable(mut self) -> Self {
         self.focusable = true;
+        self
+    }
+
+    /// Paints and hits this element above the tree, outside ancestor overflow.
+    ///
+    /// The element leaves its parent's flex or grid, so the parent does not grow to fit it.
+    /// Automatic width and height shrink to the content. A percentage resolves against the
+    /// viewport. [`place`](Self::place) sets the top-left in viewport pixels; the default is the
+    /// origin. A wheel over the element does not scroll the page underneath. A later overlay
+    /// paints and hits above an earlier one, and a nested overlay paints above the one it sits in.
+    #[must_use]
+    pub fn overlay(mut self) -> Self {
+        self.overlay = true;
+        self
+    }
+
+    /// Top-left of an [`overlay`](Self::overlay), in viewport logical pixels.
+    ///
+    /// A [`Point`](cappy_layout::Point) stays where it is. A [`Dynamic`] point is read again when
+    /// a signal it reads changes, and when a geometry key it reads changes. On an element that is
+    /// not an overlay, the point is kept and not used.
+    #[must_use]
+    pub fn place(mut self, at: impl IntoPlace) -> Self {
+        at.apply_place(&mut self);
         self
     }
 
@@ -824,6 +880,8 @@ pub struct DivBuilder {
     on_hover: Option<HoverHandler>,
     stylesheet: Option<Arc<Stylesheet>>,
     disabled: Option<Box<dyn FnOnce(&mut Element)>>,
+    overlay: bool,
+    place: Option<Box<dyn FnOnce(&mut Element)>>,
 }
 
 impl DivBuilder {
@@ -834,6 +892,8 @@ impl DivBuilder {
             on_hover: None,
             stylesheet: None,
             disabled: None,
+            overlay: false,
+            place: None,
         }
     }
 
@@ -860,6 +920,18 @@ impl DivBuilder {
         self.disabled = Some(Box::new(move |element| disabled.apply_disabled(element)));
         self
     }
+
+    #[must_use]
+    pub fn overlay(mut self) -> Self {
+        self.overlay = true;
+        self
+    }
+
+    #[must_use]
+    pub fn place(mut self, at: impl IntoPlace + 'static) -> Self {
+        self.place = Some(Box::new(move |element| at.apply_place(element)));
+        self
+    }
 }
 
 impl IntoElement for DivBuilder {
@@ -868,7 +940,11 @@ impl IntoElement for DivBuilder {
         element.on_click = self.on_click;
         element.on_hover = self.on_hover;
         element.stylesheet = self.stylesheet;
+        element.overlay = self.overlay;
         if let Some(apply) = self.disabled {
+            apply(&mut element);
+        }
+        if let Some(apply) = self.place {
             apply(&mut element);
         }
         element

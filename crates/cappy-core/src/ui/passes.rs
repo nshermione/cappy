@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use cappy_layout::{Point, Rect, TextLeaf};
+use cappy_layout::{LayoutConstraint, Point, Rect, Size, TextLeaf};
 use cappy_style::{
     Background, BoxShadow, Color, Display, Extent, LayoutStyle, TextStyle, VisualStyle,
 };
@@ -154,6 +154,12 @@ impl Ui {
             self.layout
                 .compute(self.root, viewport, self.measurer.as_mut())
                 .expect(LAYOUT_OUT_OF_SYNC);
+            for id in self.overlay_layers() {
+                let (width, height) = self.overlay_constraint(id, viewport);
+                self.layout
+                    .compute_axes(id, width, height, self.measurer.as_mut())
+                    .expect(LAYOUT_OUT_OF_SYNC);
+            }
             self.clamp_scroll_targets();
             self.positions_dirty = true;
         }
@@ -268,10 +274,68 @@ impl Ui {
         self.board.publish(key, id, rect, scroll);
     }
 
+    /// Stores the viewport top-left of an overlay. A change is placed on the next layout pass.
+    pub(super) fn apply_place(&mut self, id: NodeId, point: Point) {
+        if !self.is_current(id) || self.nodes[id.index()].anchor == point {
+            return;
+        }
+        self.nodes[id.index()].anchor = point;
+        if self.nodes[id.index()].overlay {
+            self.positions_dirty = true;
+            self.display_list_stale = true;
+        }
+    }
+
+    /// Automatic axes shrink to the content. A length or percentage gets the viewport, so the
+    /// percentage has a size to resolve against.
+    fn overlay_constraint(
+        &self,
+        id: NodeId,
+        viewport: Size,
+    ) -> (LayoutConstraint, LayoutConstraint) {
+        let layout = &self.nodes[id.index()].style.layout;
+        (
+            constraint_for(layout.width, viewport.width),
+            constraint_for(layout.height, viewport.height),
+        )
+    }
+
+    /// Overlay nodes in paint order. The list is rebuilt after the tree changes.
+    pub(super) fn overlay_layers(&self) -> Vec<NodeId> {
+        if self.overlay_order_dirty.get() {
+            let order = self.collect_overlay_layers();
+            *self.overlay_order.borrow_mut() = order;
+            self.overlay_order_dirty.set(false);
+        }
+        self.overlay_order.borrow().clone()
+    }
+
+    fn collect_overlay_layers(&self) -> Vec<NodeId> {
+        let mut order = Vec::new();
+        self.collect_layers_under(self.root, &mut order);
+        order
+    }
+
+    /// In-flow descendants first, then each overlay child and the overlays nested inside it.
+    fn collect_layers_under(&self, id: NodeId, order: &mut Vec<NodeId>) {
+        let children = self.nodes[id.index()].children.clone();
+        for child in &children {
+            if !self.nodes[child.index()].overlay {
+                self.collect_layers_under(*child, order);
+            }
+        }
+        for child in children {
+            if self.nodes[child.index()].overlay {
+                order.push(child);
+                self.collect_layers_under(child, order);
+            }
+        }
+    }
+
     fn place_nodes(&mut self) {
         let mut stack = vec![Placed {
             id: self.root,
-            origin: Point::default(),
+            origin: self.layer_origin(self.root),
             clip: None,
         }];
         while let Some(Placed { id, origin, clip }) = stack.pop() {
@@ -313,11 +377,32 @@ impl Ui {
             } else {
                 clip
             };
-            stack.extend(node.children.iter().rev().map(|child| Placed {
-                id: *child,
-                origin: child_origin,
-                clip: child_clip,
-            }));
+            let children = node.children.clone();
+            for child in children.into_iter().rev() {
+                if self.nodes[child.index()].overlay {
+                    stack.push(Placed {
+                        id: child,
+                        origin: self.nodes[child.index()].anchor,
+                        clip: None,
+                    });
+                } else {
+                    stack.push(Placed {
+                        id: child,
+                        origin: child_origin,
+                        clip: child_clip,
+                    });
+                }
+            }
+        }
+    }
+
+    /// An overlay's top-left is its anchor. Every other node starts at the origin passed in.
+    fn layer_origin(&self, id: NodeId) -> Point {
+        let node = &self.nodes[id.index()];
+        if node.overlay {
+            node.anchor
+        } else {
+            Point::default()
         }
     }
 
@@ -414,6 +499,19 @@ impl Ui {
             match step {
                 Painted::Thumb { id, clip, opacity } => {
                     self.push_thumbs(&mut primitives, id, clip, opacity);
+                    continue;
+                }
+                Painted::Layers {
+                    ids,
+                    opacity,
+                    space,
+                } => {
+                    stack.extend(ids.into_iter().rev().map(|id| Painted::Enter {
+                        id,
+                        clip: None,
+                        opacity,
+                        space,
+                    }));
                     continue;
                 }
                 Painted::Enter {
@@ -529,13 +627,30 @@ impl Ui {
                     } else {
                         clip
                     };
+                    let children = node.children.clone();
+                    let mut in_flow = Vec::new();
+                    let mut overlays = Vec::new();
+                    for child in children {
+                        if self.nodes[child.index()].overlay {
+                            overlays.push(child);
+                        } else {
+                            in_flow.push(child);
+                        }
+                    }
+                    if !overlays.is_empty() {
+                        stack.push(Painted::Layers {
+                            ids: overlays,
+                            opacity,
+                            space,
+                        });
+                    }
                     stack.push(Painted::Thumb {
                         id,
                         clip: child_clip,
                         opacity,
                     });
-                    stack.extend(node.children.iter().rev().map(|child| Painted::Enter {
-                        id: *child,
+                    stack.extend(in_flow.into_iter().rev().map(|child| Painted::Enter {
+                        id: child,
                         clip: child_clip,
                         opacity,
                         space,
@@ -671,6 +786,19 @@ enum Painted {
         clip: Option<Rect>,
         opacity: f32,
     },
+    /// Overlay children, painted after this node's in-flow subtree with the clip cleared.
+    Layers {
+        ids: Vec<NodeId>,
+        opacity: f32,
+        space: PaintSpace,
+    },
+}
+
+fn constraint_for(extent: Extent, available: f32) -> LayoutConstraint {
+    match extent {
+        Extent::Auto => LayoutConstraint::MaxContent,
+        Extent::Px(_) | Extent::Percent(_) => LayoutConstraint::Definite(available),
+    }
 }
 
 fn clip_rect(rect: Rect, clip: Option<Rect>) -> Option<Rect> {

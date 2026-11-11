@@ -12,6 +12,7 @@ mod passes;
 mod scroll;
 
 use crate::time::Instant;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -168,6 +169,9 @@ pub struct Ui {
     next_anim_owner: u64,
     /// The first UI on this context. It drains motion jobs and publishes the runtime waker.
     primary: bool,
+    /// Overlay nodes in paint order (later entries paint and hit above earlier ones).
+    overlay_order: RefCell<Vec<NodeId>>,
+    overlay_order_dirty: Cell<bool>,
 }
 
 impl Ui {
@@ -227,6 +231,8 @@ impl Ui {
             anims: Vec::new(),
             next_anim_owner: 0,
             primary: false,
+            overlay_order: RefCell::new(Vec::new()),
+            overlay_order_dirty: Cell::new(true),
         };
         ui.root = ui.mount(root.into_element(), None);
         ui.add_binding(ui.root, BindingKind::Theme);

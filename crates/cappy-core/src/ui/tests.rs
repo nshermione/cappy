@@ -3329,6 +3329,409 @@ fn two_uis_keep_separate_geometry() {
     assert_eq!(secondary_wakes.get(), 0);
 }
 
+#[test]
+fn overlay_leaves_flow_escapes_clip_and_paints_above() {
+    let cx = context();
+    let ui = settled(
+        &cx,
+        div()
+            .style(StyleRefinement::default().direction(FlexDirection::Column))
+            .child(
+                div()
+                    .key("card")
+                    .style(
+                        StyleRefinement::default()
+                            .direction(FlexDirection::Column)
+                            .width(80)
+                            .overflow(Overflow::Hidden)
+                            .flex_shrink(0.0),
+                    )
+                    .children([
+                        div().key("row").style(
+                            StyleRefinement::default()
+                                .width(80)
+                                .height(30)
+                                .flex_shrink(0.0)
+                                .background(Color::BLACK),
+                        ),
+                        div()
+                            .key("pop")
+                            .overlay()
+                            .place(Point::new(12.0, 90.0))
+                            .style(
+                                StyleRefinement::default()
+                                    .width(40)
+                                    .height(24)
+                                    .flex_shrink(0.0)
+                                    .background(Color::WHITE),
+                            ),
+                    ]),
+            ),
+    );
+    let card = ui.node_rect(ui.find_by_key("card").unwrap()).unwrap();
+    let pop = ui.node_rect(ui.find_by_key("pop").unwrap()).unwrap();
+    assert!(
+        (card.height - 30.0).abs() < 0.5,
+        "card grew to {}",
+        card.height
+    );
+    assert!((pop.x - 12.0).abs() < 0.5 && (pop.y - 90.0).abs() < 0.5);
+    assert!(pop.bottom() > card.bottom());
+    assert!(painted_quad(&ui, "pop").clip.is_none());
+    assert!(quad_index(&ui, "pop") > quad_index(&ui, "row"));
+
+    let pop_id = ui.find_by_key("pop").unwrap();
+    let card_id = ui.find_by_key("card").unwrap();
+    let on_pop = ui.hit_path(center_of(&ui, "pop"));
+    assert!(on_pop.contains(&pop_id));
+    assert!(!on_pop.contains(&card_id));
+    let on_row = ui.hit_path(center_of(&ui, "row"));
+    assert!(on_row.contains(&ui.find_by_key("row").unwrap()));
+    assert!(!on_row.contains(&pop_id));
+}
+
+#[test]
+fn wheel_over_an_overlay_does_not_scroll_the_page() {
+    let cx = context();
+    let start = Instant::now();
+    let mut ui = Ui::new(
+        &cx,
+        div()
+            .style(StyleRefinement::default().direction(FlexDirection::Column))
+            .children([
+                div()
+                    .key("page")
+                    .style(
+                        StyleRefinement::default()
+                            .direction(FlexDirection::Column)
+                            .width(200)
+                            .height(80)
+                            .overflow_y(Overflow::Auto)
+                            .flex_shrink(0.0),
+                    )
+                    .child(
+                        div().key("tall").style(
+                            StyleRefinement::default()
+                                .width(40)
+                                .height(400)
+                                .flex_shrink(0.0),
+                        ),
+                    ),
+                div()
+                    .key("pop")
+                    .overlay()
+                    .place(Point::new(0.0, 0.0))
+                    .style(
+                        StyleRefinement::default()
+                            .direction(FlexDirection::Column)
+                            .width(60)
+                            .height(40)
+                            .overflow_y(Overflow::Auto)
+                            .flex_shrink(0.0)
+                            .background(Color::BLACK),
+                    )
+                    .child(
+                        div().key("inner").style(
+                            StyleRefinement::default()
+                                .width(40)
+                                .height(200)
+                                .flex_shrink(0.0),
+                        ),
+                    ),
+            ]),
+        Theme::light(),
+    );
+    ui.update_at(VIEWPORT, start);
+    let tall = ui.find_by_key("tall").unwrap();
+    let inner = ui.find_by_key("inner").unwrap();
+    let page_before = ui.node_rect(tall).unwrap().y;
+    let inner_before = ui.node_rect(inner).unwrap().y;
+    ui.handle_event(InputEvent::PointerMoved {
+        position: center_of(&ui, "pop"),
+    });
+    ui.handle_event(InputEvent::Wheel {
+        delta: Point::new(0.0, -40.0),
+    });
+    ui.update_at(VIEWPORT, start + Duration::from_millis(32));
+    assert_eq!(ui.node_rect(tall).unwrap().y, page_before);
+    assert!(ui.node_rect(inner).unwrap().y < inner_before);
+
+    let page = ui.node_rect(ui.find_by_key("page").unwrap()).unwrap();
+    ui.handle_event(InputEvent::PointerMoved {
+        position: Point::new(page.x + 150.0, page.y + 8.0),
+    });
+    ui.handle_event(InputEvent::Wheel {
+        delta: Point::new(0.0, -80.0),
+    });
+    ui.update_at(VIEWPORT, start + Duration::from_millis(64));
+    assert!(ui.node_rect(tall).unwrap().y < page_before);
+}
+
+#[test]
+fn place_follows_the_trigger_rect() {
+    let cx = context();
+    let read = cx.clone();
+    let mut ui = settled(
+        &cx,
+        div()
+            .style(StyleRefinement::default().direction(FlexDirection::Column))
+            .children([
+                div()
+                    .key("scroller")
+                    .style(
+                        StyleRefinement::default()
+                            .direction(FlexDirection::Column)
+                            .width(100)
+                            .height(50)
+                            .overflow_y(Overflow::Auto)
+                            .flex_shrink(0.0),
+                    )
+                    .children([
+                        div().key("trigger").style(
+                            StyleRefinement::default()
+                                .width(40)
+                                .height(20)
+                                .flex_shrink(0.0)
+                                .background(Color::BLACK),
+                        ),
+                        div().style(
+                            StyleRefinement::default()
+                                .width(40)
+                                .height(200)
+                                .flex_shrink(0.0),
+                        ),
+                    ]),
+                div()
+                    .key("pop")
+                    .overlay()
+                    .place(Dynamic(move || {
+                        read.node_rect("trigger")
+                            .map(|rect| Point::new(rect.x, rect.bottom()))
+                            .unwrap_or_default()
+                    }))
+                    .style(
+                        StyleRefinement::default()
+                            .width(30)
+                            .height(16)
+                            .flex_shrink(0.0)
+                            .background(Color::WHITE),
+                    ),
+            ]),
+    );
+    let trigger = ui.node_rect(ui.find_by_key("trigger").unwrap()).unwrap();
+    let pop = ui.node_rect(ui.find_by_key("pop").unwrap()).unwrap();
+    assert!((pop.y - trigger.bottom()).abs() < 0.5, "pop.y {}", pop.y);
+    assert!((pop.x - trigger.x).abs() < 0.5);
+
+    cx.set_scroll_offset("scroller", Point::new(0.0, 30.0));
+    ui.update(VIEWPORT);
+    let trigger = ui.node_rect(ui.find_by_key("trigger").unwrap()).unwrap();
+    let pop = ui.node_rect(ui.find_by_key("pop").unwrap()).unwrap();
+    assert!(
+        (pop.y - trigger.bottom()).abs() < 0.5,
+        "pop {} trigger bottom {}",
+        pop.y,
+        trigger.bottom()
+    );
+    assert!(pop.y < 20.0);
+}
+
+#[test]
+fn a_later_overlay_takes_the_hit_and_size_follows_content_or_the_viewport() {
+    let cx = context();
+    let back_clicks = cx.signal(0);
+    let front_clicks = cx.signal(0);
+    let back_count = back_clicks.clone();
+    let front_count = front_clicks.clone();
+    let ui = settled(
+        &cx,
+        div().children([
+            div()
+                .key("back")
+                .overlay()
+                .place(Point::new(10.0, 10.0))
+                .style(
+                    StyleRefinement::default()
+                        .width(40)
+                        .height(40)
+                        .flex_shrink(0.0),
+                )
+                .on_click(move |_| back_count.update(|count| *count += 1)),
+            div()
+                .key("front")
+                .overlay()
+                .place(Point::new(10.0, 10.0))
+                .style(
+                    StyleRefinement::default()
+                        .width(40)
+                        .height(40)
+                        .flex_shrink(0.0)
+                        .background(Color::BLACK),
+                )
+                .on_click(move |_| front_count.update(|count| *count += 1)),
+            div()
+                .key("shrink")
+                .overlay()
+                .place(Point::new(0.0, 80.0))
+                .child(
+                    div().style(
+                        StyleRefinement::default()
+                            .width(30)
+                            .height(20)
+                            .flex_shrink(0.0),
+                    ),
+                ),
+            div()
+                .key("half")
+                .overlay()
+                .place(Point::new(0.0, 120.0))
+                .style(
+                    StyleRefinement::default()
+                        .width(cappy_style::percent(50.0))
+                        .height(10)
+                        .flex_shrink(0.0),
+                ),
+        ]),
+    );
+    let path = ui.hit_path(center_of(&ui, "front"));
+    assert!(path.contains(&ui.find_by_key("front").unwrap()));
+    assert!(!path.contains(&ui.find_by_key("back").unwrap()));
+    let mut ui = ui;
+    click(&mut ui, "front");
+    assert_eq!(front_clicks.get_untracked(), 1);
+    assert_eq!(back_clicks.get_untracked(), 0);
+
+    let shrunk = ui.node_rect(ui.find_by_key("shrink").unwrap()).unwrap();
+    assert!((shrunk.width - 30.0).abs() < 0.5, "width {}", shrunk.width);
+    assert!(
+        (shrunk.height - 20.0).abs() < 0.5,
+        "height {}",
+        shrunk.height
+    );
+    let half = ui.node_rect(ui.find_by_key("half").unwrap()).unwrap();
+    assert!(
+        (half.width - 400.0).abs() < 0.5,
+        "percent width {}",
+        half.width
+    );
+}
+
+#[test]
+fn a_nested_overlay_hits_and_scrolls_above_its_host() {
+    let cx = context();
+    let start = Instant::now();
+    let mut ui = Ui::new(
+        &cx,
+        div().child(
+            div()
+                .key("host")
+                .overlay()
+                .place(Point::new(0.0, 0.0))
+                .style(
+                    StyleRefinement::default()
+                        .direction(FlexDirection::Column)
+                        .width(120)
+                        .height(80)
+                        .overflow_y(Overflow::Auto)
+                        .flex_shrink(0.0)
+                        .background(Color::BLACK),
+                )
+                .children([
+                    div().key("body").style(
+                        StyleRefinement::default()
+                            .width(40)
+                            .height(200)
+                            .flex_shrink(0.0),
+                    ),
+                    div()
+                        .key("menu")
+                        .overlay()
+                        .place(Point::new(10.0, 10.0))
+                        .style(
+                            StyleRefinement::default()
+                                .width(30)
+                                .height(20)
+                                .flex_shrink(0.0)
+                                .background(Color::WHITE),
+                        ),
+                ]),
+        ),
+        Theme::light(),
+    );
+    ui.update_at(VIEWPORT, start);
+    let path = ui.hit_path(Point::new(16.0, 16.0));
+    assert!(path.contains(&ui.find_by_key("menu").unwrap()));
+    assert!(!path.contains(&ui.find_by_key("host").unwrap()));
+    assert!(quad_index(&ui, "menu") > quad_index(&ui, "host"));
+
+    let body = ui.find_by_key("body").unwrap();
+    let before = ui.node_rect(body).unwrap().y;
+    ui.handle_event(InputEvent::PointerMoved {
+        position: Point::new(16.0, 16.0),
+    });
+    ui.handle_event(InputEvent::Wheel {
+        delta: Point::new(0.0, -40.0),
+    });
+    ui.update_at(VIEWPORT, start + Duration::from_millis(32));
+    assert_eq!(ui.node_rect(body).unwrap().y, before);
+
+    ui.handle_event(InputEvent::PointerMoved {
+        position: Point::new(80.0, 40.0),
+    });
+    ui.handle_event(InputEvent::Wheel {
+        delta: Point::new(0.0, -80.0),
+    });
+    ui.update_at(VIEWPORT, start + Duration::from_millis(64));
+    assert!(ui.node_rect(body).unwrap().y < before);
+}
+
+#[test]
+fn a_hidden_overlay_is_not_hit() {
+    let cx = context();
+    let open = cx.signal(true);
+    let shown = open.clone();
+    let mut ui = settled(
+        &cx,
+        div().child(show(
+            move || shown.get(),
+            || {
+                div()
+                    .key("pop")
+                    .overlay()
+                    .place(Point::new(4.0, 4.0))
+                    .style(
+                        StyleRefinement::default()
+                            .width(30)
+                            .height(20)
+                            .flex_shrink(0.0),
+                    )
+            },
+        )),
+    );
+    let pop = ui.find_by_key("pop").unwrap();
+    assert!(ui.hit_path(Point::new(10.0, 10.0)).contains(&pop));
+    open.set(false);
+    ui.update(VIEWPORT);
+    assert!(!ui.hit_path(Point::new(10.0, 10.0)).contains(&pop));
+}
+
+fn quad_index(ui: &Ui, key: &str) -> usize {
+    let layout = ui.node_rect(ui.find_by_key(key).unwrap()).unwrap();
+    let center_x = layout.x + layout.width * 0.5;
+    let center_y = layout.y + layout.height * 0.5;
+    ui.display_list()
+        .iter()
+        .position(|primitive| {
+            let Primitive::Quad(quad) = primitive else {
+                return false;
+            };
+            let x = quad.rect.x + quad.rect.width * 0.5;
+            let y = quad.rect.y + quad.rect.height * 0.5;
+            (x - center_x).abs() < 0.5 && (y - center_y).abs() < 0.5
+        })
+        .expect("painted quad")
+}
+
 fn sized_geometry(cx: &Context, width: i32) -> Element {
     div().children([
         div().key("box").style(

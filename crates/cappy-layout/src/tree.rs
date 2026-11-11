@@ -40,6 +40,24 @@ impl fmt::Display for LayoutError {
 
 impl std::error::Error for LayoutError {}
 
+/// How much space one axis of a layout root is given.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum LayoutConstraint {
+    /// A known number of logical pixels. Percentages resolve against this.
+    Definite(f32),
+    /// The content's max size. An automatic width or height shrinks to the children.
+    MaxContent,
+}
+
+impl LayoutConstraint {
+    fn available(self) -> AvailableSpace {
+        match self {
+            Self::Definite(value) => AvailableSpace::Definite(value),
+            Self::MaxContent => AvailableSpace::MaxContent,
+        }
+    }
+}
+
 fn engine_error(error: taffy::TaffyError) -> LayoutError {
     LayoutError::Engine(format!("{error:?}"))
 }
@@ -191,10 +209,27 @@ impl<K: Copy + Eq + Hash + fmt::Debug> LayoutTree<K> {
         available: Size,
         measurer: &mut dyn TextMeasurer,
     ) -> Result<(), LayoutError> {
+        self.compute_axes(
+            root,
+            LayoutConstraint::Definite(available.width),
+            LayoutConstraint::Definite(available.height),
+            measurer,
+        )
+    }
+
+    /// Lays out `root` as its own tree. [`LayoutConstraint::MaxContent`] shrinks that axis to the
+    /// content. [`LayoutConstraint::Definite`] is the size a percentage resolves against.
+    pub fn compute_axes(
+        &mut self,
+        root: K,
+        width: LayoutConstraint,
+        height: LayoutConstraint,
+        measurer: &mut dyn TextMeasurer,
+    ) -> Result<(), LayoutError> {
         let root_node = self.node(root)?;
         let space = taffy::Size {
-            width: AvailableSpace::Definite(available.width),
-            height: AvailableSpace::Definite(available.height),
+            width: width.available(),
+            height: height.available(),
         };
         self.taffy
             .compute_layout_with_measure(root_node, space, |inputs, _node, leaf, style| {
@@ -666,6 +701,51 @@ mod tests {
         )
         .unwrap();
         assert!(tree.local_rect(0).unwrap().width > 0.0);
+    }
+
+    #[test]
+    fn max_content_shrinks_and_a_percentage_uses_the_definite_axis() {
+        let mut tree = LayoutTree::new();
+        let mut parent = column(0.0, 0.0);
+        parent.flex_shrink = 0.0;
+        let mut child = fixed(30.0, 20.0);
+        child.flex_shrink = 0.0;
+        tree.insert(0, &parent).unwrap();
+        tree.insert(1, &child).unwrap();
+        tree.set_children(0, &[1]).unwrap();
+        tree.compute_axes(
+            0,
+            LayoutConstraint::MaxContent,
+            LayoutConstraint::MaxContent,
+            &mut ApproximateTextMeasurer::default(),
+        )
+        .unwrap();
+        let shrunk = tree.local_rect(0).unwrap();
+        assert!((shrunk.width - 30.0).abs() < 0.5, "width {}", shrunk.width);
+        assert!(
+            (shrunk.height - 20.0).abs() < 0.5,
+            "height {}",
+            shrunk.height
+        );
+
+        let mut wide = column(0.0, 0.0);
+        wide.width = Extent::Percent(50.0);
+        wide.height = Extent::Px(10.0);
+        tree.set_style(0, &wide).unwrap();
+        tree.compute_axes(
+            0,
+            LayoutConstraint::Definite(800.0),
+            LayoutConstraint::Definite(600.0),
+            &mut ApproximateTextMeasurer::default(),
+        )
+        .unwrap();
+        let percent = tree.local_rect(0).unwrap();
+        assert!(
+            (percent.width - 400.0).abs() < 0.5,
+            "percent width {}",
+            percent.width
+        );
+        assert!((percent.height - 10.0).abs() < 0.5);
     }
 
     #[test]

@@ -334,6 +334,9 @@ impl Ui {
             selection,
             selection_binding,
             children,
+            overlay,
+            place,
+            place_binding,
             slot_owner: _,
             accepts_slots: _,
             lifecycle,
@@ -414,6 +417,8 @@ impl Ui {
             on_hover,
             focusable,
             disabled: node_disabled,
+            overlay,
+            anchor: place.unwrap_or_default(),
             on_key,
             on_text,
             on_ime,
@@ -472,6 +477,9 @@ impl Ui {
         }
         if let Some(binding) = style_binding {
             self.add_binding(id, BindingKind::Style(binding));
+        }
+        if let Some(binding) = place_binding {
+            self.add_binding(id, BindingKind::Place(binding));
         }
         let parts = self.adopt_children(id, children, suppressed);
         self.nodes[id.index()].parts = parts;
@@ -689,10 +697,16 @@ impl Ui {
             return;
         }
         let children = self.flatten_node(id);
+        let layout_children: Vec<NodeId> = children
+            .iter()
+            .copied()
+            .filter(|child| !self.nodes[child.index()].overlay)
+            .collect();
         self.layout
-            .set_children(id, &children)
+            .set_children(id, &layout_children)
             .expect("layout children should still be mounted");
         self.nodes[id.index()].children = children;
+        self.overlay_order_dirty.set(true);
         self.layout_dirty = true;
         self.display_list_stale = true;
     }
@@ -841,6 +855,8 @@ impl Ui {
         node.on_focus = None;
         node.on_pointer = None;
         node.focusable = false;
+        node.overlay = false;
+        node.anchor = cappy_layout::Point::default();
         node.caret = None;
         node.selection = None;
         node.content = NodeContent::Container;

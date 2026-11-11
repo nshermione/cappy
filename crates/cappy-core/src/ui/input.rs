@@ -96,20 +96,57 @@ impl Ui {
         Point::new(delta.x - used_x, delta.y - used_y)
     }
 
-    /// Path from the root to the deepest visible node under `point`.
+    /// Path from the hit root to the deepest visible node under `point`.
+    ///
+    /// An overlay is tested before the page, topmost first. A hit there does not include the
+    /// page nodes underneath, so a wheel on the overlay cannot scroll them. A miss falls through
+    /// to the next overlay and then to the page. Overlay nodes are skipped while walking the page.
     pub fn hit_path(&self, point: Point) -> Vec<NodeId> {
-        let mut path = Vec::new();
-        let mut current = Some(self.root).filter(|root| self.is_hit(*root, point));
-        while let Some(id) = current {
-            path.push(id);
-            current = self.nodes[id.index()]
-                .children
-                .iter()
-                .rev()
-                .copied()
-                .find(|child| self.is_hit(*child, point));
+        for id in self.overlay_layers().into_iter().rev() {
+            if self.layer_shown(id)
+                && let Some(path) = self.hit_chain(id, point)
+            {
+                return path;
+            }
         }
-        path
+        self.hit_chain(self.root, point).unwrap_or_default()
+    }
+
+    /// `root` to the deepest in-flow descendant under `point`. Overlay children are not entered;
+    /// they are their own hit roots.
+    fn hit_chain(&self, root: NodeId, point: Point) -> Option<Vec<NodeId>> {
+        if !self.is_hit(root, point) {
+            return None;
+        }
+        let mut path = vec![root];
+        let mut current = root;
+        loop {
+            let children = self.nodes[current.index()].children.clone();
+            let Some(next) = children
+                .into_iter()
+                .rev()
+                .find(|child| !self.nodes[child.index()].overlay && self.is_hit(*child, point))
+            else {
+                break;
+            };
+            path.push(next);
+            current = next;
+        }
+        Some(path)
+    }
+
+    /// False when this overlay or an ancestor is hidden. Overflow on an ancestor does not count:
+    /// that is the clip an overlay escapes.
+    fn layer_shown(&self, id: NodeId) -> bool {
+        let mut current = Some(id);
+        while let Some(node_id) = current {
+            let node = &self.nodes[node_id.index()];
+            if !node.alive || node.suppressed || node.style.layout.display == Display::None {
+                return false;
+            }
+            current = node.parent;
+        }
+        true
     }
 
     fn is_hit(&self, id: NodeId, point: Point) -> bool {
@@ -168,8 +205,12 @@ impl Ui {
     }
 
     fn inside_ancestor_clips(&self, id: NodeId, point: Point) -> bool {
+        let mut child = id;
         let mut current = self.nodes[id.index()].parent;
         while let Some(parent) = current {
+            if self.nodes[child.index()].overlay {
+                return true;
+            }
             let node = &self.nodes[parent.index()];
             if node.style.layout.clips() {
                 let clip = axis_clip(
@@ -181,6 +222,7 @@ impl Ui {
                     return false;
                 }
             }
+            child = parent;
             current = node.parent;
         }
         true

@@ -132,6 +132,11 @@ pub(crate) struct Node {
     pub(crate) on_hover: Option<HoverHandler>,
     pub(crate) focusable: bool,
     pub(crate) disabled: bool,
+    /// Painted and hit above the tree. Ancestor overflow does not clip it, and it is not in the
+    /// parent's flex or grid.
+    pub(crate) overlay: bool,
+    /// Viewport top-left used when [`Self::overlay`] is set. Identity is the origin.
+    pub(crate) anchor: Point,
     pub(crate) on_key: Option<KeyHandler>,
     pub(crate) on_text: Option<TextHandler>,
     pub(crate) on_ime: Option<ImeHandler>,

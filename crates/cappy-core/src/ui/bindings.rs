@@ -1,6 +1,8 @@
 //! Reactive bindings: closures whose result is written into a node whenever a signal they read
 //! changes.
 
+use cappy_layout::Point;
+
 use super::flow::FlowId;
 use super::{NodeId, Ui};
 use crate::ThemeHandle;
@@ -19,6 +21,7 @@ pub(super) enum BindingKind {
     Disabled(DisabledBinding),
     Caret(CaretBinding),
     Selection(SelectionBinding),
+    Place(Box<dyn Fn() -> Point>),
     Disposed,
 }
 
@@ -109,6 +112,7 @@ impl Ui {
             Disabled(bool),
             Caret(Option<usize>),
             Selection(Option<(usize, usize)>),
+            Place(Point),
         }
         let step = match &self.bindings[id.slot()].kind {
             BindingKind::Text(compute) => Step::Text(track(observer, compute)),
@@ -123,6 +127,7 @@ impl Ui {
             BindingKind::Disabled(compute) => Step::Disabled(track(observer, compute)),
             BindingKind::Caret(compute) => Step::Caret(track(observer, compute)),
             BindingKind::Selection(compute) => Step::Selection(track(observer, compute)),
+            BindingKind::Place(compute) => Step::Place(track(observer, compute)),
             BindingKind::Disposed => return,
         };
         match step {
@@ -131,6 +136,7 @@ impl Ui {
             Step::Disabled(disabled) => self.apply_node_disabled(node, disabled),
             Step::Caret(caret) => self.apply_text_caret(node, caret),
             Step::Selection(selection) => self.apply_text_selection(node, selection),
+            Step::Place(point) => self.apply_place(node, point),
             Step::Classes(classes) => {
                 let target = &mut self.nodes[node.index()];
                 if target.dynamic_classes != classes {
