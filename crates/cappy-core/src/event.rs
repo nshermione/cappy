@@ -85,10 +85,14 @@ pub enum PointerPhase {
 
 /// Pointer activity on a focusable node. `text_index` is a byte offset into the text leaf under
 /// the pointer when that leaf can be hit.
+///
+/// `button` is the button for this event. Move events belong to the primary gesture. Secondary
+/// and middle buttons are delivered as down and up only, and they do not focus or click.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PointerEvent {
     pub position: Point,
     pub phase: PointerPhase,
+    pub button: PointerButton,
     pub text_index: Option<usize>,
     pub shift: bool,
     pub click_count: u8,

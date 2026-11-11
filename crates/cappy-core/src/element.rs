@@ -265,6 +265,8 @@ pub struct Element {
     pub(crate) on_ime: Option<ImeHandler>,
     pub(crate) on_focus: Option<FocusHandler>,
     pub(crate) on_pointer: Option<PointerHandler>,
+    /// Primary press that landed outside this element. Runs after that press's click.
+    pub(crate) on_dismiss: Option<ClickHandler>,
     /// Fixed disabled flag. A [`disabled_when`](Element::disabled_when) binding overwrites this
     /// after mount.
     pub(crate) disabled: bool,
@@ -430,6 +432,7 @@ impl Element {
             on_ime: None,
             on_focus: None,
             on_pointer: None,
+            on_dismiss: None,
             disabled: false,
             disabled_when: None,
             caret: None,
@@ -581,10 +584,27 @@ impl Element {
 
     /// Pointer down, move and up while this element is the pointer target. `text_index` is set
     /// when the pointer is over a text leaf.
+    ///
+    /// The primary button also focuses this element. The secondary and middle buttons are
+    /// delivered here and do not focus, blur, or click. A context menu reads
+    /// [`PointerButton::Secondary`](crate::PointerButton::Secondary) on
+    /// [`PointerPhase::Down`](crate::PointerPhase::Down).
     #[must_use]
     pub fn on_pointer(mut self, handler: impl FnMut(&PointerEvent) + 'static) -> Self {
         self.focusable = true;
         self.on_pointer = Some(Box::new(handler));
+        self
+    }
+
+    /// Called after a primary press that landed outside this element, once that press's click
+    /// has run.
+    ///
+    /// Closing a menu here does not drop the item that was pressed. A press that starts inside
+    /// this element, including on a nested overlay, does not dismiss it. A menu opened by the
+    /// same click is not dismissed, because it was not mounted when the press began.
+    #[must_use]
+    pub fn on_dismiss(mut self, handler: impl FnMut(&ClickEvent) + 'static) -> Self {
+        self.on_dismiss = Some(Box::new(handler));
         self
     }
 
@@ -878,6 +898,7 @@ impl<C: Component + 'static> IntoElement for C {
 pub struct DivBuilder {
     on_click: Option<ClickHandler>,
     on_hover: Option<HoverHandler>,
+    on_dismiss: Option<ClickHandler>,
     stylesheet: Option<Arc<Stylesheet>>,
     disabled: Option<Box<dyn FnOnce(&mut Element)>>,
     overlay: bool,
@@ -890,6 +911,7 @@ impl DivBuilder {
         Self {
             on_click: None,
             on_hover: None,
+            on_dismiss: None,
             stylesheet: None,
             disabled: None,
             overlay: false,
@@ -900,6 +922,12 @@ impl DivBuilder {
     #[must_use]
     pub fn on_click(mut self, handler: impl FnMut(&ClickEvent) + 'static) -> Self {
         self.on_click = Some(Box::new(handler));
+        self
+    }
+
+    #[must_use]
+    pub fn on_dismiss(mut self, handler: impl FnMut(&ClickEvent) + 'static) -> Self {
+        self.on_dismiss = Some(Box::new(handler));
         self
     }
 
@@ -939,6 +967,7 @@ impl IntoElement for DivBuilder {
         let mut element = div();
         element.on_click = self.on_click;
         element.on_hover = self.on_hover;
+        element.on_dismiss = self.on_dismiss;
         element.stylesheet = self.stylesheet;
         element.overlay = self.overlay;
         if let Some(apply) = self.disabled {

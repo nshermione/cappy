@@ -327,6 +327,7 @@ impl Ui {
             on_ime,
             on_focus,
             on_pointer,
+            on_dismiss,
             disabled,
             disabled_when: element_disabled_when,
             caret,
@@ -424,6 +425,7 @@ impl Ui {
             on_ime,
             on_focus,
             on_pointer,
+            on_dismiss,
             caret,
             selection,
             parts: Vec::new(),
@@ -854,6 +856,7 @@ impl Ui {
         node.on_ime = None;
         node.on_focus = None;
         node.on_pointer = None;
+        node.on_dismiss = None;
         node.focusable = false;
         node.overlay = false;
         node.anchor = cappy_layout::Point::default();
@@ -886,6 +889,16 @@ impl Ui {
         if self.pointer_capture == Some(id) {
             self.pointer_capture = None;
         }
+        if self
+            .button_capture
+            .is_some_and(|(_, captured)| captured == id)
+        {
+            self.button_capture = None;
+        }
+        if self.pending_blur == Some(id) {
+            self.pending_blur = None;
+        }
+        self.pending_dismiss.retain(|pending| *pending != id);
         if self
             .scrollbar_drag
             .as_ref()

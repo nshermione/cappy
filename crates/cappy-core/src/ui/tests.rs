@@ -9,10 +9,10 @@ use crate::paint::Primitive;
 use crate::reactive::{live_signal_count, signal_is_alive, signal_subscriber_count};
 use crate::{
     Application, ButtonState, Component, Context, Dynamic, Element, HasContext, ImeEvent,
-    InputEvent, IntoElement, Key, KeyEvent, Modifiers, PointerButton, Signal, Singleton,
-    SingletonOf, Slot, SurfaceCommand, SurfaceOptions, div, for_each, fragment, if_else, input,
-    on_before_mount, on_before_unmount, on_mounted, on_unmounted, on_updated, show, slot, text,
-    text_dyn, use_store,
+    InputEvent, IntoElement, Key, KeyEvent, Modifiers, PointerButton, PointerPhase, Signal,
+    Singleton, SingletonOf, Slot, SurfaceCommand, SurfaceOptions, div, for_each, fragment, if_else,
+    input, on_before_mount, on_before_unmount, on_mounted, on_unmounted, on_updated, show, slot,
+    text, text_dyn, use_store,
 };
 use cappy_style::{Background, Color, FlexDirection, Overflow, StyleRefinement};
 
@@ -3713,6 +3713,367 @@ fn a_hidden_overlay_is_not_hit() {
     open.set(false);
     ui.update(VIEWPORT);
     assert!(!ui.hit_path(Point::new(10.0, 10.0)).contains(&pop));
+}
+
+#[test]
+fn a_menu_that_closes_on_blur_still_runs_the_item_click() {
+    let cx = context();
+    let open = cx.signal(true);
+    let open_menu = open.clone();
+    let open_blur = open.clone();
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let click_log = Rc::clone(&log);
+    let blur_log = Rc::clone(&log);
+    let mut ui = settled(
+        &cx,
+        div().children([
+            div()
+                .key("trigger")
+                .focusable()
+                .style(StyleRefinement::default().size(40).flex_shrink(0.0))
+                .on_focus(move |is_focused| {
+                    if !is_focused {
+                        blur_log.borrow_mut().push("blur");
+                        open_blur.set(false);
+                    }
+                }),
+            if_else(
+                move || open_menu.get(),
+                move || {
+                    let click_log = Rc::clone(&click_log);
+                    div()
+                        .key("menu")
+                        .overlay()
+                        .place(Point::new(0.0, 48.0))
+                        .child(
+                            div()
+                                .key("item")
+                                .style(StyleRefinement::default().size(40).flex_shrink(0.0))
+                                .on_click(move |_| {
+                                    click_log.borrow_mut().push("click");
+                                }),
+                        )
+                },
+                || div(),
+            ),
+        ]),
+    );
+    key(&mut ui, Key::Tab, Modifiers::default());
+    let item = center_of(&ui, "item");
+    ui.handle_event(InputEvent::PointerMoved { position: item });
+    ui.handle_event(InputEvent::PointerButton {
+        button: PointerButton::Primary,
+        state: ButtonState::Pressed,
+    });
+    ui.update(VIEWPORT);
+    assert!(log.borrow().is_empty(), "{:?}", log.borrow());
+    assert!(ui.find_by_key("item").is_some());
+
+    ui.handle_event(InputEvent::PointerButton {
+        button: PointerButton::Primary,
+        state: ButtonState::Released,
+    });
+    assert_eq!(log.borrow().as_slice(), ["click", "blur"]);
+    ui.update(VIEWPORT);
+    assert!(ui.find_by_key("item").is_none());
+    ui.prepare_frame();
+    assert_eq!(ui.update(VIEWPORT), UpdateOutcome::Idle);
+}
+
+#[test]
+fn a_focusable_item_keeps_its_click_when_the_trigger_blurs() {
+    let cx = context();
+    let open = cx.signal(true);
+    let open_menu = open.clone();
+    let open_blur = open.clone();
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let click_log = Rc::clone(&log);
+    let blur_log = Rc::clone(&log);
+    let mut ui = settled(
+        &cx,
+        div().children([
+            div()
+                .key("trigger")
+                .focusable()
+                .style(StyleRefinement::default().size(40).flex_shrink(0.0))
+                .on_focus(move |is_focused| {
+                    if !is_focused {
+                        blur_log.borrow_mut().push("blur");
+                        open_blur.set(false);
+                    }
+                }),
+            if_else(
+                move || open_menu.get(),
+                move || {
+                    let click_log = Rc::clone(&click_log);
+                    div()
+                        .key("menu")
+                        .overlay()
+                        .place(Point::new(0.0, 48.0))
+                        .child(
+                            div()
+                                .key("item")
+                                .focusable()
+                                .style(StyleRefinement::default().size(40).flex_shrink(0.0))
+                                .on_click(move |_| {
+                                    click_log.borrow_mut().push("click");
+                                }),
+                        )
+                },
+                || div(),
+            ),
+        ]),
+    );
+    key(&mut ui, Key::Tab, Modifiers::default());
+    let item = center_of(&ui, "item");
+    ui.handle_event(InputEvent::PointerMoved { position: item });
+    ui.handle_event(InputEvent::PointerButton {
+        button: PointerButton::Primary,
+        state: ButtonState::Pressed,
+    });
+    ui.update(VIEWPORT);
+    assert!(log.borrow().is_empty(), "{:?}", log.borrow());
+    assert!(ui.find_by_key("item").is_some());
+    ui.handle_event(InputEvent::PointerButton {
+        button: PointerButton::Primary,
+        state: ButtonState::Released,
+    });
+    assert_eq!(log.borrow().as_slice(), ["click", "blur"]);
+}
+
+#[test]
+fn an_outside_click_dismisses_after_the_press_finishes() {
+    let cx = context();
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let page_log = Rc::clone(&log);
+    let item_log = Rc::clone(&log);
+    let dismiss_log = Rc::clone(&log);
+    let mut ui = settled(
+        &cx,
+        div().children([
+            div()
+                .key("page")
+                .style(StyleRefinement::default().size(40).flex_shrink(0.0))
+                .on_click(move |_| page_log.borrow_mut().push("page")),
+            div()
+                .key("menu")
+                .overlay()
+                .place(Point::new(120.0, 120.0))
+                .style(StyleRefinement::default().size(80).flex_shrink(0.0))
+                .on_dismiss(move |_| dismiss_log.borrow_mut().push("dismiss"))
+                .child(
+                    div()
+                        .key("item")
+                        .style(StyleRefinement::default().size(40).flex_shrink(0.0))
+                        .on_click(move |_| item_log.borrow_mut().push("item")),
+                ),
+        ]),
+    );
+    let item = center_of(&ui, "item");
+    ui.handle_event(InputEvent::PointerMoved { position: item });
+    ui.handle_event(InputEvent::PointerButton {
+        button: PointerButton::Primary,
+        state: ButtonState::Pressed,
+    });
+    ui.update(VIEWPORT);
+    assert!(log.borrow().is_empty(), "{:?}", log.borrow());
+    ui.handle_event(InputEvent::PointerButton {
+        button: PointerButton::Primary,
+        state: ButtonState::Released,
+    });
+    assert_eq!(log.borrow().as_slice(), ["item"]);
+
+    let page = center_of(&ui, "page");
+    ui.handle_event(InputEvent::PointerMoved { position: page });
+    ui.handle_event(InputEvent::PointerButton {
+        button: PointerButton::Primary,
+        state: ButtonState::Pressed,
+    });
+    ui.update(VIEWPORT);
+    assert_eq!(log.borrow().as_slice(), ["item"]);
+    ui.handle_event(InputEvent::PointerButton {
+        button: PointerButton::Primary,
+        state: ButtonState::Released,
+    });
+    assert_eq!(log.borrow().as_slice(), ["item", "page", "dismiss"]);
+}
+
+#[test]
+fn a_nested_overlay_click_does_not_dismiss_its_host() {
+    let cx = context();
+    let dismissals = cx.signal(0);
+    let dismiss_flag = dismissals.clone();
+    let nested_clicks = cx.signal(0);
+    let nested_flag = nested_clicks.clone();
+    let mut ui = settled(
+        &cx,
+        div()
+            .key("host")
+            .overlay()
+            .place(Point::new(0.0, 0.0))
+            .style(StyleRefinement::default().size(80).flex_shrink(0.0))
+            .on_dismiss(move |_| dismiss_flag.update(|count| *count += 1))
+            .child(
+                div()
+                    .key("nested")
+                    .overlay()
+                    .place(Point::new(200.0, 200.0))
+                    .style(StyleRefinement::default().size(30).flex_shrink(0.0))
+                    .on_click(move |_| nested_flag.update(|count| *count += 1)),
+            ),
+    );
+    click(&mut ui, "host");
+    click(&mut ui, "nested");
+    assert_eq!(nested_clicks.get_untracked(), 1);
+    assert_eq!(dismissals.get_untracked(), 0);
+
+    click_at(&mut ui, 400.0, 400.0);
+    assert_eq!(dismissals.get_untracked(), 1);
+}
+
+#[test]
+fn the_click_that_opens_a_menu_does_not_dismiss_it() {
+    let cx = context();
+    let open = cx.signal(false);
+    let open_click = open.clone();
+    let open_menu = open.clone();
+    let open_dismiss = open.clone();
+    let dismissals = cx.signal(0);
+    let dismiss_flag = dismissals.clone();
+    let mut ui = settled(
+        &cx,
+        div().children([
+            div()
+                .key("trigger")
+                .style(StyleRefinement::default().size(40).flex_shrink(0.0))
+                .on_click(move |_| open_click.set(true)),
+            if_else(
+                move || open_menu.get(),
+                move || {
+                    let dismiss_flag = dismiss_flag.clone();
+                    let open_dismiss = open_dismiss.clone();
+                    div()
+                        .key("menu")
+                        .overlay()
+                        .place(Point::new(0.0, 48.0))
+                        .style(StyleRefinement::default().size(40).flex_shrink(0.0))
+                        .on_dismiss(move |_| {
+                            dismiss_flag.update(|count| *count += 1);
+                            open_dismiss.set(false);
+                        })
+                },
+                || div(),
+            ),
+        ]),
+    );
+    click(&mut ui, "trigger");
+    ui.update(VIEWPORT);
+    assert!(ui.find_by_key("menu").is_some());
+    assert_eq!(dismissals.get_untracked(), 0);
+
+    click_at(&mut ui, 400.0, 400.0);
+    ui.update(VIEWPORT);
+    assert_eq!(dismissals.get_untracked(), 1);
+    assert!(ui.find_by_key("menu").is_none());
+}
+
+#[test]
+fn the_right_and_middle_buttons_reach_on_pointer_without_clicking_or_blurring() {
+    let cx = context();
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let events = Rc::clone(&log);
+    let order = Rc::new(RefCell::new(Vec::new()));
+    let click_order = Rc::clone(&order);
+    let blur_order = Rc::clone(&order);
+    let mut ui = settled(
+        &cx,
+        div().children([
+            div()
+                .key("keeper")
+                .focusable()
+                .style(StyleRefinement::default().size(40).flex_shrink(0.0))
+                .on_focus(move |is_focused| {
+                    if !is_focused {
+                        blur_order.borrow_mut().push("blur");
+                    }
+                }),
+            div()
+                .key("target")
+                .style(StyleRefinement::default().size(40).flex_shrink(0.0))
+                .on_pointer(move |event| {
+                    events.borrow_mut().push((event.button, event.phase));
+                })
+                .on_click(move |_| click_order.borrow_mut().push("click")),
+        ]),
+    );
+    key(&mut ui, Key::Tab, Modifiers::default());
+    let target = center_of(&ui, "target");
+    for button in [PointerButton::Secondary, PointerButton::Middle] {
+        log.borrow_mut().clear();
+        ui.handle_event(InputEvent::PointerMoved { position: target });
+        ui.handle_event(InputEvent::PointerButton {
+            button,
+            state: ButtonState::Pressed,
+        });
+        ui.handle_event(InputEvent::PointerButton {
+            button,
+            state: ButtonState::Released,
+        });
+        assert_eq!(
+            log.borrow().as_slice(),
+            [(button, PointerPhase::Down), (button, PointerPhase::Up)]
+        );
+    }
+    assert!(order.borrow().is_empty(), "{:?}", order.borrow());
+
+    log.borrow_mut().clear();
+    ui.handle_event(InputEvent::PointerMoved { position: target });
+    ui.handle_event(InputEvent::PointerButton {
+        button: PointerButton::Primary,
+        state: ButtonState::Pressed,
+    });
+    ui.handle_event(InputEvent::PointerMoved {
+        position: Point::new(target.x + 4.0, target.y),
+    });
+    ui.handle_event(InputEvent::PointerButton {
+        button: PointerButton::Primary,
+        state: ButtonState::Released,
+    });
+    assert_eq!(
+        log.borrow().as_slice(),
+        [
+            (PointerButton::Primary, PointerPhase::Down),
+            (PointerButton::Primary, PointerPhase::Move),
+            (PointerButton::Primary, PointerPhase::Up),
+        ]
+    );
+    assert_eq!(order.borrow().as_slice(), ["click", "blur"]);
+}
+
+#[test]
+fn a_disabled_node_does_not_take_the_right_button() {
+    let cx = context();
+    let events = Rc::new(Cell::new(0));
+    let seen = events.clone();
+    let mut ui = settled(
+        &cx,
+        div()
+            .key("gate")
+            .style(StyleRefinement::default().size(40).flex_shrink(0.0))
+            .disabled(true)
+            .on_pointer(move |_| seen.set(seen.get() + 1)),
+    );
+    let gate = center_of(&ui, "gate");
+    ui.handle_event(InputEvent::PointerMoved { position: gate });
+    ui.handle_event(InputEvent::PointerButton {
+        button: PointerButton::Secondary,
+        state: ButtonState::Pressed,
+    });
+    ui.handle_event(InputEvent::PointerButton {
+        button: PointerButton::Secondary,
+        state: ButtonState::Released,
+    });
+    assert_eq!(events.get(), 0);
 }
 
 fn quad_index(ui: &Ui, key: &str) -> usize {

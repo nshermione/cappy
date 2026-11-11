@@ -142,6 +142,8 @@ pub(crate) struct Node {
     pub(crate) on_ime: Option<ImeHandler>,
     pub(crate) on_focus: Option<FocusHandler>,
     pub(crate) on_pointer: Option<PointerHandler>,
+    /// Primary press that landed outside this node. Runs after that press's click.
+    pub(crate) on_dismiss: Option<ClickHandler>,
     /// Caret byte index drawn on a text leaf. Inputs keep theirs on [`InputField`].
     pub(crate) caret: Option<usize>,
     pub(crate) selection: Option<(usize, usize)>,

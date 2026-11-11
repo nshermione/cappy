@@ -19,6 +19,14 @@ use crate::{
 const CARET_BLINK: Duration = Duration::from_millis(530);
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 
+/// Deepest focusable node under the pointer, or why there is none.
+enum PressFocus {
+    Target(NodeId),
+    /// A disabled focusable node is in front. Do not focus or press through it.
+    Blocked,
+    None,
+}
+
 /// A press on a scrollbar thumb or its track, held until the button is released.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct ScrollbarDrag {
@@ -44,19 +52,23 @@ impl Ui {
             }
             InputEvent::PointerLeft => {
                 self.pointer = None;
+                self.button_capture = None;
+                self.pending_dismiss.clear();
+                self.finish_deferred_blur();
                 self.blur();
                 if self.scrollbar_drag.is_none() {
                     self.refresh_hover();
                 }
             }
-            InputEvent::PointerButton {
-                button: PointerButton::Primary,
-                state,
-            } => match state {
-                ButtonState::Pressed => self.press(),
-                ButtonState::Released => self.release(),
+            InputEvent::PointerButton { button, state } => match button {
+                PointerButton::Primary => match state {
+                    ButtonState::Pressed => self.press(),
+                    ButtonState::Released => self.release(),
+                },
+                PointerButton::Secondary | PointerButton::Middle => {
+                    self.other_button(button, state)
+                }
             },
-            InputEvent::PointerButton { .. } => {}
             InputEvent::Wheel { delta } => self.wheel(delta),
             InputEvent::Modifiers(modifiers) => self.modifiers = modifiers,
             InputEvent::Key(event) => self.on_key(event),
@@ -268,27 +280,10 @@ impl Ui {
             self.drag_scrollbar(position);
             return;
         }
-        let mut focus_target = None;
-        let mut focus_blocked = false;
-        for id in self.hovered.iter().rev().copied() {
-            if !self.is_current(id) || !self.nodes[id.index()].focusable {
-                continue;
-            }
-            if self.node_disabled(id) {
-                focus_blocked = true;
-            } else {
-                focus_target = Some(id);
-            }
-            break;
-        }
-        if let Some(id) = focus_target {
-            let count = self.press_count(id);
-            self.focus(id);
-            self.pointer_capture = Some(id);
-            self.pointer_down(id, count);
-        } else if !focus_blocked {
-            self.blur();
-        }
+        // Record the press before focus callbacks. A menu that closes from blur or dismiss must
+        // not drop this target before release.
+        let dismiss = self.outside_dismiss_targets(&self.hovered);
+        self.pending_dismiss = dismiss;
         let mut click_target = None;
         for id in self.hovered.iter().rev().copied() {
             if !self.is_current(id) || self.nodes[id.index()].on_click.is_none() {
@@ -303,6 +298,16 @@ impl Ui {
             self.pressed = Some(id);
             self.set_interaction(id, |state| state.pressed = true);
         }
+        match self.press_focus() {
+            PressFocus::Target(id) => {
+                let count = self.press_count(id);
+                self.pointer_capture = Some(id);
+                self.focus_deferring_blur(id);
+                self.pointer_down(id, count);
+            }
+            PressFocus::Blocked => {}
+            PressFocus::None => self.blur_deferring(),
+        }
     }
 
     fn release(&mut self) {
@@ -313,23 +318,112 @@ impl Ui {
         if let Some(id) = self.pointer_capture.take()
             && self.is_current(id)
         {
-            self.emit_pointer(id, PointerPhase::Up, 1);
+            self.emit_pointer(id, PointerPhase::Up, 1, PointerButton::Primary);
         }
-        let Some(id) = self.pressed.take() else {
+        if let Some(id) = self.pressed.take()
+            && self.is_current(id)
+        {
+            self.set_interaction(id, |state| state.pressed = false);
+            if self.hovered.contains(&id) {
+                let event = ClickEvent {
+                    position: self.pointer.unwrap_or_default(),
+                };
+                let node = &mut self.nodes[id.index()];
+                if let Some(mut handler) = node.on_click.take() {
+                    handler(&event);
+                    node.on_click.get_or_insert(handler);
+                }
+            }
+        }
+        self.finish_press();
+    }
+
+    /// Deepest focusable node under the pointer. A disabled node blocks the nodes behind it.
+    fn press_focus(&self) -> PressFocus {
+        for id in self.hovered.iter().rev().copied() {
+            if !self.is_current(id) || !self.nodes[id.index()].focusable {
+                continue;
+            }
+            if self.node_disabled(id) {
+                return PressFocus::Blocked;
+            }
+            return PressFocus::Target(id);
+        }
+        PressFocus::None
+    }
+
+    /// `on_dismiss` nodes this press did not land inside. Nested overlays count as inside their host.
+    fn outside_dismiss_targets(&self, path: &[NodeId]) -> Vec<NodeId> {
+        let mut targets = Vec::new();
+        for index in 0..self.nodes.len() {
+            if self.nodes[index].on_dismiss.is_none() {
+                continue;
+            }
+            let id = NodeId::new(index as u32, self.nodes[index].generation);
+            if !self.layer_shown(id) {
+                continue;
+            }
+            if path.iter().any(|hit| self.is_within(*hit, id)) {
+                continue;
+            }
+            targets.push(id);
+        }
+        targets
+    }
+
+    fn finish_press(&mut self) {
+        self.finish_deferred_blur();
+        let dismiss = std::mem::take(&mut self.pending_dismiss);
+        let position = self.pointer.unwrap_or_default();
+        for id in dismiss.into_iter().rev() {
+            self.call_dismiss(id, position);
+        }
+    }
+
+    fn finish_deferred_blur(&mut self) {
+        let Some(id) = self.pending_blur.take() else {
             return;
         };
-        if !self.is_current(id) {
+        if self.is_current(id) && self.focused != Some(id) {
+            self.call_focus(id, false);
+        }
+    }
+
+    fn call_dismiss(&mut self, id: NodeId, position: Point) {
+        if !self.is_current(id) || !self.layer_shown(id) {
             return;
         }
-        self.set_interaction(id, |state| state.pressed = false);
-        if self.hovered.contains(&id) {
-            let event = ClickEvent {
-                position: self.pointer.unwrap_or_default(),
-            };
-            let node = &mut self.nodes[id.index()];
-            if let Some(mut handler) = node.on_click.take() {
-                handler(&event);
-                node.on_click.get_or_insert(handler);
+        let event = ClickEvent { position };
+        let mut handler = self.nodes[id.index()].on_dismiss.take();
+        if let Some(handler) = handler.as_mut() {
+            handler(&event);
+        }
+        if self.is_current(id) {
+            self.nodes[id.index()].on_dismiss = handler;
+        }
+    }
+
+    /// Right and middle buttons reach `on_pointer` without focusing, clicking, or dismissing.
+    fn other_button(&mut self, button: PointerButton, state: ButtonState) {
+        match state {
+            ButtonState::Pressed => {
+                let PressFocus::Target(id) = self.press_focus() else {
+                    return;
+                };
+                self.button_capture = Some((button, id));
+                self.emit_pointer(id, PointerPhase::Down, 1, button);
+            }
+            ButtonState::Released => {
+                let Some((held, id)) = self.button_capture.take() else {
+                    return;
+                };
+                if held != button {
+                    self.button_capture = Some((held, id));
+                    return;
+                }
+                if self.is_current(id) {
+                    self.emit_pointer(id, PointerPhase::Up, 1, button);
+                }
             }
         }
     }
@@ -500,7 +594,7 @@ impl Ui {
             self.reveal_input_caret(id);
             self.show_caret(id);
         }
-        self.emit_pointer(id, PointerPhase::Down, count);
+        self.emit_pointer(id, PointerPhase::Down, count, PointerButton::Primary);
     }
 
     fn drag_capture(&mut self, phase: PointerPhase) {
@@ -517,10 +611,16 @@ impl Ui {
             self.reveal_input_caret(id);
             self.show_caret(id);
         }
-        self.emit_pointer(id, phase, 1);
+        self.emit_pointer(id, phase, 1, PointerButton::Primary);
     }
 
-    fn emit_pointer(&mut self, id: NodeId, phase: PointerPhase, click_count: u8) {
+    fn emit_pointer(
+        &mut self,
+        id: NodeId,
+        phase: PointerPhase,
+        click_count: u8,
+        button: PointerButton,
+    ) {
         let Some(position) = self.pointer else {
             return;
         };
@@ -531,6 +631,7 @@ impl Ui {
             handler(&PointerEvent {
                 position,
                 phase,
+                button,
                 text_index,
                 shift,
                 click_count,
@@ -748,25 +849,46 @@ impl Ui {
     }
 
     pub(super) fn focus(&mut self, id: NodeId) {
+        self.focus_at(id, true);
+    }
+
+    /// Moves focus. When `notify_blur` is false, `on_focus(false)` waits until the press releases.
+    fn focus_at(&mut self, id: NodeId, notify_blur: bool) {
         if self.focused == Some(id) || !self.is_focusable(id) {
             return;
         }
-        self.blur();
+        self.blur_at(notify_blur);
         self.focused = Some(id);
         self.set_interaction(id, |state| state.focused = true);
         self.call_focus(id, true);
         self.show_caret(id);
     }
 
+    fn focus_deferring_blur(&mut self, id: NodeId) {
+        self.focus_at(id, false);
+    }
+
     pub(super) fn blur(&mut self) {
+        self.blur_at(true);
+    }
+
+    fn blur_deferring(&mut self) {
+        self.blur_at(false);
+    }
+
+    fn blur_at(&mut self, notify: bool) {
         let Some(id) = self.focused.take() else {
             return;
         };
         self.caret_deadline = None;
         if self.is_current(id) {
             self.set_interaction(id, |state| state.focused = false);
-            self.call_focus(id, false);
             self.mark_paint_dirty(id);
+            if notify {
+                self.call_focus(id, false);
+            } else {
+                self.pending_blur = Some(id);
+            }
         }
     }
 

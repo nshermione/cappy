@@ -21,7 +21,7 @@ use cappy_style::{Style, Theme};
 
 use crate::clipboard::{Clipboard, MemoryClipboard};
 use crate::element::IntoElement;
-use crate::event::Modifiers;
+use crate::event::{Modifiers, PointerButton};
 use crate::geometry::GeometryBoard;
 use crate::paint::{Primitive, RenderFrame};
 use crate::reactive::{BindingQueue, Signal};
@@ -153,8 +153,16 @@ pub struct Ui {
     /// Thumb or track drag. The offset follows the pointer until the button is released.
     scrollbar_drag: Option<input::ScrollbarDrag>,
     focused: Option<NodeId>,
-    /// Node receiving pointer moves until the button is released.
+    /// Node receiving pointer moves until the primary button is released.
     pointer_capture: Option<NodeId>,
+    /// Secondary or middle button held on a focusable node, until that button is released.
+    button_capture: Option<(PointerButton, NodeId)>,
+    /// `on_focus(false)` deferred until the primary press releases, so a popup can close after
+    /// the item click.
+    pending_blur: Option<NodeId>,
+    /// Nodes whose `on_dismiss` should run after the primary press's click. The press landed
+    /// outside each of them.
+    pending_dismiss: Vec<NodeId>,
     modifiers: Modifiers,
     /// Previous primary press, used to treat a second press as a double click.
     last_press: Option<(NodeId, Instant)>,
@@ -222,6 +230,9 @@ impl Ui {
             scrollbar_drag: None,
             focused: None,
             pointer_capture: None,
+            button_capture: None,
+            pending_blur: None,
+            pending_dismiss: Vec::new(),
             modifiers: Modifiers::default(),
             last_press: None,
             caret_on: true,
