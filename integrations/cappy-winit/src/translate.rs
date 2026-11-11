@@ -112,6 +112,8 @@ fn map_key(key: &WinitKey) -> Option<Key> {
         WinitKey::Named(NamedKey::Delete) => Key::Delete,
         WinitKey::Named(NamedKey::ArrowLeft) => Key::Left,
         WinitKey::Named(NamedKey::ArrowRight) => Key::Right,
+        WinitKey::Named(NamedKey::ArrowUp) => Key::Up,
+        WinitKey::Named(NamedKey::ArrowDown) => Key::Down,
         WinitKey::Named(NamedKey::Home) => Key::Home,
         WinitKey::Named(NamedKey::End) => Key::End,
         WinitKey::Character(text) => Key::Character(text.chars().next()?),
@@ -146,6 +148,15 @@ mod tests {
         assert_eq!(
             pointer_button(MouseButton::Back, ElementState::Pressed),
             None
+        );
+    }
+
+    #[test]
+    fn arrow_up_and_down_are_keys() {
+        assert_eq!(map_key(&WinitKey::Named(NamedKey::ArrowUp)), Some(Key::Up));
+        assert_eq!(
+            map_key(&WinitKey::Named(NamedKey::ArrowDown)),
+            Some(Key::Down)
         );
     }
 

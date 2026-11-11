@@ -12,8 +12,8 @@ use super::scroll::{
 use super::{NodeId, Ui};
 use crate::time::{Duration, Instant};
 use crate::{
-    ButtonState, ClickEvent, ImeEvent, InputEvent, Key, KeyEvent, PointerButton, PointerEvent,
-    PointerPhase,
+    ButtonState, ClickEvent, FocusScope, ImeEvent, InputEvent, Key, KeyEvent, PointerButton,
+    PointerEvent, PointerPhase,
 };
 
 const CARET_BLINK: Duration = Duration::from_millis(530);
@@ -688,6 +688,9 @@ impl Ui {
         if !self.is_current(id) || self.node_disabled(id) {
             return;
         }
+        if event.state == ButtonState::Pressed && self.move_roving(event.key) {
+            return;
+        }
         if self.is_input(id) && event.state == ButtonState::Pressed {
             self.input_key(id, event);
         }
@@ -829,23 +832,347 @@ impl Ui {
         self.focus(order[next]);
     }
 
+    /// Tab order. A visible trap replaces the page. A roving scope contributes its active item.
     fn focus_order(&self) -> Vec<NodeId> {
         let mut order = Vec::new();
-        let mut stack = vec![self.root];
-        while let Some(id) = stack.pop() {
-            if !self.is_current(id) {
-                continue;
-            }
-            let node = &self.nodes[id.index()];
-            if node.suppressed || node.style.layout.display == Display::None {
-                continue;
-            }
-            if node.focusable && !self.node_disabled(id) {
-                order.push(id);
-            }
-            stack.extend(node.children.iter().rev().copied());
-        }
+        self.collect_tab_stops(self.tab_root(), &mut order);
         order
+    }
+
+    fn tab_root(&self) -> NodeId {
+        self.last_visible_trap(self.root).unwrap_or(self.root)
+    }
+
+    fn last_visible_trap(&self, id: NodeId) -> Option<NodeId> {
+        if !self.is_shown(id) {
+            return None;
+        }
+        let mut found = if self.nodes[id.index()].focus_scope == Some(FocusScope::Trap) {
+            Some(id)
+        } else {
+            None
+        };
+        let count = self.nodes[id.index()].children.len();
+        for index in 0..count {
+            let child = self.nodes[id.index()].children[index];
+            if let Some(inner) = self.last_visible_trap(child) {
+                found = Some(inner);
+            }
+        }
+        found
+    }
+
+    fn collect_tab_stops(&self, id: NodeId, stops: &mut Vec<NodeId>) {
+        if !self.is_shown(id) {
+            return;
+        }
+        if self.is_roving_scope(id) {
+            if self.is_focusable(id) {
+                stops.push(id);
+            }
+            if let Some(stop) = self.roving_tab_stop(id) {
+                stops.push(stop);
+            }
+            return;
+        }
+        if self.is_focusable(id) {
+            stops.push(id);
+        }
+        let count = self.nodes[id.index()].children.len();
+        for index in 0..count {
+            let child = self.nodes[id.index()].children[index];
+            self.collect_tab_stops(child, stops);
+        }
+    }
+
+    fn roving_tab_stop(&self, scope: NodeId) -> Option<NodeId> {
+        let items = self.roving_items(scope);
+        if let Some(focused) = self.focused {
+            if items.contains(&focused) {
+                return Some(focused);
+            }
+        }
+        if let Some(active) = self.nodes[scope.index()].roving_active {
+            if self.is_current(active) && items.contains(&active) {
+                return Some(active);
+            }
+        }
+        items.first().copied()
+    }
+
+    fn roving_items(&self, scope: NodeId) -> Vec<NodeId> {
+        let mut items = Vec::new();
+        if !self.is_current(scope) {
+            return items;
+        }
+        let count = self.nodes[scope.index()].children.len();
+        for index in 0..count {
+            let child = self.nodes[scope.index()].children[index];
+            self.collect_roving_items(child, &mut items);
+        }
+        items
+    }
+
+    fn collect_roving_items(&self, id: NodeId, items: &mut Vec<NodeId>) {
+        if !self.is_shown(id) {
+            return;
+        }
+        if self.is_roving_scope(id) {
+            if let Some(stop) = self.roving_tab_stop(id) {
+                items.push(stop);
+            }
+            return;
+        }
+        if self.is_focusable(id) {
+            items.push(id);
+        }
+        let count = self.nodes[id.index()].children.len();
+        for index in 0..count {
+            let child = self.nodes[id.index()].children[index];
+            self.collect_roving_items(child, items);
+        }
+    }
+
+    /// Moves focus inside the roving scope that contains it. False when this key is not one of
+    /// that scope's arrows, so the focused node still receives it.
+    fn move_roving(&mut self, key: Key) -> bool {
+        let (kind, reverse) = match key {
+            Key::Up => (FocusScope::Vertical, true),
+            Key::Down => (FocusScope::Vertical, false),
+            Key::Left => (FocusScope::Horizontal, true),
+            Key::Right => (FocusScope::Horizontal, false),
+            _ => return false,
+        };
+        let Some(focused) = self.focused else {
+            return false;
+        };
+        if matches!(key, Key::Left | Key::Right) && self.is_input(focused) {
+            return false;
+        }
+        let Some(scope) = self.scope_from(focused, kind) else {
+            return false;
+        };
+        let items = self.roving_items(scope);
+        if items.is_empty() {
+            return true;
+        }
+        let next = match items.iter().position(|item| *item == focused) {
+            Some(index) if reverse => {
+                if index == 0 {
+                    items.len() - 1
+                } else {
+                    index - 1
+                }
+            }
+            Some(index) => (index + 1) % items.len(),
+            None if reverse => items.len() - 1,
+            None => 0,
+        };
+        self.focus(items[next]);
+        true
+    }
+
+    fn scope_from(&self, id: NodeId, kind: FocusScope) -> Option<NodeId> {
+        let mut current = Some(id);
+        while let Some(node) = current {
+            if self.is_current(node) && self.nodes[node.index()].focus_scope == Some(kind) {
+                return Some(node);
+            }
+            current = self.nodes[node.index()].parent;
+        }
+        None
+    }
+
+    fn is_roving_scope(&self, id: NodeId) -> bool {
+        self.is_current(id)
+            && matches!(
+                self.nodes[id.index()].focus_scope,
+                Some(FocusScope::Vertical | FocusScope::Horizontal)
+            )
+    }
+
+    /// The node and its ancestors are mounted and not hidden.
+    fn is_shown(&self, id: NodeId) -> bool {
+        let mut current = Some(id);
+        while let Some(node) = current {
+            if !self.is_current(node) {
+                return false;
+            }
+            let item = &self.nodes[node.index()];
+            if item.suppressed || item.style.layout.display == Display::None {
+                return false;
+            }
+            current = item.parent;
+        }
+        true
+    }
+
+    pub(super) fn arm_mounted_scope(&mut self, id: NodeId) {
+        if self.is_roving_scope(id) {
+            self.arm_roving(id);
+        }
+    }
+
+    fn arm_roving(&mut self, id: NodeId) {
+        if !self.roving_enter.contains(&id) {
+            self.roving_enter.push(id);
+        }
+    }
+
+    pub(super) fn roving_visibility(&mut self, id: NodeId, shown: bool) {
+        if shown {
+            self.arm_mounted_scope(id);
+            return;
+        }
+        self.roving_enter.retain(|pending| *pending != id);
+        if self.is_roving_scope(id) {
+            self.restore_roving(id);
+        }
+    }
+
+    pub(super) fn scope_display_changed(&mut self, id: NodeId, hidden: bool) {
+        if hidden {
+            self.hide_roving_under(id);
+        } else {
+            self.arm_roving_under(id);
+        }
+    }
+
+    fn hide_roving_under(&mut self, id: NodeId) {
+        if self.roving_enter.is_empty() && self.focused.is_none() {
+            return;
+        }
+        if !self.is_current(id) {
+            return;
+        }
+        self.roving_enter.retain(|pending| *pending != id);
+        if self.is_roving_scope(id) {
+            self.restore_roving(id);
+        }
+        let count = self.nodes[id.index()].children.len();
+        for index in 0..count {
+            let child = self.nodes[id.index()].children[index];
+            self.hide_roving_under(child);
+        }
+    }
+
+    fn arm_roving_under(&mut self, id: NodeId) {
+        if !self.is_current(id) {
+            return;
+        }
+        self.arm_mounted_scope(id);
+        let count = self.nodes[id.index()].children.len();
+        for index in 0..count {
+            let child = self.nodes[id.index()].children[index];
+            self.arm_roving_under(child);
+        }
+    }
+
+    pub(super) fn prepare_scope_dispose(&mut self, id: NodeId) {
+        self.roving_enter.retain(|pending| *pending != id);
+        if self.is_roving_scope(id) {
+            self.restore_roving(id);
+        }
+    }
+
+    pub(super) fn settle_roving_enter(&mut self) {
+        if self.roving_enter.is_empty() {
+            return;
+        }
+        self.drain_roving_enter();
+        if self.style_dirty {
+            self.resolve_styles();
+        }
+    }
+
+    fn drain_roving_enter(&mut self) {
+        let pending = std::mem::take(&mut self.roving_enter);
+        let Some(origin) = self.focused else {
+            return;
+        };
+        for id in pending {
+            if !self.is_roving_scope(id) || !self.is_shown(id) {
+                continue;
+            }
+            if origin == id || self.is_within(origin, id) {
+                continue;
+            }
+            if self
+                .focused
+                .is_some_and(|focused| focused == id || self.is_within(focused, id))
+            {
+                continue;
+            }
+            let Some(target) = self.roving_tab_stop(id) else {
+                continue;
+            };
+            self.pin_return(id, origin);
+            self.focus(target);
+        }
+    }
+
+    fn pin_return(&mut self, scope: NodeId, origin: NodeId) {
+        let mut current = Some(scope);
+        while let Some(node) = current {
+            if self.is_roving_scope(node)
+                && self.nodes[node.index()].focus_return.is_none()
+                && origin != node
+                && !self.is_within(origin, node)
+            {
+                self.nodes[node.index()].focus_return = Some(origin);
+            }
+            current = self
+                .is_current(node)
+                .then_some(self.nodes[node.index()].parent)
+                .flatten();
+        }
+    }
+
+    fn restore_roving(&mut self, scope: NodeId) {
+        if !self.is_roving_scope(scope) {
+            return;
+        }
+        let inside = self
+            .focused
+            .is_some_and(|id| id == scope || self.is_within(id, scope));
+        if !inside {
+            return;
+        }
+        let return_to = self.nodes[scope.index()].focus_return.take();
+        if let Some(target) = return_to {
+            if target != scope
+                && !self.is_within(target, scope)
+                && self.is_focusable(target)
+                && self.is_shown(target)
+            {
+                self.focus(target);
+                return;
+            }
+        }
+        self.blur();
+    }
+
+    fn remember_roving_entry(&mut self, previous: Option<NodeId>, next: NodeId) {
+        if !self.is_current(next) {
+            return;
+        }
+        let mut current = Some(next);
+        while let Some(node) = current {
+            if self.is_roving_scope(node) {
+                if let Some(prev) = previous
+                    && prev != node
+                    && self.is_current(prev)
+                    && !self.is_within(prev, node)
+                    && self.nodes[node.index()].focus_return.is_none()
+                {
+                    self.nodes[node.index()].focus_return = Some(prev);
+                }
+                if next != node && self.is_within(next, node) {
+                    self.nodes[node.index()].roving_active = Some(next);
+                }
+            }
+            current = self.nodes[node.index()].parent;
+        }
     }
 
     pub(super) fn focus(&mut self, id: NodeId) {
@@ -857,6 +1184,8 @@ impl Ui {
         if self.focused == Some(id) || !self.is_focusable(id) {
             return;
         }
+        let previous = self.focused;
+        self.remember_roving_entry(previous, id);
         self.blur_at(notify_blur);
         self.focused = Some(id);
         self.set_interaction(id, |state| state.focused = true);

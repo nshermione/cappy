@@ -8,11 +8,11 @@ use super::*;
 use crate::paint::Primitive;
 use crate::reactive::{live_signal_count, signal_is_alive, signal_subscriber_count};
 use crate::{
-    Application, ButtonState, Component, Context, Dynamic, Element, HasContext, ImeEvent,
-    InputEvent, IntoElement, Key, KeyEvent, Modifiers, PointerButton, PointerPhase, Signal,
-    Singleton, SingletonOf, Slot, SurfaceCommand, SurfaceOptions, div, for_each, fragment, if_else,
-    input, on_before_mount, on_before_unmount, on_mounted, on_unmounted, on_updated, show, slot,
-    text, text_dyn, use_store,
+    Application, ButtonState, Component, Context, Dynamic, Element, FocusScope, HasContext,
+    ImeEvent, InputEvent, IntoElement, Key, KeyEvent, Modifiers, PointerButton, PointerPhase,
+    Signal, Singleton, SingletonOf, Slot, SurfaceCommand, SurfaceOptions, div, for_each, fragment,
+    if_else, input, on_before_mount, on_before_unmount, on_mounted, on_unmounted, on_updated, show,
+    slot, text, text_dyn, use_store,
 };
 use cappy_style::{Background, Color, FlexDirection, Overflow, StyleRefinement};
 
@@ -4074,6 +4074,419 @@ fn a_disabled_node_does_not_take_the_right_button() {
         state: ButtonState::Released,
     });
     assert_eq!(events.get(), 0);
+}
+
+fn focus_mark(name: &'static str, current: &crate::Reactive<String>) -> Element {
+    let slot = current.clone();
+    div()
+        .key(name)
+        .focusable()
+        .style(StyleRefinement::default().size(24).flex_shrink(0.0))
+        .on_focus(move |is_focused| {
+            if is_focused {
+                slot.set(name.to_owned());
+            }
+        })
+}
+
+fn shift_tab() -> Modifiers {
+    Modifiers {
+        shift: true,
+        ..Modifiers::default()
+    }
+}
+
+#[test]
+fn tab_cycles_focusable_nodes_in_tree_order() {
+    let cx = context();
+    let current = cx.reactive(String::new());
+    let mut ui = settled(
+        &cx,
+        div().children([
+            focus_mark("first", &current),
+            focus_mark("second", &current),
+        ]),
+    );
+    click(&mut ui, "first");
+    assert_eq!(current.get_untracked(), "first");
+    key(&mut ui, Key::Tab, Modifiers::default());
+    assert_eq!(current.get_untracked(), "second");
+    key(&mut ui, Key::Tab, Modifiers::default());
+    assert_eq!(current.get_untracked(), "first");
+    key(&mut ui, Key::Tab, shift_tab());
+    assert_eq!(current.get_untracked(), "second");
+}
+
+#[test]
+fn tab_stays_inside_the_open_trap() {
+    let cx = context();
+    let current = cx.reactive(String::new());
+    let trap = crate::DivBuilder::open(&cx)
+        .focus_scope(FocusScope::Trap)
+        .into_element()
+        .children([focus_mark("a", &current), focus_mark("b", &current)]);
+    let mut ui = settled(
+        &cx,
+        div().children([
+            focus_mark("before", &current),
+            trap,
+            focus_mark("after", &current),
+        ]),
+    );
+    click(&mut ui, "after");
+    key(&mut ui, Key::Tab, Modifiers::default());
+    assert_eq!(current.get_untracked(), "a");
+    key(&mut ui, Key::Tab, Modifiers::default());
+    assert_eq!(current.get_untracked(), "b");
+    key(&mut ui, Key::Tab, Modifiers::default());
+    assert_eq!(current.get_untracked(), "a");
+    key(&mut ui, Key::Tab, shift_tab());
+    assert_eq!(current.get_untracked(), "b");
+}
+
+#[test]
+fn a_hidden_trap_does_not_keep_tab() {
+    let cx = context();
+    let current = cx.reactive(String::new());
+    let open = cx.reactive(false);
+    let open_read = open.clone();
+    let trap_current = current.clone();
+    let mut ui = settled(
+        &cx,
+        div().children([
+            focus_mark("before", &current),
+            show(
+                move || open_read.get(),
+                move || {
+                    div()
+                        .focus_scope(FocusScope::Trap)
+                        .child(focus_mark("inside", &trap_current))
+                },
+            ),
+            focus_mark("after", &current),
+        ]),
+    );
+    click(&mut ui, "before");
+    key(&mut ui, Key::Tab, Modifiers::default());
+    assert_eq!(current.get_untracked(), "after");
+    open.set(true);
+    ui.update(VIEWPORT);
+    click(&mut ui, "before");
+    key(&mut ui, Key::Tab, Modifiers::default());
+    assert_eq!(current.get_untracked(), "inside");
+    key(&mut ui, Key::Tab, Modifiers::default());
+    assert_eq!(current.get_untracked(), "inside");
+}
+
+#[test]
+fn a_nested_trap_keeps_tab_in_the_inner_one() {
+    let cx = context();
+    let current = cx.reactive(String::new());
+    let mut ui = settled(
+        &cx,
+        div().focus_scope(FocusScope::Trap).children([
+            focus_mark("outer", &current),
+            div().focus_scope(FocusScope::Trap).children([
+                focus_mark("inner", &current),
+                focus_mark("inner_b", &current),
+            ]),
+            focus_mark("outer_b", &current),
+        ]),
+    );
+    click(&mut ui, "outer");
+    key(&mut ui, Key::Tab, Modifiers::default());
+    assert_eq!(current.get_untracked(), "inner");
+    key(&mut ui, Key::Tab, Modifiers::default());
+    assert_eq!(current.get_untracked(), "inner_b");
+    key(&mut ui, Key::Tab, Modifiers::default());
+    assert_eq!(current.get_untracked(), "inner");
+}
+
+#[test]
+fn up_and_down_move_inside_a_vertical_scope_and_wrap() {
+    let cx = context();
+    let current = cx.reactive(String::new());
+    let mut ui = settled(
+        &cx,
+        div().focus_scope(FocusScope::Vertical).children([
+            focus_mark("one", &current),
+            focus_mark("two", &current),
+            focus_mark("three", &current),
+        ]),
+    );
+    click(&mut ui, "one");
+    key(&mut ui, Key::Down, Modifiers::default());
+    assert_eq!(current.get_untracked(), "two");
+    key(&mut ui, Key::Down, Modifiers::default());
+    assert_eq!(current.get_untracked(), "three");
+    key(&mut ui, Key::Down, Modifiers::default());
+    assert_eq!(current.get_untracked(), "one");
+    key(&mut ui, Key::Up, Modifiers::default());
+    assert_eq!(current.get_untracked(), "three");
+}
+
+#[test]
+fn left_and_right_on_a_vertical_scope_reach_the_item() {
+    let cx = context();
+    let current = cx.reactive(String::new());
+    let seen = Rc::new(Cell::new(false));
+    let flag = Rc::clone(&seen);
+    let mut ui = settled(
+        &cx,
+        div().focus_scope(FocusScope::Vertical).children([
+            focus_mark("one", &current).on_key(move |event, _| {
+                if event.state == ButtonState::Pressed && event.key == Key::Left {
+                    flag.set(true);
+                }
+            }),
+            focus_mark("two", &current),
+        ]),
+    );
+    click(&mut ui, "one");
+    key(&mut ui, Key::Left, Modifiers::default());
+    assert!(seen.get());
+    assert_eq!(current.get_untracked(), "one");
+}
+
+#[test]
+fn a_disabled_roving_item_is_skipped() {
+    let cx = context();
+    let current = cx.reactive(String::new());
+    let mut ui = settled(
+        &cx,
+        div().focus_scope(FocusScope::Vertical).children([
+            focus_mark("one", &current),
+            focus_mark("skip", &current).disabled(true),
+            focus_mark("three", &current),
+        ]),
+    );
+    click(&mut ui, "one");
+    key(&mut ui, Key::Down, Modifiers::default());
+    assert_eq!(current.get_untracked(), "three");
+}
+
+#[test]
+fn left_and_right_move_inside_a_horizontal_scope() {
+    let cx = context();
+    let current = cx.reactive(String::new());
+    let seen = Rc::new(Cell::new(false));
+    let flag = Rc::clone(&seen);
+    let mut ui = settled(
+        &cx,
+        div().focus_scope(FocusScope::Horizontal).children([
+            focus_mark("one", &current),
+            focus_mark("two", &current).on_key(move |event, _| {
+                if event.state == ButtonState::Pressed && event.key == Key::Up {
+                    flag.set(true);
+                }
+            }),
+        ]),
+    );
+    click(&mut ui, "one");
+    key(&mut ui, Key::Right, Modifiers::default());
+    assert_eq!(current.get_untracked(), "two");
+    key(&mut ui, Key::Right, Modifiers::default());
+    assert_eq!(current.get_untracked(), "one");
+    key(&mut ui, Key::Left, Modifiers::default());
+    assert_eq!(current.get_untracked(), "two");
+    key(&mut ui, Key::Up, Modifiers::default());
+    assert!(seen.get());
+    assert_eq!(current.get_untracked(), "two");
+}
+
+#[test]
+fn tab_stops_once_in_a_roving_scope_then_leaves() {
+    let cx = context();
+    let current = cx.reactive(String::new());
+    let mut ui = settled(
+        &cx,
+        div().children([
+            focus_mark("before", &current),
+            div()
+                .focus_scope(FocusScope::Vertical)
+                .children([focus_mark("a", &current), focus_mark("b", &current)]),
+            focus_mark("after", &current),
+        ]),
+    );
+    click(&mut ui, "before");
+    key(&mut ui, Key::Tab, Modifiers::default());
+    assert_eq!(current.get_untracked(), "a");
+    key(&mut ui, Key::Tab, Modifiers::default());
+    assert_eq!(current.get_untracked(), "after");
+    key(&mut ui, Key::Tab, shift_tab());
+    assert_eq!(current.get_untracked(), "a");
+    key(&mut ui, Key::Down, Modifiers::default());
+    assert_eq!(current.get_untracked(), "b");
+    key(&mut ui, Key::Tab, Modifiers::default());
+    assert_eq!(current.get_untracked(), "after");
+    key(&mut ui, Key::Tab, shift_tab());
+    assert_eq!(current.get_untracked(), "b");
+}
+
+#[test]
+fn an_input_in_a_horizontal_scope_keeps_left_and_right() {
+    let cx = context();
+    let text = cx.reactive(String::from("ab"));
+    let text_input = text.clone();
+    let current = cx.reactive(String::new());
+    let mut ui = settled(
+        &cx,
+        div().focus_scope(FocusScope::Horizontal).children([
+            input()
+                .value(Dynamic(move || text_input.clone()))
+                .key("field")
+                .style(StyleRefinement::default().width(80).font_size(10)),
+            focus_mark("next", &current),
+        ]),
+    );
+    key(&mut ui, Key::Tab, Modifiers::default());
+    key(&mut ui, Key::Left, Modifiers::default());
+    ui.handle_event(InputEvent::Text("X".into()));
+    assert_eq!(text.get_untracked(), "aXb");
+    assert_eq!(current.get_untracked(), "");
+}
+
+#[test]
+fn showing_a_roving_scope_takes_focus_and_hiding_it_returns_focus() {
+    let cx = context();
+    let current = cx.reactive(String::new());
+    let open = cx.reactive(false);
+    let open_read = open.clone();
+    let menu = current.clone();
+    let mut ui = settled(
+        &cx,
+        div().children([
+            focus_mark("trigger", &current),
+            show(
+                move || open_read.get(),
+                move || {
+                    div()
+                        .focus_scope(FocusScope::Vertical)
+                        .children([focus_mark("one", &menu), focus_mark("two", &menu)])
+                },
+            ),
+        ]),
+    );
+    click(&mut ui, "trigger");
+    open.set(true);
+    ui.update(VIEWPORT);
+    assert_eq!(current.get_untracked(), "one");
+    key(&mut ui, Key::Down, Modifiers::default());
+    assert_eq!(current.get_untracked(), "two");
+    open.set(false);
+    ui.update(VIEWPORT);
+    assert_eq!(current.get_untracked(), "trigger");
+    assert!(!ui.needs_update());
+}
+
+#[test]
+fn disposing_a_roving_scope_returns_focus() {
+    let cx = context();
+    let current = cx.reactive(String::new());
+    let open = cx.reactive(false);
+    let open_read = open.clone();
+    let menu = current.clone();
+    let mut ui = settled(
+        &cx,
+        div().children([
+            focus_mark("trigger", &current),
+            if_else(
+                move || open_read.get(),
+                move || {
+                    div()
+                        .focus_scope(FocusScope::Vertical)
+                        .child(focus_mark("one", &menu))
+                },
+                || div(),
+            ),
+        ]),
+    );
+    click(&mut ui, "trigger");
+    open.set(true);
+    ui.update(VIEWPORT);
+    assert_eq!(current.get_untracked(), "one");
+    open.set(false);
+    ui.update(VIEWPORT);
+    assert_eq!(current.get_untracked(), "trigger");
+}
+
+#[test]
+fn hiding_a_roving_scope_keeps_focus_that_already_left() {
+    let cx = context();
+    let current = cx.reactive(String::new());
+    let open = cx.reactive(false);
+    let open_read = open.clone();
+    let menu = current.clone();
+    let mut ui = settled(
+        &cx,
+        div().children([
+            focus_mark("trigger", &current),
+            show(
+                move || open_read.get(),
+                move || {
+                    div()
+                        .focus_scope(FocusScope::Vertical)
+                        .child(focus_mark("one", &menu))
+                },
+            ),
+            focus_mark("after", &current),
+        ]),
+    );
+    click(&mut ui, "trigger");
+    open.set(true);
+    ui.update(VIEWPORT);
+    assert_eq!(current.get_untracked(), "one");
+    click(&mut ui, "after");
+    assert_eq!(current.get_untracked(), "after");
+    open.set(false);
+    ui.update(VIEWPORT);
+    assert_eq!(current.get_untracked(), "after");
+}
+
+#[test]
+fn display_none_on_a_roving_scope_returns_focus() {
+    let cx = context();
+    let current = cx.reactive(String::new());
+    let shown = cx.reactive(false);
+    let shown_read = shown.clone();
+    let mut ui = settled(
+        &cx,
+        div().children([
+            focus_mark("trigger", &current),
+            div()
+                .focus_scope(FocusScope::Vertical)
+                .style_dyn(move || {
+                    if shown_read.get() {
+                        StyleRefinement::default()
+                    } else {
+                        StyleRefinement::default().display(cappy_style::Display::None)
+                    }
+                })
+                .child(focus_mark("one", &current)),
+        ]),
+    );
+    click(&mut ui, "trigger");
+    shown.set(true);
+    ui.update(VIEWPORT);
+    assert_eq!(current.get_untracked(), "one");
+    shown.set(false);
+    ui.update(VIEWPORT);
+    assert_eq!(current.get_untracked(), "trigger");
+}
+
+#[test]
+fn a_roving_scope_mounted_with_nothing_focused_does_not_take_focus() {
+    let cx = context();
+    let current = cx.reactive(String::new());
+    let ui = settled(
+        &cx,
+        div()
+            .focus_scope(FocusScope::Vertical)
+            .child(focus_mark("tab", &current)),
+    );
+    assert_eq!(current.get_untracked(), "");
+    assert!(!ui.needs_update());
+    assert!(ui.frame_deadline(Instant::now()).is_none());
 }
 
 fn quad_index(ui: &Ui, key: &str) -> usize {

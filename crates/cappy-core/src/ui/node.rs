@@ -12,8 +12,8 @@ use crate::image_load::ImageLoad;
 use crate::time::Instant;
 
 use crate::element::{
-    ClickHandler, FocusHandler, HoverHandler, ImeHandler, InputHandler, KeyHandler, PointerHandler,
-    TextHandler,
+    ClickHandler, FocusHandler, FocusScope, HoverHandler, ImeHandler, InputHandler, KeyHandler,
+    PointerHandler, TextHandler,
 };
 use crate::ui::edit::TextEdit;
 
@@ -131,6 +131,12 @@ pub(crate) struct Node {
     pub(crate) on_click: Option<ClickHandler>,
     pub(crate) on_hover: Option<HoverHandler>,
     pub(crate) focusable: bool,
+    /// Trap or roving tabindex. `None` leaves this node in the flat tab order.
+    pub(crate) focus_scope: Option<FocusScope>,
+    /// Node that had focus when it entered this roving scope. Restored when the scope closes.
+    pub(crate) focus_return: Option<NodeId>,
+    /// Last focused descendant of a roving scope. The tab stop while focus is outside it.
+    pub(crate) roving_active: Option<NodeId>,
     pub(crate) disabled: bool,
     /// Painted and hit above the tree. Ancestor overflow does not clip it, and it is not in the
     /// parent's flex or grid.

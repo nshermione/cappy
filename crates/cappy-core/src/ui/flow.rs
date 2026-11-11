@@ -322,6 +322,7 @@ impl Ui {
             on_click,
             on_hover,
             focusable,
+            focus_scope,
             on_key,
             on_text,
             on_ime,
@@ -417,6 +418,9 @@ impl Ui {
             on_click,
             on_hover,
             focusable,
+            focus_scope,
+            focus_return: None,
+            roving_active: None,
             disabled: node_disabled,
             overlay,
             anchor: place.unwrap_or_default(),
@@ -486,6 +490,9 @@ impl Ui {
         let parts = self.adopt_children(id, children, suppressed);
         self.nodes[id.index()].parts = parts;
         self.reflatten(id);
+        if !suppressed {
+            self.arm_mounted_scope(id);
+        }
         id
     }
 
@@ -675,6 +682,7 @@ impl Ui {
         }
         if self.nodes[id.index()].suppressed != suppressed {
             self.nodes[id.index()].suppressed = suppressed;
+            self.roving_visibility(id, !suppressed);
             if suppressed {
                 self.cancel_motion(id);
             }
@@ -826,6 +834,7 @@ impl Ui {
     }
 
     fn dispose_node(&mut self, id: NodeId) {
+        self.prepare_scope_dispose(id);
         let Some(node) = self.nodes.get(id.index()) else {
             return;
         };
@@ -858,6 +867,9 @@ impl Ui {
         node.on_pointer = None;
         node.on_dismiss = None;
         node.focusable = false;
+        node.focus_scope = None;
+        node.focus_return = None;
+        node.roving_active = None;
         node.overlay = false;
         node.anchor = cappy_layout::Point::default();
         node.caret = None;

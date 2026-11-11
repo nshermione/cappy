@@ -179,6 +179,8 @@ pub struct Ui {
     primary: bool,
     /// Overlay nodes in paint order (later entries paint and hit above earlier ones).
     overlay_order: RefCell<Vec<NodeId>>,
+    /// Roving scopes that became visible and may take focus once style has resolved.
+    roving_enter: Vec<NodeId>,
     overlay_order_dirty: Cell<bool>,
 }
 
@@ -244,6 +246,7 @@ impl Ui {
             primary: false,
             overlay_order: RefCell::new(Vec::new()),
             overlay_order_dirty: Cell::new(true),
+            roving_enter: Vec::new(),
         };
         ui.root = ui.mount(root.into_element(), None);
         ui.add_binding(ui.root, BindingKind::Theme);
@@ -306,6 +309,7 @@ impl Ui {
             || self.motion_animating()
             || self.queue.runtime.has_motions()
             || self.board.has_writes()
+            || !self.roving_enter.is_empty()
     }
 
     /// When the host should draw the next animation frame. `None` once scroll and tweens rest.
@@ -354,6 +358,7 @@ impl Ui {
         // Hover changes caused by layout can restyle nodes again.
         self.resolve_styles();
         self.run_layout();
+        self.settle_roving_enter();
         self.drain_motions();
         self.step_scroll(dt);
         self.step_motion(now);
@@ -363,6 +368,7 @@ impl Ui {
         self.finish_anims(now);
         self.run_layout();
         self.flush_geometry_bindings();
+        self.settle_roving_enter();
         self.collect_paint_damage();
         self.rebuild_display_list();
         self.reclaim_unused();

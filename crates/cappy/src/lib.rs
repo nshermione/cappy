@@ -70,13 +70,13 @@ pub use cappy_components as components;
 pub mod prelude {
     pub use cappy_core::{
         Align, Application, Color, ColorToken, Component, Context, Display, Dynamic, Element,
-        FlexDirection, FontSize, FontWeight, FrameInput, HasContext, ImageClip, ImageDecodeError,
-        ImagePixels, ImageSource, IntoElement, IntoReactive, Justify, ObjectFit, Overflow, Radius,
-        Reactive, Signal, Slot, Space, StyleRefinement, Stylesheet, SurfaceId, SurfaceOptions,
-        Theme, ThemeCatalog, ThemeHandle, Themes, Ui, UpdateOutcome, asset_path, div, for_each,
-        fragment, hex, if_else, image, input, linear, on, on_before_mount, on_before_unmount,
-        on_mounted, on_unmounted, on_updated, percent, reactive, shadow, show, slot, text,
-        text_dyn, use_local_store, use_store,
+        FlexDirection, FocusScope, FontSize, FontWeight, FrameInput, HasContext, ImageClip,
+        ImageDecodeError, ImagePixels, ImageSource, IntoElement, IntoReactive, Justify, ObjectFit,
+        Overflow, Radius, Reactive, Signal, Slot, Space, StyleRefinement, Stylesheet, SurfaceId,
+        SurfaceOptions, Theme, ThemeCatalog, ThemeHandle, Themes, Ui, UpdateOutcome, asset_path,
+        div, for_each, fragment, hex, if_else, image, input, linear, on, on_before_mount,
+        on_before_unmount, on_mounted, on_unmounted, on_updated, percent, reactive, shadow, show,
+        slot, text, text_dyn, use_local_store, use_store,
     };
     #[cfg(not(feature = "cpu"))]
     pub use cappy_core::{Anim, AnimHandle, Ease, Motion, Repeat};

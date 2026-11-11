@@ -44,6 +44,8 @@ pub enum Key {
     Delete,
     Left,
     Right,
+    Up,
+    Down,
     Home,
     End,
     /// A printable key. Shortcuts compare the ASCII lowercase form.

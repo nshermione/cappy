@@ -247,6 +247,35 @@ impl<C, T> Slot<C, T> {
 /// Set on the root a component renders. A slot walk does not enter a nested component root.
 const COMPONENT_SLOT_OWNER: u32 = 1;
 
+/// Where keyboard focus may move inside an element.
+///
+/// Without a scope, Tab visits every focusable node. [`Trap`](Self::Trap) keeps Tab inside a
+/// modal. [`Vertical`](Self::Vertical) and [`Horizontal`](Self::Horizontal) are the roving
+/// tabindex used by Select, Menu, Tabs, and Tree: arrow keys move inside the scope, Tab stops
+/// on the active item once, and closing the scope returns focus to the node that had it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FocusScope {
+    /// Tab and Shift+Tab cycle through this element and do not leave it.
+    ///
+    /// The last visible trap in tree order is the active one, so a trap nested inside another
+    /// keeps Tab in the inner trap. A trap hidden with `display: none` or `show(false)` is not
+    /// active. When focus is outside the active trap, the next Tab enters it.
+    Trap,
+    /// Up and Down move among the focusable descendants. Left and Right reach the focused node.
+    ///
+    /// Only the active descendant is in the tab order: the focused one, else the last one that
+    /// had focus, else the first. When this scope becomes visible and some other node is focused,
+    /// focus moves to that descendant and that other node is remembered. Hiding or disposing the
+    /// scope gives focus back, unless focus has already left. A scope mounted while nothing is
+    /// focused does not take it.
+    Vertical,
+    /// Left and Right move among the focusable descendants. Up and Down reach the focused node.
+    ///
+    /// A focused input keeps Left and Right for its caret. Tab order and returning focus match
+    /// [`Vertical`](Self::Vertical).
+    Horizontal,
+}
+
 /// A node description: a container (`div`), a text leaf, or a slot hole, with classes, style and
 /// handlers.
 pub struct Element {
@@ -261,6 +290,8 @@ pub struct Element {
     pub(crate) on_click: Option<ClickHandler>,
     pub(crate) on_hover: Option<HoverHandler>,
     pub(crate) focusable: bool,
+    /// Keyboard scope. `None` leaves this element in the flat tab order.
+    pub(crate) focus_scope: Option<FocusScope>,
     pub(crate) on_key: Option<KeyHandler>,
     pub(crate) on_text: Option<TextHandler>,
     pub(crate) on_ime: Option<ImeHandler>,
@@ -428,6 +459,7 @@ impl Element {
             on_click: None,
             on_hover: None,
             focusable: false,
+            focus_scope: None,
             on_key: None,
             on_text: None,
             on_ime: None,
@@ -524,6 +556,16 @@ impl Element {
     #[must_use]
     pub fn focusable(mut self) -> Self {
         self.focusable = true;
+        self
+    }
+
+    /// Keeps Tab inside this element, or moves arrow keys among its descendants.
+    ///
+    /// See [`FocusScope`]. A modal uses [`FocusScope::Trap`]. Select, Menu, Tabs, and Tree use
+    /// [`FocusScope::Vertical`] or [`FocusScope::Horizontal`].
+    #[must_use]
+    pub fn focus_scope(mut self, scope: FocusScope) -> Self {
+        self.focus_scope = Some(scope);
         self
     }
 
@@ -904,6 +946,7 @@ pub struct DivBuilder {
     disabled: Option<Box<dyn FnOnce(&mut Element)>>,
     overlay: bool,
     place: Option<Box<dyn FnOnce(&mut Element)>>,
+    focus_scope: Option<FocusScope>,
 }
 
 impl DivBuilder {
@@ -917,7 +960,15 @@ impl DivBuilder {
             disabled: None,
             overlay: false,
             place: None,
+            focus_scope: None,
         }
+    }
+
+    /// Same scope as [`Element::focus_scope`].
+    #[must_use]
+    pub fn focus_scope(mut self, scope: FocusScope) -> Self {
+        self.focus_scope = Some(scope);
+        self
     }
 
     #[must_use]
@@ -971,6 +1022,7 @@ impl IntoElement for DivBuilder {
         element.on_dismiss = self.on_dismiss;
         element.stylesheet = self.stylesheet;
         element.overlay = self.overlay;
+        element.focus_scope = self.focus_scope;
         if let Some(apply) = self.disabled {
             apply(&mut element);
         }

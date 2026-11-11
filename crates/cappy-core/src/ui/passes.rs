@@ -111,6 +111,7 @@ impl Ui {
 
     /// Resolves one node's style. Returns whether its inherited text style changed.
     fn restyle(&mut self, id: NodeId, parent_text: Option<&TextStyle>) -> bool {
+        let was_none = self.nodes[id.index()].style.layout.display == Display::None;
         let node = &self.nodes[id.index()];
         let resolved = self.theme.get().resolve(
             parent_text,
@@ -140,6 +141,10 @@ impl Ui {
         }
         if change.paint {
             self.mark_paint_dirty(id);
+        }
+        let now_none = self.nodes[id.index()].style.layout.display == Display::None;
+        if was_none != now_none {
+            self.scope_display_changed(id, now_none);
         }
         change.inherited
     }
