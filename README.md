@@ -8,8 +8,6 @@ Frames are drawn on the GPU with [wgpu](https://wgpu.rs/) by default, or on the 
 > **This is a personal learning project.** It exists to help the author learn more
 > about Rust. It is **not production-ready**, the API can change or break at any time,
 > and it is **not recommended for use in real projects**.
->
-> The author has **no plans to publish any of these crates** to crates.io.
 
 ## Contents
 
