@@ -27,7 +27,7 @@ Frames are drawn on the GPU with [wgpu](https://wgpu.rs/) by default, or on the 
 - [Environment variables](#environment-variables)
 - [Continuous integration](#continuous-integration)
 - [Troubleshooting](#troubleshooting)
-- [Support, issues and pull requests](#support-issues-and-pull-requests)
+- [Contributing](#contributing)
 - [License](#license)
 
 ## Key features
@@ -608,11 +608,26 @@ CPU snapshots do not need a GPU, but they are not required to match the GPU file
 
 `Ui::update` applies bindings, then style, then layout, and may restyle after layout moves the hovered node. Drive the tree through `TestUi` or call `update` again after changing a signal. Scroll easing uses the time between updates; tests that need a settled offset should step time rather than sleep.
 
-## Support, issues and pull requests
+## Contributing
 
-The author is fairly lazy and **will not handle issues or pull requests** in this repository. Please do not expect replies, fixes or reviews.
+Issues and pull requests are welcome. The API is still unstable: read the warning at the top before building on it.
 
-If you would like to contribute seriously or take over maintenance of this project, please get in touch by email: **[ns.hermione@gmail.com](mailto:ns.hermione@gmail.com)**.
+Using an AI tool to write or review a change is fine. A contribution is not rejected, discounted, or treated differently because an AI helped produce it. Review looks at the diff: the behavior, the tests, and whether it fits the code around it.
+
+1. Branch from `master`.
+2. Check the same things CI checks, from the repo root:
+
+```sh
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --all-features
+cargo test --workspace
+```
+
+`cargo fmt --all` rewrites formatting. `cargo test --workspace` is what [continuous integration](#continuous-integration) runs. Pixel snapshots stay a local step; update them only when the picture should change, and say which renderer you used. See [Testing](#testing).
+
+3. Open a pull request against `master`. Say what changed and why. If the public API moved, say that too.
+
+Unless you explicitly state otherwise, a contribution you submit is dual licensed under Apache-2.0 and MIT, as described in [License](#license).
 
 ## License
 
