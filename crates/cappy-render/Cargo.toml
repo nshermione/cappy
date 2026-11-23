@@ -13,6 +13,8 @@ cappy-host.workspace = true
 wgpu.workspace = true
 glyphon.workspace = true
 bytemuck.workspace = true
+lyon_path.workspace = true
+lyon_tessellation.workspace = true
 log.workspace = true
 
 # Browser builds need a WebGL fallback and Send/Sync wgpu types without shared-memory atomics.

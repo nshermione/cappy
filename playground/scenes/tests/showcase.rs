@@ -242,6 +242,13 @@ fn images_tab_decodes_each_file() {
         "image-svg",
     ] {
         let rect = harness.rect(key);
+        if key == "image-svg" {
+            let painted = harness.ui().display_list().iter().any(|primitive| {
+                matches!(primitive, Primitive::Vector(vector) if vector.rect == rect)
+            });
+            assert!(painted, "image-svg has no vector primitive");
+            continue;
+        }
         let pixels = harness
             .ui()
             .display_list()
@@ -251,7 +258,8 @@ fn images_tab_decodes_each_file() {
                 Primitive::Image(_)
                 | Primitive::Quad(_)
                 | Primitive::Shadow(_)
-                | Primitive::Text(_) => None,
+                | Primitive::Text(_)
+                | Primitive::Vector(_) => None,
             })
             .unwrap_or_else(|| panic!("{key} has no image primitive"));
         assert!(pixels.width() > 0, "{key}");

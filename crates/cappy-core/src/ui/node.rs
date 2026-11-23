@@ -7,7 +7,8 @@ use cappy_style::{ClassName, InteractionState, Style, StyleRefinement, Styleshee
 
 use std::time::Duration;
 
-use crate::bitmap::{ImageClip, ImagePixels, ObjectFit};
+use crate::bitmap::{ImageClip, ObjectFit};
+use crate::image_decode::ImagePaint;
 use crate::image_load::ImageLoad;
 use crate::time::Instant;
 
@@ -89,7 +90,7 @@ pub(crate) enum NodeContent {
     Text(Arc<str>),
     Image {
         clip: ImageClip,
-        pixels: Arc<ImagePixels>,
+        paint: ImagePaint,
         fit: ObjectFit,
         elapsed: Duration,
         /// `None` while the image is hidden, so that gap is not added to `elapsed`.

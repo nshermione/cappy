@@ -356,7 +356,9 @@ pub fn input() -> Element {
 /// locator string. [`asset_path!`](crate::asset_path) turns a path relative to the calling crate
 /// into that locator. A path is read from disk. `http://` and `https://` are fetched. In the
 /// browser any other string is a URL on the page, such as `assets/photo.png`. A GIF with more
-/// than one frame plays. Give the element a width and height; the box does not yet size itself from the
+/// than one frame plays. A supported SVG is kept as paths and drawn at this element's size; an
+/// SVG that uses filters, masks, text, or other unsupported features is rasterized once.
+/// Give the element a width and height; the box does not yet size itself from the
 /// bitmap. [`Element::fit`] chooses how the bitmap fills that box.
 #[must_use]
 pub fn image(source: impl Into<ImageSource>) -> Element {

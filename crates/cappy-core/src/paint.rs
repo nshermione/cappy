@@ -7,6 +7,7 @@ use cappy_style::{Background, BoxShadow, Color};
 
 use crate::Damage;
 use crate::bitmap::{ImagePixels, ObjectFit};
+use crate::vector::VectorPicture;
 
 /// Rotation of a painted box around [`Spin::pivot`]. Zero leaves the box axis-aligned.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -181,10 +182,34 @@ pub struct ImagePrimitive {
 
 impl ImagePrimitive {
     pub fn placement(&self) -> ImagePlacement {
-        image_placement(
+        content_placement(
             self.rect,
-            self.pixels.width(),
-            self.pixels.height(),
+            self.pixels.width() as f32,
+            self.pixels.height() as f32,
+            self.fit,
+        )
+    }
+}
+
+/// A vector picture fitted into `rect` the same way as an [`ImagePrimitive`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct VectorPrimitive {
+    pub rect: Rect,
+    pub picture: Arc<VectorPicture>,
+    pub fit: ObjectFit,
+    pub corner_radius: f32,
+    /// Ancestor scrollports. `None` means the primitive is not clipped further.
+    pub clip: Option<Rect>,
+    /// Multiplier applied on top of each path's own opacity.
+    pub opacity: f32,
+}
+
+impl VectorPrimitive {
+    pub fn placement(&self) -> ImagePlacement {
+        content_placement(
+            self.rect,
+            self.picture.view_width,
+            self.picture.view_height,
             self.fit,
         )
     }
@@ -195,6 +220,7 @@ pub enum Primitive {
     Shadow(ShadowPrimitive),
     Quad(QuadPrimitive),
     Image(ImagePrimitive),
+    Vector(VectorPrimitive),
     Text(TextPrimitive),
 }
 
@@ -204,6 +230,7 @@ impl Primitive {
             Self::Shadow(shadow) => (spun_aabb(shadow.ink_bounds(), shadow.spin), shadow.clip),
             Self::Quad(quad) => (spun_aabb(quad.rect, quad.spin), quad.clip),
             Self::Image(image) => (image.rect, image.clip),
+            Self::Vector(vector) => (vector.rect, vector.clip),
             Self::Text(text) => (text.rect, text.clip),
         };
         match clip.and_then(|clip| rect.intersection(&clip)) {
@@ -316,9 +343,16 @@ pub fn image_placement(
     image_height: u32,
     fit: ObjectFit,
 ) -> ImagePlacement {
-    let image_width = image_width as f32;
-    let image_height = image_height as f32;
-    if image_width <= 0.0 || image_height <= 0.0 || rect.is_empty() {
+    content_placement(rect, image_width as f32, image_height as f32, fit)
+}
+
+fn content_placement(
+    rect: Rect,
+    content_width: f32,
+    content_height: f32,
+    fit: ObjectFit,
+) -> ImagePlacement {
+    if content_width <= 0.0 || content_height <= 0.0 || rect.is_empty() {
         return ImagePlacement {
             dest: Rect::ZERO,
             uv_min_x: 0.0,
@@ -336,9 +370,9 @@ pub fn image_placement(
             uv_max_y: 1.0,
         },
         ObjectFit::Contain => {
-            let scale = (rect.width / image_width).min(rect.height / image_height);
-            let width = image_width * scale;
-            let height = image_height * scale;
+            let scale = (rect.width / content_width).min(rect.height / content_height);
+            let width = content_width * scale;
+            let height = content_height * scale;
             ImagePlacement {
                 dest: Rect::new(
                     rect.x + (rect.width - width) * 0.5,
@@ -353,9 +387,9 @@ pub fn image_placement(
             }
         }
         ObjectFit::Cover => {
-            let scale = (rect.width / image_width).max(rect.height / image_height);
-            let drawn_width = image_width * scale;
-            let drawn_height = image_height * scale;
+            let scale = (rect.width / content_width).max(rect.height / content_height);
+            let drawn_width = content_width * scale;
+            let drawn_height = content_height * scale;
             let crop_x = ((drawn_width - rect.width) * 0.5 / drawn_width).clamp(0.0, 0.5);
             let crop_y = ((drawn_height - rect.height) * 0.5 / drawn_height).clamp(0.0, 0.5);
             ImagePlacement {

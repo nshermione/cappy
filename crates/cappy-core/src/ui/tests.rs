@@ -565,11 +565,41 @@ fn an_image_loads_from_a_filesystem_path() {
         .iter()
         .find_map(|primitive| match primitive {
             Primitive::Image(image) => Some(image),
-            Primitive::Quad(_) | Primitive::Shadow(_) | Primitive::Text(_) => None,
+            Primitive::Quad(_)
+            | Primitive::Shadow(_)
+            | Primitive::Text(_)
+            | Primitive::Vector(_) => None,
         })
         .expect("loaded image");
     assert_eq!((image.pixels.width(), image.pixels.height()), (32, 32));
     assert_eq!(&image.pixels.rgba()[..4], &[255, 0, 0, 128]);
+}
+
+#[test]
+fn an_svg_file_paints_vectors() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/sample.svg");
+    let _cx = context();
+    let ui = settled(
+        crate::image(path)
+            .key("icon")
+            .style(StyleRefinement::default().size(80)),
+    );
+    let vector = ui
+        .display_list()
+        .iter()
+        .find_map(|primitive| match primitive {
+            Primitive::Vector(vector) => Some(vector),
+            Primitive::Image(_)
+            | Primitive::Quad(_)
+            | Primitive::Shadow(_)
+            | Primitive::Text(_) => None,
+        })
+        .expect("svg is a vector primitive");
+    assert_eq!(
+        (vector.picture.view_width, vector.picture.view_height),
+        (64.0, 48.0)
+    );
+    assert_eq!(vector.picture.draws.len(), 3);
 }
 
 #[test]
@@ -602,7 +632,10 @@ fn gif_pixel(ui: &Ui) -> [u8; 4] {
         .iter()
         .find_map(|primitive| match primitive {
             Primitive::Image(image) => Some(image),
-            Primitive::Quad(_) | Primitive::Shadow(_) | Primitive::Text(_) => None,
+            Primitive::Quad(_)
+            | Primitive::Shadow(_)
+            | Primitive::Text(_)
+            | Primitive::Vector(_) => None,
         })
         .expect("gif");
     let rgba = image.pixels.rgba();
@@ -622,7 +655,10 @@ fn display_list_paints_back_to_front() {
         .iter()
         .filter_map(|primitive| match primitive {
             Primitive::Text(text) => Some(&*text.text),
-            Primitive::Quad(_) | Primitive::Shadow(_) | Primitive::Image(_) => None,
+            Primitive::Quad(_)
+            | Primitive::Shadow(_)
+            | Primitive::Image(_)
+            | Primitive::Vector(_) => None,
         })
         .collect();
     assert_eq!(texts, ["Count: 0", "+1"]);
@@ -3413,7 +3449,10 @@ fn a_fixed_height_multiline_input_scrolls_the_caret_into_view() {
         .iter()
         .find_map(|primitive| match primitive {
             Primitive::Text(text) => Some(text.scroll_y),
-            Primitive::Quad(_) | Primitive::Shadow(_) | Primitive::Image(_) => None,
+            Primitive::Quad(_)
+            | Primitive::Shadow(_)
+            | Primitive::Image(_)
+            | Primitive::Vector(_) => None,
         });
     assert!(
         scroll_y.is_some_and(|offset| offset > 1.0),
@@ -3472,7 +3511,10 @@ fn painted_text(ui: &Ui) -> Vec<String> {
         .iter()
         .filter_map(|primitive| match primitive {
             Primitive::Text(text) => Some(text.text.to_string()),
-            Primitive::Quad(_) | Primitive::Shadow(_) | Primitive::Image(_) => None,
+            Primitive::Quad(_)
+            | Primitive::Shadow(_)
+            | Primitive::Image(_)
+            | Primitive::Vector(_) => None,
         })
         .collect()
 }

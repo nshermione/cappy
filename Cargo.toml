@@ -43,6 +43,8 @@ pollster = "1"
 png = "0.18"
 image = { version = "0.25", default-features = false }
 resvg = { version = "0.45", default-features = false }
+lyon_path = "1.0"
+lyon_tessellation = "1.0"
 
 # Proc-macro
 syn = { version = "2", features = ["full"] }

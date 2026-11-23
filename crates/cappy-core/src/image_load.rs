@@ -10,44 +10,51 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::bitmap::ImageClip;
+use crate::image_decode::LoadedImage;
 use crate::image_source::ImageSource;
 
 const MAX_IMAGE_BYTES: u64 = 32 * 1024 * 1024;
 
 /// A load that is still running. [`take`](Self::take) is `Some` once, when it finishes.
 pub(crate) struct ImageLoad {
-    slot: Arc<Mutex<Option<Result<ImageClip, String>>>>,
+    slot: Arc<Mutex<Option<Result<LoadedImage, String>>>>,
 }
 
 impl ImageLoad {
-    pub(crate) fn take(&self) -> Option<Result<ImageClip, String>> {
+    pub(crate) fn take(&self) -> Option<Result<LoadedImage, String>> {
         self.slot.lock().ok()?.take()
     }
 }
 
 /// Turns `source` into a clip. A locator that cannot be read yet comes back with a load slot
 /// and a transparent stand-in, so layout still has a box.
-pub(crate) fn open(source: ImageSource) -> (ImageClip, Option<ImageLoad>) {
+pub(crate) fn open(source: ImageSource) -> (LoadedImage, Option<ImageLoad>) {
     match source {
-        ImageSource::Clip(clip) => (clip, None),
+        ImageSource::Clip(clip) => (LoadedImage::Bitmap(clip), None),
         ImageSource::Locator(locator) => open_locator(locator),
     }
 }
 
-fn open_locator(locator: String) -> (ImageClip, Option<ImageLoad>) {
+fn open_locator(locator: String) -> (LoadedImage, Option<ImageLoad>) {
     if is_http(&locator) {
-        return (placeholder(), Some(start_http(locator)));
+        return (
+            LoadedImage::Bitmap(placeholder()),
+            Some(start_http(locator)),
+        );
     }
     #[cfg(target_arch = "wasm32")]
     {
-        return (placeholder(), Some(start_page(locator)));
+        return (
+            LoadedImage::Bitmap(placeholder()),
+            Some(start_page(locator)),
+        );
     }
     #[cfg(not(target_arch = "wasm32"))]
     match read_file(&locator) {
         Ok(clip) => (clip, None),
         Err(error) => {
             log::warn!("{error}");
-            (placeholder(), None)
+            (LoadedImage::Bitmap(placeholder()), None)
         }
     }
 }
@@ -68,15 +75,15 @@ fn is_http(locator: &str) -> bool {
             .eq_ignore_ascii_case("http://")
 }
 
-fn decode_locator(locator: &str, bytes: &[u8]) -> Result<ImageClip, String> {
+fn decode_locator(locator: &str, bytes: &[u8]) -> Result<LoadedImage, String> {
     if bytes.len() as u64 > MAX_IMAGE_BYTES {
         return Err(format!("image {locator} is larger than 32MB"));
     }
-    ImageClip::decode(bytes).map_err(|error| format!("image {locator}: {error}"))
+    crate::image_decode::load_image(bytes).map_err(|error| format!("image {locator}: {error}"))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn read_file(locator: &str) -> Result<ImageClip, String> {
+fn read_file(locator: &str) -> Result<LoadedImage, String> {
     let path = filesystem_path(locator);
     let meta = std::fs::metadata(&path).map_err(|error| format!("image {locator}: {error}"))?;
     if meta.len() > MAX_IMAGE_BYTES {
@@ -130,7 +137,7 @@ fn start_page(locator: String) -> ImageLoad {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn fetch_http(locator: &str) -> Result<ImageClip, String> {
+fn fetch_http(locator: &str) -> Result<LoadedImage, String> {
     let mut current = locator.trim().to_owned();
     for _ in 0..4 {
         let parts = split_http_url(&current)?;
@@ -362,7 +369,7 @@ fn decode_chunks(mut body: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn spawn_fetch(locator: String, writer: Arc<Mutex<Option<Result<ImageClip, String>>>>) {
+fn spawn_fetch(locator: String, writer: Arc<Mutex<Option<Result<LoadedImage, String>>>>) {
     wasm_bindgen_futures::spawn_local(async move {
         let result = fetch_page(&locator).await;
         if let Ok(mut guard) = writer.lock() {
@@ -372,7 +379,7 @@ fn spawn_fetch(locator: String, writer: Arc<Mutex<Option<Result<ImageClip, Strin
 }
 
 #[cfg(target_arch = "wasm32")]
-async fn fetch_page(locator: &str) -> Result<ImageClip, String> {
+async fn fetch_page(locator: &str) -> Result<LoadedImage, String> {
     use wasm_bindgen::JsCast;
 
     let window = web_sys::window().ok_or_else(|| "image load has no browser window".to_owned())?;
@@ -441,7 +448,10 @@ mod tests {
             stream.write_all(&png).expect("body");
         });
 
-        let clip = fetch_http(&format!("http://127.0.0.1:{port}/sample.png")).expect("fetch");
+        let loaded = fetch_http(&format!("http://127.0.0.1:{port}/sample.png")).expect("fetch");
+        let crate::image_decode::LoadedImage::Bitmap(clip) = loaded else {
+            panic!("png is a bitmap");
+        };
         assert_eq!(clip.frame_pixels(0).width(), 32);
         assert_eq!(&clip.frame_pixels(0).rgba()[..4], &[255, 0, 0, 128]);
     }

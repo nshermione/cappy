@@ -83,7 +83,8 @@ impl ImagePixels {
     /// once at the intrinsic size (`width`/`height`, or the `viewBox` when those are
     /// absent). An SVG with neither uses a 512px long edge. Text and embedded bitmaps
     /// inside an SVG are skipped. Resizing the element later scales that bitmap; it
-    /// does not rasterize again.
+    /// does not rasterize again. An image element does not use this for a supported SVG:
+    /// that file stays a vector picture and is tessellated at the size being drawn.
     pub fn decode(bytes: &[u8]) -> Result<Self, ImageDecodeError> {
         crate::image_decode::decode_image(bytes)
     }

@@ -22,6 +22,7 @@ mod surface;
 mod theme_handle;
 pub mod time;
 mod ui;
+pub mod vector;
 
 pub use context::{
     Application, Context, FieldInit, Singleton, SingletonOf, on, reactive, use_local_store,
@@ -47,7 +48,7 @@ pub use image_source::ImageSource;
 pub use listener::Listener;
 pub use paint::{
     ImagePlacement, ImagePrimitive, Primitive, QuadPrimitive, RenderFrame, ShadowPrimitive, Spin,
-    TextPrimitive, image_placement, paint_bounds, rounded_box_distance,
+    TextPrimitive, VectorPrimitive, image_placement, paint_bounds, rounded_box_distance,
     rounded_box_distance_corners, scale_about, spun_aabb, unspin_point,
 };
 pub use prop::{ByHandle, ByValue, PropInput};

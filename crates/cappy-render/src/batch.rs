@@ -1,19 +1,20 @@
 //! Splits the damaged part of a display list into draw batches.
 //!
-//! Quads and text use different pipelines. Within a batch all quads are drawn first, then all
-//! text, which is only correct while no quad covers earlier text; a quad that does starts a new
-//! batch.
+//! Quads, images, vectors and text use different pipelines. Within a batch they are drawn in
+//! that order, which is only correct while a later primitive does not cover an earlier one that
+//! is drawn after it. A primitive that would does starts a new batch.
 
 use cappy_core::{Primitive, Rect};
 
 /// Anti-aliasing can bleed slightly past a primitive's bounds.
 const CULL_MARGIN: f32 = 1.0;
 
-/// Indices into the display list, drawn quads first.
+/// Indices into the display list, drawn quads first, then images, then vectors, then text.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct Batch {
     pub quads: Vec<usize>,
     pub images: Vec<usize>,
+    pub vectors: Vec<usize>,
     pub texts: Vec<usize>,
 }
 
@@ -27,36 +28,42 @@ pub(crate) fn plan_batches(primitives: &[Primitive], damage: &[Rect]) -> Vec<Bat
         }
         match primitive {
             Primitive::Quad(_) | Primitive::Shadow(_) => {
-                if overlaps_batch(primitives, current(&batches), &bounds, BatchPart::UnderQuad) {
+                if overlaps_batch(primitives, current(&batches), &bounds, BatchPart::Quad) {
                     batches.push(Batch::default());
                 }
                 current_mut(&mut batches).quads.push(index);
             }
             Primitive::Image(_) => {
-                if overlaps_batch(
-                    primitives,
-                    current(&batches),
-                    &bounds,
-                    BatchPart::UnderImage,
-                ) {
+                if overlaps_batch(primitives, current(&batches), &bounds, BatchPart::Image) {
                     batches.push(Batch::default());
                 }
                 current_mut(&mut batches).images.push(index);
+            }
+            Primitive::Vector(_) => {
+                if overlaps_batch(primitives, current(&batches), &bounds, BatchPart::Vector) {
+                    batches.push(Batch::default());
+                }
+                current_mut(&mut batches).vectors.push(index);
             }
             Primitive::Text(_) => current_mut(&mut batches).texts.push(index),
         }
     }
     batches.retain(|batch| {
-        !batch.quads.is_empty() || !batch.images.is_empty() || !batch.texts.is_empty()
+        !batch.quads.is_empty()
+            || !batch.images.is_empty()
+            || !batch.vectors.is_empty()
+            || !batch.texts.is_empty()
     });
     batches
 }
 
-/// What a new primitive is drawn after. A quad is drawn before images and text, so it has to
-/// start a new batch when it would cover either. An image is drawn before text.
+/// What a new primitive is drawn after. A quad is drawn before images, vectors and text, so it
+/// has to start a new batch when it would cover any of them. An image is drawn before vectors
+/// and text. A vector is drawn before text.
 enum BatchPart {
-    UnderQuad,
-    UnderImage,
+    Quad,
+    Image,
+    Vector,
 }
 
 fn overlaps_batch(primitives: &[Primitive], batch: &Batch, bounds: &Rect, part: BatchPart) -> bool {
@@ -66,8 +73,11 @@ fn overlaps_batch(primitives: &[Primitive], batch: &Batch, bounds: &Rect, part: 
             .any(|&index| primitives[index].bounds().intersects(bounds))
     };
     match part {
-        BatchPart::UnderQuad => overlaps(&batch.images) || overlaps(&batch.texts),
-        BatchPart::UnderImage => overlaps(&batch.texts),
+        BatchPart::Quad => {
+            overlaps(&batch.images) || overlaps(&batch.vectors) || overlaps(&batch.texts)
+        }
+        BatchPart::Image => overlaps(&batch.vectors) || overlaps(&batch.texts),
+        BatchPart::Vector => overlaps(&batch.texts),
     }
 }
 
@@ -134,6 +144,7 @@ mod tests {
             [Batch {
                 quads: vec![0, 2],
                 images: vec![],
+                vectors: vec![],
                 texts: vec![1],
             }]
         );
@@ -149,11 +160,13 @@ mod tests {
                 Batch {
                     quads: vec![],
                     images: vec![],
+                    vectors: vec![],
                     texts: vec![0],
                 },
                 Batch {
                     quads: vec![1],
                     images: vec![],
+                    vectors: vec![],
                     texts: vec![2],
                 },
             ]
@@ -169,6 +182,7 @@ mod tests {
             [Batch {
                 quads: vec![1],
                 images: vec![],
+                vectors: vec![],
                 texts: vec![],
             }]
         );

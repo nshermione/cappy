@@ -12,9 +12,10 @@ use cappy_style::{
 
 use super::scroll::{self, axis_clip, horizontal_thumb, nest_clip, scrollport, vertical_thumb};
 use super::{NodeId, Ui};
+use crate::image_decode::ImagePaint;
 use crate::paint::{
-    ImagePrimitive, Primitive, QuadPrimitive, ShadowPrimitive, Spin, TextPrimitive, paint_bounds,
-    rect_center, scale_about, shadow_shape, spun_aabb,
+    ImagePrimitive, Primitive, QuadPrimitive, ShadowPrimitive, Spin, TextPrimitive,
+    VectorPrimitive, paint_bounds, rect_center, scale_about, shadow_shape, spun_aabb,
 };
 
 const LAYOUT_OUT_OF_SYNC: &str = "layout tree is out of sync with the node tree";
@@ -737,16 +738,28 @@ impl Ui {
                                 align: text_style.align,
                             }));
                         }
-                        super::NodeContent::Image { pixels, fit, .. } => {
-                            primitives.push(Primitive::Image(ImagePrimitive {
-                                rect,
-                                pixels: pixels.clone(),
-                                fit: *fit,
-                                corner_radius: visual.corner_radius.max_radius(),
-                                clip,
-                                opacity,
-                            }));
-                        }
+                        super::NodeContent::Image { paint, fit, .. } => match paint {
+                            ImagePaint::Bitmap(pixels) => {
+                                primitives.push(Primitive::Image(ImagePrimitive {
+                                    rect,
+                                    pixels: pixels.clone(),
+                                    fit: *fit,
+                                    corner_radius: visual.corner_radius.max_radius(),
+                                    clip,
+                                    opacity,
+                                }));
+                            }
+                            ImagePaint::Vector(picture) => {
+                                primitives.push(Primitive::Vector(VectorPrimitive {
+                                    rect,
+                                    picture: picture.clone(),
+                                    fit: *fit,
+                                    corner_radius: visual.corner_radius.max_radius(),
+                                    clip,
+                                    opacity,
+                                }));
+                            }
+                        },
                         super::NodeContent::Container => {}
                     }
                     let child_clip = if node.style.layout.clips() {
@@ -1029,11 +1042,11 @@ impl Ui {
         }
         for (index, result) in finished {
             match result {
-                Ok(clip) => {
-                    let pixels = clip.frame_pixels(0);
+                Ok(loaded) => {
+                    let (paint, clip) = loaded.resolve();
                     if let super::NodeContent::Image {
                         clip: slot,
-                        pixels: shown,
+                        paint: shown,
                         elapsed,
                         clock,
                         shown: frame,
@@ -1042,7 +1055,7 @@ impl Ui {
                     } = &mut self.nodes[index].content
                     {
                         *slot = clip;
-                        *shown = pixels;
+                        *shown = paint;
                         *elapsed = std::time::Duration::ZERO;
                         *clock = None;
                         *frame = 0;
@@ -1071,7 +1084,7 @@ impl Ui {
             let visible = self.image_is_visible(index);
             let super::NodeContent::Image {
                 clip,
-                pixels,
+                paint,
                 elapsed,
                 clock,
                 shown,
@@ -1094,7 +1107,9 @@ impl Ui {
             let next = clip.index_at(*elapsed);
             if next != *shown {
                 *shown = next;
-                *pixels = clip.frame_pixels(next);
+                if let ImagePaint::Bitmap(pixels) = paint {
+                    *pixels = clip.frame_pixels(next);
+                }
                 changed.push(index);
             }
         }

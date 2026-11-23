@@ -390,11 +390,11 @@ impl Ui {
                 NodeContent::Text("".into())
             }
             ElementContent::Image { source, fit } => {
-                let (clip, load) = crate::image_load::open(source);
-                let pixels = clip.frame_pixels(0);
+                let (loaded, load) = crate::image_load::open(source);
+                let (paint, clip) = loaded.resolve();
                 NodeContent::Image {
                     clip,
-                    pixels,
+                    paint,
                     fit,
                     elapsed: std::time::Duration::ZERO,
                     clock: None,

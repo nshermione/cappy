@@ -13,6 +13,7 @@ use crate::composite::{Compositor, OFFSCREEN_FORMAT, Offscreen};
 use crate::image::ImageLayer;
 use crate::quad::{QuadBatch, QuadBlend, QuadInstance, QuadPipelines, needs_manual_srgb};
 use crate::text::TextLayer;
+use crate::vector::VectorLayer;
 
 /// Each scissor redraws every batch, so a long list of regions becomes their bounding box.
 const MAX_GPU_REGIONS: usize = 8;
@@ -75,6 +76,7 @@ impl From<glyphon::RenderError> for RenderError {
 pub struct Renderer {
     quad_pipelines: QuadPipelines,
     images: ImageLayer,
+    vectors: VectorLayer,
     compositor: Compositor,
     scene_quads: QuadBatch,
     selection_quads: QuadBatch,
@@ -98,6 +100,7 @@ impl Renderer {
             caret_quads: QuadBatch::new(device, &quad_pipelines, "cappy text carets"),
             overlay_quads: QuadBatch::new(device, &quad_pipelines, "cappy overlay quads"),
             images: ImageLayer::new(device),
+            vectors: VectorLayer::new(device),
             quad_pipelines,
             compositor: Compositor::new(device),
             text: TextLayer::new(device, queue, fonts, OFFSCREEN_FORMAT),
@@ -162,6 +165,14 @@ impl Renderer {
             quad_instances(&frame.primitives, &batches, &scissors, frame.scale_factor);
         self.scene_quads.upload(device, queue, size, &instances);
         self.images.prepare(
+            device,
+            queue,
+            size,
+            frame.scale_factor,
+            &frame.primitives,
+            &batches,
+        );
+        self.vectors.prepare(
             device,
             queue,
             size,
@@ -264,6 +275,8 @@ impl Renderer {
             for (batch_index, range) in quad_ranges.iter().enumerate() {
                 self.scene_quads.draw(&mut pass, &painter, range.clone());
                 self.images
+                    .draw(device, &mut pass, OFFSCREEN_FORMAT, batch_index);
+                self.vectors
                     .draw(device, &mut pass, OFFSCREEN_FORMAT, batch_index);
                 self.selection_quads
                     .draw(&mut pass, &painter, 0..selection_count);

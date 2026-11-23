@@ -10,6 +10,7 @@ mod quad;
 mod renderer;
 mod surface;
 mod text;
+mod vector;
 
 pub use renderer::{RenderError, RenderTarget, Renderer, TargetLoad};
 pub use surface::{SurfaceError, WindowSurface, open_window_renderer};

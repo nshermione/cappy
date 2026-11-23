@@ -5,6 +5,36 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::bitmap::{ImageClip, ImagePixels, ImagePixelsError};
+use crate::vector::VectorPicture;
+
+/// A decoded image element: a bitmap clip, or a vector picture when the SVG can be drawn as paths.
+pub(crate) enum LoadedImage {
+    Bitmap(ImageClip),
+    Vector(Arc<VectorPicture>),
+}
+
+/// What an image node paints. A GIF keeps its clip separately and swaps this bitmap each frame.
+pub(crate) enum ImagePaint {
+    Bitmap(Arc<ImagePixels>),
+    Vector(Arc<VectorPicture>),
+}
+
+impl LoadedImage {
+    /// Splits a load into the painted content and the clip that drives GIF frames.
+    pub(crate) fn resolve(self) -> (ImagePaint, ImageClip) {
+        match self {
+            Self::Bitmap(clip) => {
+                let pixels = clip.frame_pixels(0);
+                (ImagePaint::Bitmap(pixels), clip)
+            }
+            Self::Vector(picture) => {
+                let pixels = ImagePixels::from_rgba(1, 1, [0, 0, 0, 0])
+                    .expect("a 1 by 1 transparent pixel is valid");
+                (ImagePaint::Vector(picture), ImageClip::still(pixels))
+            }
+        }
+    }
+}
 
 /// Why [`ImagePixels::decode`](crate::ImagePixels::decode) rejected a buffer.
 #[derive(Debug, PartialEq, Eq)]
@@ -47,6 +77,29 @@ pub(crate) fn decode_image(bytes: &[u8]) -> Result<ImagePixels, ImageDecodeError
         return decode_svg(bytes);
     }
     decode_raster(bytes)
+}
+
+/// Decodes bytes for an image element. A supported SVG stays a vector picture. Anything this
+/// picture cannot draw is rasterized, same as [`decode_image`].
+pub(crate) fn load_image(bytes: &[u8]) -> Result<LoadedImage, ImageDecodeError> {
+    if bytes.is_empty() {
+        return Err(ImageDecodeError::Empty);
+    }
+    if is_avif(bytes) {
+        return Err(ImageDecodeError::Failed(
+            "AVIF decoding is not compiled for this target".to_owned(),
+        ));
+    }
+    if looks_like_svg(bytes) {
+        return match crate::vector::decode_picture(bytes)? {
+            Some(picture) => Ok(LoadedImage::Vector(Arc::new(picture))),
+            None => Ok(LoadedImage::Bitmap(ImageClip::still(decode_svg(bytes)?))),
+        };
+    }
+    if is_gif(bytes) {
+        return Ok(LoadedImage::Bitmap(decode_gif(bytes)?));
+    }
+    Ok(LoadedImage::Bitmap(ImageClip::still(decode_raster(bytes)?)))
 }
 
 pub(crate) fn decode_clip(bytes: &[u8]) -> Result<ImageClip, ImageDecodeError> {

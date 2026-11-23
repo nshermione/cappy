@@ -104,3 +104,60 @@ fn idle_frames_keep_the_previous_pixels() {
     let second = renderer.render(&idle_frame, background()).unwrap();
     assert_eq!(first, second);
 }
+
+#[test]
+fn a_scaled_svg_circle_stays_crisp() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../cappy-core/fixtures/sample.svg"
+    );
+    let cx = context();
+    let mut harness = harness(
+        &cx,
+        cappy_core::image(path).key("svg").style(
+            cappy_core::StyleRefinement::default()
+                .width(256)
+                .height(192),
+        ),
+    );
+    let frame = harness.frame();
+    let vector = frame
+        .primitives
+        .iter()
+        .find_map(|primitive| match primitive {
+            cappy_core::Primitive::Vector(vector) => Some(vector),
+            _ => None,
+        })
+        .expect("svg paints as vectors");
+    assert!(
+        vector.rect.width >= 200.0,
+        "layout width {}",
+        vector.rect.width
+    );
+    let placement = vector.placement();
+    let scale = frame.scale_factor;
+    let map = |x: f32, y: f32| -> (u32, u32) {
+        let u = x / vector.picture.view_width;
+        let v = y / vector.picture.view_height;
+        let span_u = (placement.uv_max_x - placement.uv_min_x).max(1.0e-4);
+        let span_v = (placement.uv_max_y - placement.uv_min_y).max(1.0e-4);
+        let px =
+            (placement.dest.x + (u - placement.uv_min_x) / span_u * placement.dest.width) * scale;
+        let py =
+            (placement.dest.y + (v - placement.uv_min_y) / span_v * placement.dest.height) * scale;
+        (px.round() as u32, py.round() as u32)
+    };
+    let image = renderer().render(&frame, background()).unwrap();
+    let (inside_x, inside_y) = map(33.0, 24.0);
+    let (outside_x, outside_y) = map(35.0, 24.0);
+    let inside = image.pixel(inside_x, inside_y);
+    let outside = image.pixel(outside_x, outside_y);
+    assert!(
+        inside[0] > 220 && inside[2] < 80,
+        "inside {inside:?} at {inside_x},{inside_y}"
+    );
+    assert!(
+        outside[0] < 90 && outside[2] > 200,
+        "outside {outside:?} at {outside_x},{outside_y}"
+    );
+}
