@@ -2,7 +2,7 @@
 
 cappy is a retained-mode GUI framework. It keeps a widget tree, tracks which signals changed, lays the tree out with [taffy](https://docs.rs/taffy), and repaints only the damaged regions. When nothing changed and no scroll animation is running, the host stays idle.
 
-Frames are drawn on the GPU with [wgpu](https://wgpu.rs/) by default, or on the CPU with [tiny-skia](https://github.com/linebender/tiny-skia) and [softbuffer](https://github.com/rust-windowing/softbuffer) when memory matters more. cappy does not own a window. A host (today, [winit](https://github.com/rust-windowing/winit)) feeds input, calls `Ui::update`, and presents the frame.
+Frames are drawn on the GPU with [wgpu](https://wgpu.rs/). cappy does not own a window. A host (today, [winit](https://github.com/rust-windowing/winit)) feeds input, calls `Ui::update`, and presents the frame.
 
 > [!WARNING]
 > **This is a personal learning project.** It exists to help the author learn more
@@ -19,7 +19,7 @@ Frames are drawn on the GPU with [wgpu](https://wgpu.rs/) by default, or on the 
 - [Using cappy from another crate](#using-cappy-from-another-crate)
 - [Architecture](#architecture)
 - [Writing UI](#writing-ui)
-- [Choosing a renderer](#choosing-a-renderer)
+- [Choosing a renderer](#renderer)
 - [Crate features](#crate-features)
 - [Testing](#testing)
 - [Environment variables](#environment-variables)
@@ -36,8 +36,8 @@ Frames are drawn on the GPU with [wgpu](https://wgpu.rs/) by default, or on the 
 - `#[component]` structs with state, props, events and slots. `#[store]` structs are one value per context.
 - Typed styles. Design tokens, themes, and `stylesheet!` classes with `:hover` and `:active`.
 - Damage-region repainting. Unchanged frames do not redraw.
-- Two renderers behind one `WindowRenderer` trait. Both consume the same `RenderFrame`.
-- Headless `TestUi` plus optional GPU and CPU pixel snapshots.
+- One wgpu renderer behind the `WindowRenderer` trait. It paints a `RenderFrame`.
+- Headless `TestUi` plus optional GPU pixel snapshots.
 
 ## Tech stack
 
@@ -46,9 +46,8 @@ Frames are drawn on the GPU with [wgpu](https://wgpu.rs/) by default, or on the 
 | Language | Rust, edition 2024 |
 | Toolchain | `1.99.1`, pinned in `rust-toolchain.toml` (dependencies need at least 1.89) |
 | Layout | [taffy](https://docs.rs/taffy) 0.15 |
-| Text | [cosmic-text](https://github.com/pop-os/cosmic-text) 0.19, shared by both renderers. The GPU path draws text through [glyphon](https://github.com/grovesNL/glyphon) 0.12 |
-| GPU renderer | [wgpu](https://wgpu.rs/) 30 |
-| CPU renderer | [tiny-skia](https://github.com/linebender/tiny-skia) 0.11 and [softbuffer](https://github.com/rust-windowing/softbuffer) 0.4 |
+| Text | [cosmic-text](https://github.com/pop-os/cosmic-text) 0.19. The renderer draws text through [glyphon](https://github.com/grovesNL/glyphon) 0.12 |
+| Renderer | [wgpu](https://wgpu.rs/) 30 |
 | Windowing | [winit](https://github.com/rust-windowing/winit) 0.30, in `cappy-winit` |
 | Pixel tests | [insta](https://insta.rs/) is a workspace dependency; snapshot helpers live in `cappy-testing` |
 | Logging | `log` + `env_logger` in the playground |
@@ -63,12 +62,11 @@ Frames are drawn on the GPU with [wgpu](https://wgpu.rs/) by default, or on the 
 │   ├── cappy-core/          Retained tree, signals, input, scroll, damage, paint list
 │   ├── cappy-style/         Tokens, themes, stylesheets, resolved Style
 │   ├── cappy-layout/        Geometry and the taffy tree
-│   ├── cappy-text/          Fonts, shaping and measurement shared by the renderers
-│   ├── cappy-host/          Window host, renderer selection, resize pacing
+│   ├── cappy-text/          Fonts, shaping and measurement
+│   ├── cappy-host/          Window host and resize pacing
 │   ├── cappy-render/        wgpu renderer
-│   ├── cappy-render-cpu/    tiny-skia + softbuffer renderer
 │   ├── cappy-components/    Built-in widgets. Empty for now; enabled by the `full` feature
-│   └── cappy-testing/       Headless driver and GPU / CPU snapshot helpers
+│   └── cappy-testing/       Headless driver and GPU snapshot helpers
 ├── macros/
 │   ├── cappy-dsl/           element! and style!
 │   └── cappy-macros/        #[component], #[store], stylesheet!, derives
@@ -81,7 +79,7 @@ Frames are drawn on the GPU with [wgpu](https://wgpu.rs/) by default, or on the 
 └── .github/workflows/rust.yml
 ```
 
-Both renderers implement `WindowRenderer` from `cappy-host` and paint the same `RenderFrame` from `cappy-core`. Integrations do not branch on which backend draws the window.
+`cappy-render` implements `WindowRenderer` from `cappy-host` and paints the `RenderFrame` from `cappy-core`.
 
 ## Prerequisites
 
@@ -90,8 +88,7 @@ Both renderers implement `WindowRenderer` from `cappy-host` and paint the same `
   - **Windows:** a recent GPU driver. The default backend is DXGI (DirectX 12). Vulkan works via `WGPU_BACKEND`.
   - **Linux:** a Vulkan driver, or a software Vulkan layer if you have no GPU. Windowing needs the usual winit system packages for your distro.
   - **macOS:** Metal, which ships with the OS.
-- The CPU renderer needs none of the GPU stack. Build with `--no-default-features --features cpu` when you want that path only.
-- **Web:** the `wasm32-unknown-unknown` target and [trunk](https://trunkrs.dev/). A Chromium browser (WebGPU, with WebGL as fallback). The CPU renderer does not run in the browser.
+- **Web:** the `wasm32-unknown-unknown` target and [trunk](https://trunkrs.dev/). A Chromium browser (WebGPU, with WebGL as fallback).
 
 There is no database, no `.env` file, and no separate asset build.
 
@@ -103,7 +100,7 @@ Clone the repository and run the playground. The showcase is a header with a the
 git clone <this-repo>
 cd rs-gui
 
-# GPU renderer, the default
+# Playground
 cargo run -p winit-demo
 
 # Outline the regions each frame repaints. F12 toggles the same overlay
@@ -171,7 +168,7 @@ cappy = { path = "../rs-gui/crates/cappy" }
 cappy-winit = { path = "../rs-gui/integrations/cappy-winit" }
 ```
 
-`cappy`'s default features are `basic` and `gpu`. `cappy-winit`'s default feature is `gpu`. See [Crate features](#crate-features) for the CPU-only combination.
+`cappy`'s default features are `basic` and `gpu`. See [Crate features](#crate-features).
 
 Most application code wants `use cappy::prelude::*`. That brings in `Application`, `Ui`, `Theme`, `element!`, `style!`, `div`, `text`, `image`, the reactive helpers, and the macros (`component`, `store`, `stylesheet`, `style_token`, `Props`, `ClassName`, `Reactive`).
 
@@ -211,10 +208,10 @@ Each primitive carries the scrollport clips of its ancestors.
 - Input is translated into `InputEvent` and given to the host.
 - A signal write from outside the event (a `set_waker` callback) asks winit to wake.
 - Live resize follows the pointer. Presents stay on a resize interval, then one more frame is presented when the size settles.
-- On Windows, the GPU path drops the DWM redirection bitmap so the swapchain is the window content during a drag. The CPU path still blits through GDI and keeps the bitmap.
+- On Windows, the host drops the DWM redirection bitmap so the swapchain is the window content during a drag.
 - F12 toggles the damage overlay. The playground starts with it on when `--debug-damage` or `CAPPY_DEBUG_DAMAGE=1` is set.
 
-`select_renderer` picks the backend: `CAPPY_RENDERER` first, then `WindowOptions::with_renderer`, then the first backend compiled in. GPU is listed before CPU. Asking for a backend that was not compiled in is an error. There is no silent fallback.
+`select_renderer` accepts `CAPPY_RENDERER=gpu` or the value from `WindowOptions::with_renderer`. Any other name is an error.
 
 ### Reactivity
 
@@ -397,40 +394,11 @@ let ui = Ui::new(cx, root(), Theme::light());
 
 `Class::apply` is what `stylesheet!` generates. `Class::sheet()` is the sheet alone, which a component returns from `Component::stylesheet`.
 
-## Choosing a renderer
+## Renderer
 
-| | GPU (`gpu`, default) | CPU (`cpu`) |
-| --- | --- | --- |
-| Drawing | wgpu | tiny-skia + softbuffer |
-| Memory | GPU driver loaded into the process | No GPU driver |
-| Best for | Animation, large or high-DPI windows, effects | Tools and mostly static UIs |
+Frames are drawn with wgpu. `cappy`'s `gpu` feature (on by default) exposes that renderer as `cappy::render`. `cappy-winit` always opens it.
 
-On the author's machine (Windows, AMD RX 6600, release build of `winit-demo`), the window used about 174 MB with the GPU renderer and about 10 MB with the CPU renderer (Task Manager, private working set). The CPU renderer pays for this with CPU time per repainted pixel, which damage-region repainting keeps small for typical UIs.
-
-- Enable the `cpu` feature of `cappy-winit` (or of the demo) to compile it in.
-- With both backends compiled in, pick one in code or with `CAPPY_RENDERER=gpu|cpu`. The environment variable wins. Without either, the GPU renderer is used.
-- With `default-features = false` and `features = ["cpu"]`, wgpu is not compiled at all. The binary is smaller and the build is faster.
-- Asking for a backend that is not compiled in is an error.
-
-```rust
-use cappy::prelude::*;
-use cappy_winit::{RendererKind, Run, WindowOptions};
-
-let application = Application::new();
-let ui = Ui::new(div().child(text("Hello")), Theme::light());
-let options = WindowOptions::new("My app").with_renderer(RendererKind::Cpu);
-application.run(options, ui).expect("app failed");
-```
-
-```sh
-# Both backends, CPU chosen at runtime (PowerShell: $env:CAPPY_RENDERER="cpu")
-CAPPY_RENDERER=cpu cargo run -p winit-demo --features cpu --release
-
-# CPU only, without wgpu
-cargo run -p winit-demo --no-default-features --features cpu --release
-```
-
-The two renderers blend colors differently (wgpu in linear light, tiny-skia in sRGB), so anti-aliased edges and translucent colors can differ slightly.
+`CAPPY_RENDERER=gpu` or `WindowOptions::with_renderer(RendererKind::Gpu)` selects that backend. Any other name is an error. Unset the variable to use the default.
 
 ## Crate features
 
@@ -440,24 +408,19 @@ The two renderers blend colors differently (wgpu in linear light, tiny-skia in s
 | --- | --- |
 | `basic` (default) | Core, styles, layout, text, window host, `element!` / `style!`, and the derive / attribute macros |
 | `gpu` (default) | `basic` plus the wgpu renderer as `cappy::render` |
-| `cpu` | `basic` plus the CPU renderer as `cappy::render_cpu` |
 | `full` | `basic` and `gpu` plus `cappy::components` |
 
 `cappy-components` is a placeholder. The feature exists so the facade shape stays stable; no widgets ship in it yet.
 
 ### `cappy-winit`
 
-| Feature | Contents |
-| --- | --- |
-| `gpu` (default) | wgpu backend |
-| `cpu` | tiny-skia + softbuffer backend |
+No cargo features. The crate always draws with wgpu.
 
 ### `winit-demo`
 
 | Feature | Contents |
 | --- | --- |
-| `gpu` (default) | Playground linked to the GPU backend |
-| `cpu` | Playground linked to the CPU backend |
+| `gpu` (default) | Playground linked to the winit host |
 
 The demo depends on `cappy` with the `basic` feature only. The renderer crate comes in through `cappy-winit`, not through `cappy::render`.
 
@@ -466,9 +429,8 @@ The demo depends on `cappy` with the `basic` feature only. The renderer crate co
 | Feature | Contents |
 | --- | --- |
 | `gpu-tests` | Render frames on a real or software GPU and compare PNGs |
-| `cpu-tests` | The same comparison with the CPU renderer |
 
-The headless `TestUi` driver needs neither feature.
+The headless `TestUi` driver does not need that feature.
 
 ## Testing
 
@@ -479,10 +441,7 @@ cargo test --workspace
 # Pixel tests on a real or software GPU
 cargo test -p cappy-testing --features gpu-tests
 
-# Pixel tests with the CPU renderer (no GPU needed)
-cargo test -p cappy-testing --features cpu-tests
-
-# Everything, including the GPU / CPU parity check
+# Everything, including the pixel tests
 cargo test --workspace --all-features
 
 # Clippy, matching the workspace lints (unsafe_code is denied)
@@ -508,7 +467,7 @@ let mut harness = TestUi::new(root, Theme::light());
 harness.click("button");
 ```
 
-Snapshots live in `crates/cappy-testing/tests/snapshots` (GPU) and `crates/cappy-testing/tests/snapshots/cpu` (CPU). A missing snapshot is written on first run. Set `CAPPY_UPDATE_SNAPSHOTS=1` to rewrite them all. On a mismatch the actual image is saved next to the snapshot as `<name>.actual.png`.
+Snapshots live in `crates/cappy-testing/tests/snapshots`. A missing snapshot is written on first run. Set `CAPPY_UPDATE_SNAPSHOTS=1` to rewrite them all. On a mismatch the actual image is saved next to the snapshot as `<name>.actual.png`.
 
 `macros/cappy-macros/tests/compile_fail/` holds trybuild tests for bad `stylesheet!`, `#[style_token]` and `#[component]` inputs.
 
@@ -516,10 +475,10 @@ Snapshots live in `crates/cappy-testing/tests/snapshots` (GPU) and `crates/cappy
 
 | Variable | Effect |
 | --- | --- |
-| `CAPPY_RENDERER` | `gpu` or `cpu`. Overrides the renderer chosen in code. Any other value is an error |
+| `CAPPY_RENDERER` | `gpu`. Overrides the renderer chosen in code. Any other value is an error |
 | `CAPPY_DEBUG_DAMAGE` | `1` outlines repainted regions in the playground. `--debug-damage` does the same |
 | `CAPPY_UPDATE_SNAPSHOTS` | `1` rewrites pixel-test snapshots |
-| `WGPU_BACKEND` | Forces a wgpu backend such as `dx12` or `vulkan`. GPU renderer only |
+| `WGPU_BACKEND` | Forces a wgpu backend such as `dx12` or `vulkan` |
 | `RUST_LOG` | Log filter. The playground defaults to `info`. Per-frame repaint lines stay off until `WindowOptions::with_log_frames(true)`. Process-memory samples stay off until `WindowOptions::with_log_memory(true)` |
 
 ## Continuous integration
@@ -531,27 +490,15 @@ cargo build --verbose
 cargo test --verbose
 ```
 
-That build uses default features, so it compiles the GPU renderer and skips `gpu-tests`, `cpu-tests` and `--all-features`. Pixel tests stay a local step.
+That build uses default features, so it compiles the renderer and skips `gpu-tests` and `--all-features`. Pixel tests stay a local step.
 
 ## Troubleshooting
-
-### The CPU renderer was not compiled in
-
-**Error:** `the cpu renderer is not compiled in; enable the cpu cargo feature`
-
-**Fix:** pass the feature, and turn default features off when wgpu should not be in the build.
-
-```sh
-cargo run -p winit-demo --no-default-features --features cpu
-```
-
-`CAPPY_RENDERER=cpu` does not enable the feature. It only selects a backend that is already compiled.
 
 ### `CAPPY_RENDERER` is set to something else
 
 **Error:** `invalid CAPPY_RENDERER`
 
-**Fix:** the value must be `gpu` or `cpu`. Unset it to use the in-code choice.
+**Fix:** the value must be `gpu`. Unset it to use the default.
 
 ```sh
 # PowerShell
@@ -578,19 +525,16 @@ Remove-Item Env:CAPPY_RENDERER
 
 - Update the GPU driver.
 - Force a backend: `WGPU_BACKEND=vulkan` or `WGPU_BACKEND=dx12` (PowerShell: `$env:WGPU_BACKEND="dx12"`).
-- Or skip the GPU: `cargo run -p winit-demo --no-default-features --features cpu --release`.
 
 ### Pixel snapshots differ across machines
 
-GPU snapshots depend on the adapter and the driver. A mismatch writes `<name>.actual.png` beside the committed snapshot. Inspect that file before updating.
+Snapshots depend on the adapter and the driver. A mismatch writes `<name>.actual.png` beside the committed snapshot. Inspect that file before updating.
 
 ```sh
 # PowerShell
 $env:CAPPY_UPDATE_SNAPSHOTS = "1"
 cargo test -p cappy-testing --features gpu-tests
 ```
-
-CPU snapshots do not need a GPU, but they are not required to match the GPU files. The renderers blend in different color spaces. `cargo test -p cappy-testing --features cpu-tests` compares against `snapshots/cpu`.
 
 ### Scroll or hover looks one frame late in a test
 
@@ -611,7 +555,7 @@ cargo clippy --workspace --all-targets --all-features
 cargo test --workspace
 ```
 
-`cargo fmt --all` rewrites formatting. `cargo test --workspace` is what [continuous integration](#continuous-integration) runs. Pixel snapshots stay a local step; update them only when the picture should change, and say which renderer you used. See [Testing](#testing).
+`cargo fmt --all` rewrites formatting. `cargo test --workspace` is what [continuous integration](#continuous-integration) runs. Pixel snapshots stay a local step; update them only when the picture should change. See [Testing](#testing).
 
 3. Open a pull request against `master`. Say what changed and why. If the public API moved, say that too.
 

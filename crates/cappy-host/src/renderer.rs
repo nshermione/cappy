@@ -9,18 +9,14 @@ use cappy_core::{Color, RenderFrame};
 /// Which backend draws the window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum RendererKind {
-    /// wgpu: smooth animation and cheap effects, but the GPU driver costs memory.
+    /// wgpu.
     Gpu,
-    /// tiny-skia and softbuffer: far less memory, painting costs CPU time.
-    Cpu,
 }
 
 impl RendererKind {
     pub const fn name(self) -> &'static str {
-        match self {
-            Self::Gpu => "gpu",
-            Self::Cpu => "cpu",
-        }
+        let Self::Gpu = self;
+        "gpu"
     }
 }
 
@@ -30,7 +26,7 @@ impl fmt::Display for RendererKind {
     }
 }
 
-/// A renderer name that is neither `gpu` nor `cpu`.
+/// A renderer name other than `gpu`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UnknownRendererError {
     pub name: String,
@@ -38,11 +34,7 @@ pub struct UnknownRendererError {
 
 impl fmt::Display for UnknownRendererError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "unknown renderer {:?}; expected \"gpu\" or \"cpu\"",
-            self.name
-        )
+        write!(f, "unknown renderer {:?}; expected \"gpu\"", self.name)
     }
 }
 
@@ -54,7 +46,6 @@ impl FromStr for RendererKind {
     fn from_str(name: &str) -> Result<Self, Self::Err> {
         match name.trim().to_ascii_lowercase().as_str() {
             "gpu" => Ok(Self::Gpu),
-            "cpu" => Ok(Self::Cpu),
             _ => Err(UnknownRendererError {
                 name: name.to_owned(),
             }),
@@ -139,7 +130,6 @@ mod tests {
     #[test]
     fn parses_renderer_names_case_insensitively() {
         assert_eq!(" GPU ".parse(), Ok(RendererKind::Gpu));
-        assert_eq!("cpu".parse(), Ok(RendererKind::Cpu));
         assert_eq!(
             "metal".parse::<RendererKind>(),
             Err(UnknownRendererError {

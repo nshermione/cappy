@@ -12,19 +12,16 @@
 //! - [`checklist`]: the checklist tab;
 //! - [`paint`]: the paint tab (linear gradients, drop shadows and a fitted image);
 //! - [`images`]: the images tab (PNG, JPEG, GIF, WebP, BMP, ICO, and SVG decoded from files);
-//! - motion: the motion tab, when the `cpu` feature is off. That feature does not export motion
-//!   from cappy, so this module is not compiled and a call to `animate` does not build.
+//! - [`motion`]: the motion tab.
 
 mod badge;
 mod checklist;
 mod counter;
 mod images;
 mod layout;
-#[cfg(not(feature = "cpu"))]
 mod motion;
 mod paint;
 mod store;
-#[cfg_attr(feature = "cpu", allow(dead_code))]
 mod style;
 mod tiles;
 

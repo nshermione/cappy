@@ -1,6 +1,6 @@
 //! Renderer-independent desktop hosting for cappy. [`WindowHost`] drives a [`cappy_core::Ui`]
-//! and hands each frame to a [`WindowRenderer`] backend (wgpu in `cappy-render`, CPU in
-//! `cappy-render-cpu`); [`select_renderer`] decides which backend a window uses.
+//! and hands each frame to a [`WindowRenderer`] backend (wgpu in `cappy-render`);
+//! [`select_renderer`] checks [`WindowOptions`] and `CAPPY_RENDERER`.
 
 mod regions;
 mod renderer;

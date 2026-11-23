@@ -7,7 +7,6 @@ use cappy::prelude::*;
 use super::checklist::ChecklistTab;
 use super::counter::CounterTab;
 use super::images::images_tab;
-#[cfg(not(feature = "cpu"))]
 use super::motion::MotionTab;
 use super::paint::PaintTab;
 use super::store::{App, Tab};
@@ -54,28 +53,16 @@ fn tab_bar(app: App) -> Element {
     }
 }
 
-#[cfg(not(feature = "cpu"))]
 fn motion_tab(app: App) -> Element {
     tab(app, Tab::Motion, "Motion", "tab-motion")
 }
 
-#[cfg(feature = "cpu")]
-fn motion_tab(_app: App) -> Element {
-    fragment(std::iter::empty::<Element>())
-}
-
-#[cfg(not(feature = "cpu"))]
 fn motion_panel(app: App) -> Element {
     element! {
         show (:app.tab.get() == Tab::Motion) {
             MotionTab()
         }
     }
-}
-
-#[cfg(feature = "cpu")]
-fn motion_panel(_app: App) -> Element {
-    fragment(std::iter::empty::<Element>())
 }
 
 fn tab(app: App, tab: Tab, title: &'static str, key: &'static str) -> Element {
@@ -94,15 +81,11 @@ fn tab(app: App, tab: Tab, title: &'static str, key: &'static str) -> Element {
     }
 }
 
-#[cfg(not(feature = "cpu"))]
 fn start_motion_loops(tab: Tab) {
     if tab == Tab::Motion {
         Context::current().animate(super::motion::spawn_loops);
     }
 }
-
-#[cfg(feature = "cpu")]
-fn start_motion_loops(_tab: Tab) {}
 
 fn header() -> Element {
     let themes = Context::current().themes();

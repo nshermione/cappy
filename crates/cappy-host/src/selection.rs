@@ -4,7 +4,7 @@ use std::fmt;
 
 use crate::{RendererKind, UnknownRendererError};
 
-/// Overrides the renderer chosen in code, e.g. `CAPPY_RENDERER=cpu`.
+/// Overrides the renderer chosen in code. The only accepted value is `gpu`.
 pub const RENDERER_ENV: &str = "CAPPY_RENDERER";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -74,29 +74,25 @@ fn resolve_renderer(
 mod tests {
     use super::*;
 
-    const BOTH: &[RendererKind] = &[RendererKind::Gpu, RendererKind::Cpu];
+    const GPU: &[RendererKind] = &[RendererKind::Gpu];
 
     #[test]
     fn defaults_to_the_first_available_backend() {
-        assert_eq!(resolve_renderer(None, None, BOTH), Ok(RendererKind::Gpu));
+        assert_eq!(resolve_renderer(None, None, GPU), Ok(RendererKind::Gpu));
+    }
+
+    #[test]
+    fn options_select_the_compiled_backend() {
         assert_eq!(
-            resolve_renderer(None, None, &[RendererKind::Cpu]),
-            Ok(RendererKind::Cpu)
+            resolve_renderer(None, Some(RendererKind::Gpu), GPU),
+            Ok(RendererKind::Gpu)
         );
     }
 
     #[test]
-    fn options_override_the_default() {
+    fn environment_selects_the_compiled_backend() {
         assert_eq!(
-            resolve_renderer(None, Some(RendererKind::Cpu), BOTH),
-            Ok(RendererKind::Cpu)
-        );
-    }
-
-    #[test]
-    fn environment_overrides_the_options() {
-        assert_eq!(
-            resolve_renderer(Some("gpu"), Some(RendererKind::Cpu), BOTH),
+            resolve_renderer(Some("gpu"), None, GPU),
             Ok(RendererKind::Gpu)
         );
     }
@@ -104,15 +100,15 @@ mod tests {
     #[test]
     fn blank_environment_is_ignored() {
         assert_eq!(
-            resolve_renderer(Some("  "), Some(RendererKind::Cpu), BOTH),
-            Ok(RendererKind::Cpu)
+            resolve_renderer(Some("  "), Some(RendererKind::Gpu), GPU),
+            Ok(RendererKind::Gpu)
         );
     }
 
     #[test]
     fn invalid_environment_is_an_error() {
         assert!(matches!(
-            resolve_renderer(Some("vulkan"), None, BOTH),
+            resolve_renderer(Some("cpu"), None, GPU),
             Err(RendererSelectionError::InvalidEnv(_))
         ));
     }
@@ -120,8 +116,8 @@ mod tests {
     #[test]
     fn missing_backends_are_reported_instead_of_replaced() {
         assert_eq!(
-            resolve_renderer(Some("cpu"), None, &[RendererKind::Gpu]),
-            Err(RendererSelectionError::Unavailable(RendererKind::Cpu))
+            resolve_renderer(Some("gpu"), None, &[]),
+            Err(RendererSelectionError::Unavailable(RendererKind::Gpu))
         );
         assert_eq!(
             resolve_renderer(None, None, &[]),

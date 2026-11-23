@@ -1,6 +1,5 @@
-//! Text support shared by every cappy renderer: the font database, shaping with cosmic-text,
-//! the layout measurer, and a cache of shaped buffers, so the GPU and CPU renderers lay text
-//! out exactly like layout measured it.
+//! Text support shared by layout and the renderer: the font database, shaping with cosmic-text,
+//! the layout measurer, and a cache of shaped buffers, so drawing matches what layout measured.
 
 mod cache;
 mod font;

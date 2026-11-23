@@ -10,7 +10,6 @@ publish = false
 [features]
 default = ["gpu"]
 gpu = ["playground-scenes/gpu"]
-cpu = ["playground-scenes/cpu"]
 
 [dependencies]
 playground-scenes.workspace = true

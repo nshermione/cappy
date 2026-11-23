@@ -5,7 +5,6 @@ mod bindings;
 mod edit;
 pub(crate) mod flow;
 mod input;
-#[cfg_attr(feature = "cpu", allow(dead_code))]
 mod motion;
 mod node;
 mod passes;
@@ -28,9 +27,6 @@ use crate::paint::{Primitive, RenderFrame};
 use crate::reactive::{BindingQueue, Signal};
 use crate::{Context, CursorIcon, Damage, DamageTracker, ThemeHandle};
 use bindings::{Binding, BindingKind};
-#[cfg(feature = "cpu")]
-use motion::MotionCtx;
-#[cfg(not(feature = "cpu"))]
 pub use motion::{Anim, AnimHandle, Ease, Motion, MotionCtx, Repeat};
 pub use node::NodeId;
 use node::{Node, NodeContent};
@@ -621,7 +617,6 @@ impl Ui {
     }
 }
 
-#[cfg_attr(feature = "cpu", allow(dead_code))]
 impl Context {
     fn queue_motion(&self, apply: impl FnOnce(&mut MotionCtx) + 'static) {
         crate::reactive::runtime().push_motion(Box::new(move |ui| {
@@ -635,15 +630,7 @@ impl Context {
     /// A later [`Ui`] leaves the jobs for that first one. A call made before any `Ui` exists
     /// waits for its first update. The host waker set on the first `Ui` fires when the queue
     /// goes from empty to occupied.
-    ///
-    /// The `cpu` feature does not export this method. A call in that build does not compile.
-    #[cfg(not(feature = "cpu"))]
     pub fn animate(&self, apply: impl FnOnce(&mut MotionCtx) + 'static) {
-        self.queue_motion(apply);
-    }
-
-    #[cfg(feature = "cpu")]
-    pub(crate) fn animate(&self, apply: impl FnOnce(&mut MotionCtx) + 'static) {
         self.queue_motion(apply);
     }
 }

@@ -1,4 +1,4 @@
-//! Scenes and helpers shared by the GPU, CPU and parity pixel tests.
+//! Scenes and helpers shared by the GPU pixel tests.
 // Each test crate uses a different subset of these helpers.
 #![allow(dead_code)]
 

@@ -19,10 +19,9 @@
 //!     .expect("app failed");
 //! ```
 //!
-//! Features pick the renderer backends compiled in: `gpu` (wgpu, default) and `cpu`
-//! (tiny-skia + softbuffer, far less memory). With both, [`WindowOptions::with_renderer`] or the
-//! `CAPPY_RENDERER=gpu|cpu` environment variable chooses; otherwise the GPU is preferred.
-//! The web target only builds the GPU backend.
+//! Features compile the wgpu renderer. [`WindowOptions::with_renderer`] or the
+//! `CAPPY_RENDERER=gpu` environment variable selects it; any other value is an error.
+//! The web target uses the same renderer.
 
 mod renderer;
 mod translate;
@@ -62,7 +61,7 @@ pub use renderer::AVAILABLE_RENDERERS;
 
 const DEBUG_DAMAGE_KEY: KeyCode = KeyCode::F12;
 
-fn window_attributes(options: &WindowOptions, renderer: RendererKind) -> WindowAttributes {
+fn window_attributes(options: &WindowOptions) -> WindowAttributes {
     // Native windows stay hidden until the first presented frame. On the web a hidden canvas
     // reports a zero size, so wgpu cannot create a surface; the page shows it immediately.
     // The page CSS sizes that canvas. An inner size would pin it to a fixed pixel box.
@@ -70,7 +69,7 @@ fn window_attributes(options: &WindowOptions, renderer: RendererKind) -> WindowA
         .with_title(options.title.clone())
         .with_visible(cfg!(target_arch = "wasm32"));
     let attributes = with_logical_size(attributes, options.logical_size);
-    web_canvas(without_redirection_bitmap(attributes, renderer))
+    web_canvas(without_redirection_bitmap(attributes))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -95,25 +94,14 @@ fn web_canvas(attributes: WindowAttributes) -> WindowAttributes {
 }
 
 /// DWM keeps a bitmap of the window and scales it on the GPU for the whole drag.
-/// The GPU swapchain is the window content, so that bitmap is dropped.
-/// The CPU backend blits through GDI and still needs it.
+/// The swapchain is the window content, so that bitmap is dropped.
 #[cfg(target_os = "windows")]
-fn without_redirection_bitmap(
-    attributes: WindowAttributes,
-    renderer: RendererKind,
-) -> WindowAttributes {
-    if renderer == RendererKind::Gpu {
-        attributes.with_no_redirection_bitmap(true)
-    } else {
-        attributes
-    }
+fn without_redirection_bitmap(attributes: WindowAttributes) -> WindowAttributes {
+    attributes.with_no_redirection_bitmap(true)
 }
 
 #[cfg(not(target_os = "windows"))]
-fn without_redirection_bitmap(
-    attributes: WindowAttributes,
-    _renderer: RendererKind,
-) -> WindowAttributes {
+fn without_redirection_bitmap(attributes: WindowAttributes) -> WindowAttributes {
     attributes
 }
 
@@ -321,8 +309,7 @@ impl WinitHost {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn start(&mut self, event_loop: &ActiveEventLoop, ui: Ui) -> Result<(), RunError> {
-        let window =
-            self.create_window(event_loop, window_attributes(&self.options, self.renderer))?;
+        let window = self.create_window(event_loop, window_attributes(&self.options))?;
         let fonts = FontContext::load(&self.options.fonts);
         self.fonts = Some(fonts.clone());
         #[cfg(debug_assertions)]
@@ -341,24 +328,13 @@ impl WinitHost {
     /// Creates the canvas, then opens the GPU device without blocking the page.
     #[cfg(target_arch = "wasm32")]
     fn begin(&mut self, event_loop: &ActiveEventLoop, ui: Ui) {
-        if self.renderer != RendererKind::Gpu {
-            self.fail(
-                event_loop,
-                RunError::Renderer(RendererError::new(
-                    self.renderer,
-                    RendererSelectionError::Unavailable(self.renderer),
-                )),
-            );
-            return;
-        }
-        let window =
-            match self.create_window(event_loop, window_attributes(&self.options, self.renderer)) {
-                Ok(window) => window,
-                Err(error) => {
-                    self.fail(event_loop, error);
-                    return;
-                }
-            };
+        let window = match self.create_window(event_loop, window_attributes(&self.options)) {
+            Ok(window) => window,
+            Err(error) => {
+                self.fail(event_loop, error);
+                return;
+            }
+        };
         let fonts = FontContext::load(&self.options.fonts);
         self.opening = Some(Opening {
             window,
@@ -480,7 +456,7 @@ impl WinitHost {
             .primary
             .as_ref()
             .map(|chrome| Arc::clone(&chrome.window));
-        let attributes = popup_attributes(&options, self.renderer, owner.as_deref());
+        let attributes = popup_attributes(&options, owner.as_deref());
         let window = self.create_window(event_loop, attributes)?;
         let ui = Ui::new(root, Theme::light());
         let renderer =
@@ -801,11 +777,7 @@ fn apply_window_event(chrome: &mut WindowChrome, host: &mut WindowHost, event: W
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn popup_attributes(
-    options: &SurfaceOptions,
-    renderer: RendererKind,
-    owner: Option<&Window>,
-) -> WindowAttributes {
+fn popup_attributes(options: &SurfaceOptions, owner: Option<&Window>) -> WindowAttributes {
     let attributes = Window::default_attributes()
         .with_title(options.title.clone())
         .with_visible(false)
@@ -813,7 +785,7 @@ fn popup_attributes(
             options.logical_size.0,
             options.logical_size.1,
         ));
-    let attributes = without_redirection_bitmap(attributes, renderer);
+    let attributes = without_redirection_bitmap(attributes);
     owned_popup(place_near_owner(attributes, options.offset, owner), owner)
 }
 

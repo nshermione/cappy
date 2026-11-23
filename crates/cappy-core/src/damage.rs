@@ -112,8 +112,8 @@ fn merge_touching(mut rects: Vec<Rect>) -> Vec<Rect> {
 
 /// One bounding box once `rects` is longer than `limit`.
 ///
-/// The CPU painter wants each region tight. A GPU pass redraws every batch inside each scissor,
-/// so the GPU renderer collapses a long list before it draws.
+/// The GPU renderer redraws every batch inside each scissor, so a long list collapses before
+/// it draws.
 pub fn coalesce_regions(rects: Vec<Rect>, limit: usize) -> Vec<Rect> {
     if rects.len() <= limit {
         return rects;

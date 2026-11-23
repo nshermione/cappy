@@ -17,8 +17,7 @@ pub fn init_logging() {
         .init();
 }
 
-/// Window options for a playground host, honouring the debug damage flag. The renderer is
-/// chosen by the host's cargo features and `CAPPY_RENDERER`.
+/// Window options for a playground host, honouring the debug damage flag.
 pub fn window_options(title: &str) -> WindowOptions {
     WindowOptions::new(title).with_debug_damage(debug_damage_requested())
 }

@@ -2,24 +2,12 @@
 //!
 //! Each presented size recreates the window buffer. While the pointer is still dragging, presents
 //! are at least one resize interval apart and the window size follows the pointer. Once the size
-//! stops changing, the next redraw presents that size. The CPU backend uses a longer interval
-//! because a size change repaints the whole window on the UI thread.
+//! stops changing, the next redraw presents that size.
 
 use cappy_core::time::{Duration, Instant};
 
-use crate::RendererKind;
-
-/// Present interval while the size is still changing on the GPU backend.
+/// Present interval while the size is still changing.
 pub(crate) const RESIZE_INTERVAL: Duration = Duration::from_millis(16);
-/// Present interval while the size is still changing on the CPU backend.
-pub(crate) const CPU_RESIZE_INTERVAL: Duration = Duration::from_millis(100);
-
-pub(crate) fn resize_interval(kind: RendererKind) -> Duration {
-    match kind {
-        RendererKind::Cpu => CPU_RESIZE_INTERVAL,
-        RendererKind::Gpu => RESIZE_INTERVAL,
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct PresentedFrame {
@@ -72,9 +60,7 @@ pub(crate) fn choose_resize_frame(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        CPU_RESIZE_INTERVAL, PresentedFrame, RESIZE_INTERVAL, ResizeFrame, choose_resize_frame,
-    };
+    use super::{PresentedFrame, RESIZE_INTERVAL, ResizeFrame, choose_resize_frame};
     use cappy_core::time::{Duration, Instant};
 
     fn presented(at: Instant) -> PresentedFrame {
@@ -177,36 +163,6 @@ mod tests {
                 Some(now),
                 later,
                 RESIZE_INTERVAL
-            ),
-            ResizeFrame::Paint
-        ));
-    }
-
-    #[test]
-    fn a_cpu_drag_uses_the_longer_interval() {
-        let now = Instant::now();
-        let presented = presented(now);
-        let mid = now + Duration::from_millis(50);
-        assert!(matches!(
-            choose_resize_frame(
-                Some(presented),
-                (900, 700),
-                1.0,
-                Some(mid),
-                mid,
-                CPU_RESIZE_INTERVAL
-            ),
-            ResizeFrame::Defer { .. }
-        ));
-        let later = now + CPU_RESIZE_INTERVAL;
-        assert!(matches!(
-            choose_resize_frame(
-                Some(presented),
-                (900, 700),
-                1.0,
-                Some(later),
-                later,
-                CPU_RESIZE_INTERVAL
             ),
             ResizeFrame::Paint
         ));

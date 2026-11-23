@@ -18,7 +18,6 @@ basic = [
     "dep:cappy-macros",
 ]
 gpu = ["basic", "dep:cappy-render"]
-cpu = ["basic", "dep:cappy-render-cpu", "cappy-core/cpu"]
 full = ["basic", "gpu", "dep:cappy-components"]
 
 [dependencies]
@@ -28,7 +27,6 @@ cappy-layout = { workspace = true, optional = true }
 cappy-text = { workspace = true, optional = true }
 cappy-host = { workspace = true, optional = true }
 cappy-render = { workspace = true, optional = true }
-cappy-render-cpu = { workspace = true, optional = true }
 cappy-dsl = { workspace = true, optional = true }
 cappy-macros = { workspace = true, optional = true }
 cappy-components = { workspace = true, optional = true }

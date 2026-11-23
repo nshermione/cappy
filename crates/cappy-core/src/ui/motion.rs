@@ -558,15 +558,7 @@ fn tween<T: Copy>(from: T, to: T, motion: Motion) -> Tween<T> {
 impl Ui {
     /// Replaces the tween for this motion's property. `from` is the value on screen and the
     /// duration clock starts on the next sample.
-    ///
-    /// The `cpu` feature keeps this crate-private. Other crates cannot call it.
-    #[cfg(not(feature = "cpu"))]
     pub fn animate(&mut self, id: NodeId, motion: Motion) {
-        self.install_motion(id, motion);
-    }
-
-    #[cfg(feature = "cpu")]
-    pub(crate) fn animate(&mut self, id: NodeId, motion: Motion) {
         self.install_motion(id, motion);
     }
 
@@ -622,15 +614,7 @@ impl Ui {
     }
 
     /// Queues `anim` to start during the next [`Ui::step_motion`] in this update.
-    ///
-    /// The `cpu` feature keeps this crate-private. Other crates cannot call it.
-    #[cfg(not(feature = "cpu"))]
     pub fn play(&mut self, anim: Anim) -> AnimHandle {
-        self.enqueue_anim(anim)
-    }
-
-    #[cfg(feature = "cpu")]
-    pub(crate) fn play(&mut self, anim: Anim) -> AnimHandle {
         self.enqueue_anim(anim)
     }
 
@@ -644,15 +628,7 @@ impl Ui {
     }
 
     /// Drops the group and the tweens it still owns. The value on screen stays put.
-    ///
-    /// The `cpu` feature keeps this crate-private. Other crates cannot call it.
-    #[cfg(not(feature = "cpu"))]
     pub fn stop(&mut self, handle: AnimHandle) {
-        self.halt_anim(handle);
-    }
-
-    #[cfg(feature = "cpu")]
-    pub(crate) fn stop(&mut self, handle: AnimHandle) {
         self.halt_anim(handle);
     }
 

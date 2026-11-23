@@ -7,9 +7,6 @@
 //!   window host, `element!`/`style!` macros and derives. Enough to build any component
 //!   yourself.
 //! - `gpu` (default): the wgpu renderer, as [`render`].
-//! - `cpu`: the tiny-skia + softbuffer renderer, as [`render_cpu`]. It loads no GPU driver, so it
-//!   needs far less memory. Motion is not part of this build: `Motion` and `Context::animate`
-//!   are not exported, and a call does not compile.
 //! - `full`: `basic` and `gpu` plus the built-in component library.
 //!
 //! ```
@@ -55,12 +52,6 @@ pub mod render {
     pub use cappy_render::*;
 }
 
-/// The CPU renderer: tiny-skia damage repainting and a softbuffer window surface.
-#[cfg(feature = "cpu")]
-pub mod render_cpu {
-    pub use cappy_render_cpu::*;
-}
-
 #[cfg(feature = "full")]
 pub use cappy_components as components;
 
@@ -77,7 +68,6 @@ pub mod prelude {
         list_window, on, on_before_mount, on_before_unmount, on_mounted, on_unmounted, on_updated,
         percent, reactive, shadow, show, slot, text, text_dyn, use_local_store, use_store,
     };
-    #[cfg(not(feature = "cpu"))]
     pub use cappy_core::{Anim, AnimHandle, Ease, Motion, Repeat};
     pub use cappy_dsl::{element, style};
     pub use cappy_macros::{ClassName, Props, Reactive, component, store, style_token, stylesheet};

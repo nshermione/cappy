@@ -54,7 +54,6 @@ pub use prop::{ByHandle, ByValue, PropInput};
 pub use reactive::{IntoReactive, Reactive, RetirePlaceholder, Signal};
 pub use surface::{SurfaceCommand, SurfaceId, SurfaceOptions};
 pub use theme_handle::{ThemeCatalog, ThemeHandle, Themes};
-#[cfg(not(feature = "cpu"))]
 pub use ui::{Anim, AnimHandle, Ease, Motion, MotionCtx, Repeat};
 pub use ui::{FrameInput, NodeId, ResourceCensus, Ui, UpdateOutcome};
 

@@ -8,14 +8,11 @@ use cappy_core::time::{Duration, Instant};
 use cappy_core::{CursorIcon, FrameInput, InputEvent, Ui, UpdateOutcome};
 use cappy_text::{CosmicTextMeasurer, FontContext};
 
-use crate::resize_pace::{PresentedFrame, ResizeFrame, choose_resize_frame, resize_interval};
+use crate::resize_pace::{PresentedFrame, RESIZE_INTERVAL, ResizeFrame, choose_resize_frame};
 use crate::{PresentOutcome, RendererError, RendererKind, WindowRenderer};
 
 const DEFAULT_TITLE: &str = "cappy";
 const DEFAULT_LOGICAL_SIZE: (f64, f64) = (960.0, 640.0);
-/// CPU presents are not vsynced. A steady 60 Hz clock keeps motion steps even; waiting 8 ms
-/// after a paint of varying length does not.
-const CPU_FRAME: Duration = Duration::from_nanos(16_666_667);
 /// A scheduled frame inside this window applies new input. Farther out is a caret blink, and
 /// waiting for it leaves the caret where it was until that blink.
 const PROMPT_FRAME: Duration = Duration::from_millis(32);
@@ -32,7 +29,7 @@ pub struct WindowOptions {
     /// Sample this process's memory and log it. Off unless a host opts in.
     /// Debug builds only; release builds record nothing either way.
     pub log_memory: bool,
-    /// Backend to draw with; `None` picks the first one compiled in (GPU before CPU).
+    /// Backend to draw with; `None` uses the one compiled in.
     /// The `CAPPY_RENDERER` environment variable overrides this.
     pub renderer: Option<RendererKind>,
     /// Which system faces to keep, and any extra font files to load.
@@ -295,7 +292,7 @@ impl WindowHost {
             scale,
             self.last_resize,
             now,
-            resize_interval(self.renderer.kind()),
+            RESIZE_INTERVAL,
         ) {
             return Ok(RedrawResult {
                 present: PresentOutcome::Deferred,
@@ -369,21 +366,10 @@ impl WindowHost {
         })
     }
 
-    /// When the next animation frame is due. GPU keeps the core's deadline, because vsync absorbs
-    /// an 8 ms step. CPU paces a near deadline on [`CPU_FRAME`] so a slow paint does not stretch
-    /// the gap. A later deadline, such as a timer or the caret, waits until that instant.
+    /// When the next animation frame is due. Vsync absorbs a short step, so the core's deadline
+    /// is used as it is. A later deadline, such as a timer or the caret, waits until that instant.
     fn next_frame_at(&self, now: Instant) -> Option<Instant> {
-        let deadline = self.ui.frame_deadline(now)?;
-        if self.renderer.kind() != RendererKind::Cpu
-            || deadline <= now
-            || deadline > now + CPU_FRAME
-        {
-            return Some(deadline);
-        }
-        Some(match self.animation_due {
-            Some(due) if due + CPU_FRAME > now => due + CPU_FRAME,
-            _ => now + CPU_FRAME,
-        })
+        self.ui.frame_deadline(now)
     }
 
     /// Logs cappy's arena counts next to the process's private bytes.

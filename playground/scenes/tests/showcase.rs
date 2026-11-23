@@ -259,7 +259,6 @@ fn images_tab_decodes_each_file() {
     }
 }
 
-#[cfg(not(feature = "cpu"))]
 #[test]
 fn motion_specimens_are_spaced_and_the_list_scrolls() {
     let mut harness = harness();
@@ -287,7 +286,6 @@ fn motion_specimens_are_spaced_and_the_list_scrolls() {
     );
 }
 
-#[cfg(not(feature = "cpu"))]
 #[test]
 fn motion_tab_fades_and_slides_from_manual_animate() {
     use std::thread::sleep;
@@ -309,7 +307,6 @@ fn motion_tab_fades_and_slides_from_manual_animate() {
     assert!(fill_alpha(&harness, "motion-opacity") < 0.95);
 }
 
-#[cfg(not(feature = "cpu"))]
 #[test]
 fn sequence_and_parallel_replay_on_their_own_boxes() {
     use std::thread::sleep;
@@ -360,7 +357,6 @@ fn sequence_and_parallel_replay_on_their_own_boxes() {
 
 /// Wheels the motion list until `key` sits inside the scrollport. The ease only moves on frames
 /// close together, so this steps the clock instead of waiting out one long sleep.
-#[cfg(not(feature = "cpu"))]
 fn reveal(harness: &mut TestUi, key: &str) {
     use std::thread::sleep;
     use std::time::Duration;
@@ -390,7 +386,6 @@ fn reveal(harness: &mut TestUi, key: &str) {
     panic!("could not scroll {key} into the motion list");
 }
 
-#[cfg(not(feature = "cpu"))]
 fn fill_alpha(harness: &TestUi, key: &str) -> f32 {
     let rect = harness.rect(key);
     harness
@@ -412,7 +407,6 @@ fn fill_alpha(harness: &TestUi, key: &str) -> f32 {
         .expect("solid fill")
 }
 
-#[cfg(not(feature = "cpu"))]
 #[test]
 fn motion_loops_are_already_running() {
     use std::thread::sleep;
@@ -447,15 +441,6 @@ fn motion_loops_are_already_running() {
         })
         .expect("spin quad");
     assert!(spin > 0.2);
-}
-
-/// The `cpu` feature removes motion from cappy, so this scene has no Motion tab.
-#[cfg(feature = "cpu")]
-#[test]
-fn cpu_feature_omits_the_motion_tab() {
-    let harness = harness();
-    assert!(harness.ui().find_by_key("tab-motion").is_none());
-    assert!(harness.ui().find_by_key("tab-counter").is_some());
 }
 
 #[test]

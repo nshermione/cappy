@@ -10,7 +10,6 @@ pub enum Tab {
     Checklist,
     Paint,
     Images,
-    #[cfg(not(feature = "cpu"))]
     Motion,
 }
 

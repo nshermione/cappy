@@ -1,5 +1,4 @@
-//! RGBA images read back from a renderer, pixel probes and PNG snapshots shared by the GPU and
-//! CPU pixel tests.
+//! RGBA images read back from a renderer, pixel probes and PNG snapshots.
 
 use std::fmt;
 use std::fs::File;

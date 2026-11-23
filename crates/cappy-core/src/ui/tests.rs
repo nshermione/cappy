@@ -2,8 +2,6 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-#[cfg(feature = "cpu")]
-use super::motion::{Anim, Ease, Motion};
 use super::*;
 use crate::paint::Primitive;
 use crate::reactive::{live_signal_count, signal_is_alive, signal_subscriber_count};
