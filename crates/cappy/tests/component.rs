@@ -40,11 +40,11 @@ impl Component for Badge {
 
     fn render(&self) -> Element {
         let cx = Context::current();
-        element!((cx) {
+        element! {
             div(class = BadgeClass::Root, key = "badge-root", on_click = cx.on(Self::press)) {
                 text(:format!("{}:{}", self.text, self.label), class = BadgeClass::Label, key = "badge-label")
             }
-        })
+        }
     }
 }
 
@@ -62,11 +62,14 @@ const VIEWPORT: FrameInput = FrameInput {
 };
 
 fn context() -> Context {
-    Application::new().context().clone()
+    {
+        Application::new();
+        Context::current()
+    }
 }
 
-fn settled(cx: &Context, root: Element) -> Ui {
-    let mut ui = Ui::new(cx, root, Theme::light());
+fn settled(root: Element) -> Ui {
+    let mut ui = Ui::new(root, Theme::light());
     ui.update(VIEWPORT);
     ui.prepare_frame();
     ui
@@ -88,9 +91,9 @@ fn click(ui: &mut Ui, key: &str) {
 fn plain_fields_and_shared_props_update_rendered_text() {
     let cx = context();
     let label = cx.reactive(String::from("new"));
-    let badge = Badge::open(&cx).label(label.clone());
+    let badge = Badge::open().label(label.clone());
     badge.text.set(String::from("note"));
-    let mut ui = settled(&cx, badge.clone().into_element());
+    let mut ui = settled(badge.clone().into_element());
     let text = ui.find_by_key("badge-label").unwrap();
     assert_eq!(ui.node_text(text), Some("note:new"));
 
@@ -103,8 +106,8 @@ fn plain_fields_and_shared_props_update_rendered_text() {
 #[test]
 fn owned_prop_does_not_follow_another_signal() {
     let cx = context();
-    let badge = Badge::open(&cx).label("once");
-    let mut ui = settled(&cx, badge.into_element());
+    let badge = Badge::open().label("once");
+    let mut ui = settled(badge.into_element());
     let text = ui.find_by_key("badge-label").unwrap();
     assert_eq!(ui.node_text(text), Some(":once"));
 
@@ -120,20 +123,17 @@ fn parent_passes_props_events_host_attributes_and_children() {
     let label = cx.reactive(String::from("new"));
     let seen = Rc::new(Cell::new(String::new()));
     let record = Rc::clone(&seen);
-    let mut ui = settled(
-        &cx,
-        element!((cx) {
-            Badge(
-                label = label.clone(),
-                on_click = move |value: &String| record.set(value.clone()),
-                class = ThemeClass::Muted,
-                key = "hosted",
-            ) {
-                text("extra", key = "extra"),
-                text("more", key = "more"),
-            }
-        }),
-    );
+    let mut ui = settled(element! {
+        Badge(
+            label = label.clone(),
+            on_click = move |value: &String| record.set(value.clone()),
+            class = ThemeClass::Muted,
+            key = "hosted",
+        ) {
+            text("extra", key = "extra"),
+            text("more", key = "more"),
+        }
+    });
 
     assert!(ui.find_by_key("badge-root").is_none());
     let hosted = ui.find_by_key("hosted").unwrap();
@@ -170,9 +170,10 @@ fn parent_passes_props_events_host_attributes_and_children() {
 
 #[test]
 fn unit_event_emits_without_a_payload() {
+    let _cx = context();
     let hit = Rc::new(Cell::new(false));
     let flag = Rc::clone(&hit);
-    let ping = Ping::open(&context()).on_ping(move || flag.set(true));
+    let ping = Ping::open().on_ping(move || flag.set(true));
     ping.on_ping.emit(());
     assert!(hit.get());
     let _ = format!("{ping:?}");
@@ -189,12 +190,12 @@ struct Panel {
 impl Component for Panel {
     fn render(&self) -> Element {
         let cx = Context::current();
-        element!((cx) {
+        element! {
             div(key = "panel") {
                 slot(icon)
                 slot(body)
             }
-        })
+        }
     }
 }
 
@@ -207,13 +208,13 @@ struct Frame {
 impl Component for Frame {
     fn render(&self) -> Element {
         let cx = Context::current();
-        element!((cx) {
+        element! {
             div(key = "frame") {
                 text("before", key = "before")
                 slot(body)
                 text("after", key = "after")
             }
-        })
+        }
     }
 }
 
@@ -226,9 +227,9 @@ struct Inner {
 impl Component for Inner {
     fn render(&self) -> Element {
         let cx = Context::current();
-        element!((cx) {
+        element! {
             div(key = "inner") { slot(body) }
-        })
+        }
     }
 }
 
@@ -241,32 +242,29 @@ struct Outer {
 impl Component for Outer {
     fn render(&self) -> Element {
         let cx = Context::current();
-        element!((cx) {
+        element! {
             div(key = "outer") {
                 slot(body)
                 Inner { text("inner-text", key = "inner-text") }
             }
-        })
+        }
     }
 }
 
 #[test]
 fn slots_land_in_declaration_order_and_drop_the_rest() {
     let cx = context();
-    let panel = Panel::open(&cx);
-    let _rendered = cx.enter(|| panel.render());
+    let panel = Panel::open();
+    let _rendered = panel.render();
     let _again = panel.clone();
-    let ui = settled(
-        &cx,
-        element!((cx) {
-            Panel(class = ThemeClass::Muted, key = "hosted") {
-                text("default", key = "default"),
-                text("named", key = "named", slot = body),
-                div(slot = icon, key = "icon") { text("+", key = "plus") }
-                text("extra", key = "extra"),
-            }
-        }),
-    );
+    let ui = settled(element! {
+        Panel(class = ThemeClass::Muted, key = "hosted") {
+            text("default", key = "default"),
+            text("named", key = "named", slot = body),
+            div(slot = icon, key = "icon") { text("+", key = "plus") }
+            text("extra", key = "extra"),
+        }
+    });
 
     assert!(ui.find_by_key("panel").is_none());
     assert!(ui.find_by_key("named").is_none());
@@ -285,15 +283,12 @@ fn slots_land_in_declaration_order_and_drop_the_rest() {
 #[test]
 fn an_unnamed_child_is_placed_where_the_slot_is() {
     let cx = context();
-    let ui = settled(
-        &cx,
-        element!((cx) {
-            Frame {
-                text("middle", key = "middle"),
-                text("dropped", key = "dropped"),
-            }
-        }),
-    );
+    let ui = settled(element! {
+        Frame {
+            text("middle", key = "middle"),
+            text("dropped", key = "dropped"),
+        }
+    });
     let frame = ui.find_by_key("frame").unwrap();
     let children = ui.node_children(frame);
     assert_eq!(children.len(), 3);
@@ -306,14 +301,11 @@ fn an_unnamed_child_is_placed_where_the_slot_is() {
 #[test]
 fn nested_components_keep_their_own_slots() {
     let cx = context();
-    let ui = settled(
-        &cx,
-        element!((cx) {
-            Outer {
-                text("outer-text", key = "outer-text")
-            }
-        }),
-    );
+    let ui = settled(element! {
+        Outer {
+            text("outer-text", key = "outer-text")
+        }
+    });
     let outer = ui.find_by_key("outer").unwrap();
     let outer_children = ui.node_children(outer);
     assert_eq!(ui.node_text(outer_children[0]), Some("outer-text"));
@@ -342,12 +334,12 @@ struct Shelf {
 impl Component for Shelf {
     fn render(&self) -> Element {
         let cx = Context::current();
-        element!((cx) {
+        element! {
             div(key = "shelf") {
                 slot(header)
                 slot(body)
             }
-        })
+        }
     }
 }
 
@@ -360,7 +352,7 @@ fn section_markers_cover_following_fields_until_the_next_marker() {
     let opened_flag = Rc::clone(&opened);
     let changed_flag = Rc::clone(&changed);
     let closed_flag = Rc::clone(&closed);
-    let shelf = Shelf::open(&cx)
+    let shelf = Shelf::open()
         .title("A")
         .on_open(move || opened_flag.set(true))
         .subtitle("B")
@@ -380,16 +372,13 @@ fn section_markers_cover_following_fields_until_the_next_marker() {
     assert_eq!(changed.take(), "next");
     assert!(closed.get());
 
-    let ui = settled(
-        &cx,
-        element!((cx) {
-            Shelf(title = "A", subtitle = "B", key = "hosted") {
-                text("top", key = "top", slot = header),
-                text("main", key = "main", slot = body),
-                text("extra", key = "extra"),
-            }
-        }),
-    );
+    let ui = settled(element! {
+        Shelf(title = "A", subtitle = "B", key = "hosted") {
+            text("top", key = "top", slot = header),
+            text("main", key = "main", slot = body),
+            text("extra", key = "extra"),
+        }
+    });
     assert!(ui.find_by_key("shelf").is_none());
     assert!(ui.find_by_key("extra").is_none());
     let hosted = ui.find_by_key("hosted").unwrap();

@@ -79,7 +79,6 @@ fn motion_panel(_app: App) -> Element {
 }
 
 fn tab(app: App, tab: Tab, title: &'static str, key: &'static str) -> Element {
-    let cx = Context::current();
     element! {
         div(
             class = ThemeClass::Btn,
@@ -87,7 +86,7 @@ fn tab(app: App, tab: Tab, title: &'static str, key: &'static str) -> Element {
             key = key,
             on_click = move |_| {
                 app.select(tab);
-                start_motion_loops(&cx, tab);
+                start_motion_loops(tab);
             },
         ) {
             text(title)
@@ -96,14 +95,14 @@ fn tab(app: App, tab: Tab, title: &'static str, key: &'static str) -> Element {
 }
 
 #[cfg(not(feature = "cpu"))]
-fn start_motion_loops(cx: &Context, tab: Tab) {
+fn start_motion_loops(tab: Tab) {
     if tab == Tab::Motion {
-        cx.animate(super::motion::spawn_loops);
+        Context::current().animate(super::motion::spawn_loops);
     }
 }
 
 #[cfg(feature = "cpu")]
-fn start_motion_loops(_cx: &Context, _tab: Tab) {}
+fn start_motion_loops(_tab: Tab) {}
 
 fn header() -> Element {
     let themes = Context::current().themes();

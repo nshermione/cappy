@@ -296,8 +296,10 @@ impl Context {
     /// binding runs that binding again when the rect changes. Outside an update or event, this
     /// returns `None`.
     pub fn node_rect(&self, key: &str) -> Option<Rect> {
-        let board = self.runtime.current_board()?;
-        board.read_rect(&self.runtime, key)
+        let _ = self;
+        let runtime = crate::reactive::runtime();
+        let board = runtime.current_board()?;
+        board.read_rect(&runtime, key)
     }
 
     /// Scroll offset of the node named `key`, in logical pixels.
@@ -306,8 +308,10 @@ impl Context {
     /// inside a binding runs that binding again when the offset changes, including while it eases.
     /// A rect change alone does not. Outside an update or event, this returns `None`.
     pub fn scroll_offset(&self, key: &str) -> Option<Point> {
-        let board = self.runtime.current_board()?;
-        board.read_scroll(&self.runtime, key)
+        let _ = self;
+        let runtime = crate::reactive::runtime();
+        let board = runtime.current_board()?;
+        board.read_scroll(&runtime, key)
     }
 
     /// Sets the scroll offset of the node named `key` and skips easing.
@@ -316,7 +320,8 @@ impl Context {
     /// nothing. The write wakes the host: the UI whose update or event is running, or the first UI
     /// on this context when the call is outside both. A call before any UI exists is ignored.
     pub fn set_scroll_offset(&self, key: &str, offset: Point) {
-        let Some(board) = self.runtime.board_for_write() else {
+        let _ = self;
+        let Some(board) = crate::reactive::runtime().board_for_write() else {
             return;
         };
         board.write_scroll(key, offset);

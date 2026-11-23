@@ -64,9 +64,8 @@ pub struct MotionTab {
 
 impl Component for MotionTab {
     fn render(&self) -> Element {
-        let cx = Context::current();
         let tracks = ease_section();
-        let playback = playback_row(cx.clone(), self.sequence, self.parallel);
+        let playback = playback_row(self.sequence, self.parallel);
         element! {
             div(class = [ThemeClass::Card, Class::Grow]) {
                 text("Motion", class = ThemeClass::Subtitle)
@@ -76,8 +75,8 @@ impl Component for MotionTab {
                 )
                 div(class = Class::ScrollList, key = "motion-scroll") {
                     div(class = Class::MotionRow) {
-                        { opacity_card(cx.clone(), self.faded) }
-                        { slide_card(cx, self.shifted) }
+                        { opacity_card(self.faded) }
+                        { slide_card(self.shifted) }
                     }
                     { playback }
                     div(class = Class::MotionRow) {
@@ -175,7 +174,7 @@ fn swatch(class: Class, key: &'static str, label: &'static str, pip: bool) -> El
     }
 }
 
-fn opacity_card(cx: Context, faded: Reactive<bool>) -> Element {
+fn opacity_card(faded: Reactive<bool>) -> Element {
     element! {
         div(class = Class::Specimen) {
             div(class = Class::MotionOpacity, key = "motion-opacity") {
@@ -188,7 +187,7 @@ fn opacity_card(cx: Context, faded: Reactive<bool>) -> Element {
                     let next = !faded.get();
                     faded.set(next);
                     let opacity = if next { 0.2 } else { 1.0 };
-                    cx.animate(move |ui| {
+                    Context::current().animate(move |ui| {
                         let id = ui.find_by_key("motion-opacity").expect("opacity card");
                         ui.animate(
                             id,
@@ -205,7 +204,7 @@ fn opacity_card(cx: Context, faded: Reactive<bool>) -> Element {
     }
 }
 
-fn slide_card(cx: Context, shifted: Reactive<bool>) -> Element {
+fn slide_card(shifted: Reactive<bool>) -> Element {
     element! {
         div(class = Class::Specimen) {
             div(class = Class::MotionSlide, key = "motion-slide") {
@@ -218,7 +217,7 @@ fn slide_card(cx: Context, shifted: Reactive<bool>) -> Element {
                     let next = !shifted.get();
                     shifted.set(next);
                     let y = if next { 28.0 } else { 0.0 };
-                    cx.animate(move |ui| {
+                    Context::current().animate(move |ui| {
                         let id = ui.find_by_key("motion-slide").expect("slide card");
                         ui.animate(
                             id,
@@ -236,20 +235,18 @@ fn slide_card(cx: Context, shifted: Reactive<bool>) -> Element {
 }
 
 fn playback_row(
-    cx: Context,
     sequence: Reactive<Option<AnimHandle>>,
     parallel: Reactive<Option<AnimHandle>>,
 ) -> Element {
-    let parallel_cx = cx.clone();
     element! {
         div(class = Class::MotionRow) {
-            { sequence_card(cx, sequence) }
-            { parallel_card(parallel_cx, parallel) }
+            { sequence_card(sequence) }
+            { parallel_card(parallel) }
         }
     }
 }
 
-fn sequence_card(cx: Context, running: Reactive<Option<AnimHandle>>) -> Element {
+fn sequence_card(running: Reactive<Option<AnimHandle>>) -> Element {
     element! {
         div(class = Class::Specimen) {
             div(class = Class::MotionPlay, key = "motion-sequence-box") {
@@ -258,7 +255,7 @@ fn sequence_card(cx: Context, running: Reactive<Option<AnimHandle>>) -> Element 
             div(
                 class = ThemeClass::Btn,
                 key = "motion-sequence",
-                on_click = move |_| replay(cx.clone(), running, sequence_clip),
+                on_click = move |_| replay(running, sequence_clip),
             ) {
                 text("Sequence")
             }
@@ -266,7 +263,7 @@ fn sequence_card(cx: Context, running: Reactive<Option<AnimHandle>>) -> Element 
     }
 }
 
-fn parallel_card(cx: Context, running: Reactive<Option<AnimHandle>>) -> Element {
+fn parallel_card(running: Reactive<Option<AnimHandle>>) -> Element {
     element! {
         div(class = Class::Specimen) {
             div(class = Class::MotionPlay, key = "motion-parallel-box") {
@@ -275,7 +272,7 @@ fn parallel_card(cx: Context, running: Reactive<Option<AnimHandle>>) -> Element 
             div(
                 class = ThemeClass::Btn,
                 key = "motion-parallel",
-                on_click = move |_| replay(cx.clone(), running, parallel_clip),
+                on_click = move |_| replay(running, parallel_clip),
             ) {
                 text("Parallel")
             }
@@ -285,15 +282,11 @@ fn parallel_card(cx: Context, running: Reactive<Option<AnimHandle>>) -> Element 
 
 /// Stops the previous group, then plays `clip` again. The clip snaps back to rest first, so a
 /// second click restarts instead of continuing from the value on screen.
-fn replay(
-    cx: Context,
-    running: Reactive<Option<AnimHandle>>,
-    clip: fn(&mut MotionCtx) -> Option<Anim>,
-) {
+fn replay(running: Reactive<Option<AnimHandle>>, clip: fn(&mut MotionCtx) -> Option<Anim>) {
     if let Some(handle) = running.get_untracked() {
         handle.stop();
     }
-    cx.animate(move |ui| {
+    Context::current().animate(move |ui| {
         let Some(anim) = clip(ui) else {
             return;
         };

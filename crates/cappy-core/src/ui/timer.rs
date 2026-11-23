@@ -4,10 +4,7 @@
 //! [`Ui::frame_deadline`] wakes the host at the deadline. The callback runs once, before bindings,
 //! and disposing the node drops it.
 
-use std::rc::Rc;
-
 use crate::geometry::TimerCommand;
-use crate::reactive::enter_runtime;
 use crate::time::{Duration, Instant};
 use crate::{Context, NodeId};
 
@@ -55,12 +52,11 @@ impl super::Ui {
             }
         }
         self.timers = waiting;
-        let runtime = Rc::clone(&self.queue.runtime);
         for timer in pending {
             if !self.is_current(timer.id) {
                 continue;
             }
-            enter_runtime(&runtime, timer.callback);
+            (timer.callback)();
         }
     }
 
@@ -108,7 +104,8 @@ impl Context {
     /// From an update or event, the timer is armed on that UI. Otherwise it is armed on the first
     /// UI of this context. Two windows do not share timers.
     pub fn timeout(&self, key: &str, delay: Duration, callback: impl FnOnce() + 'static) {
-        let Some(board) = self.runtime.board_for_write() else {
+        let _ = self;
+        let Some(board) = crate::reactive::runtime().board_for_write() else {
             return;
         };
         board.push_timer_command(TimerCommand::Arm {
@@ -123,7 +120,8 @@ impl Context {
     /// An unknown key wakes the host once and then does nothing. A call before any UI exists is
     /// ignored. Which UI receives the clear matches [`Context::timeout`].
     pub fn clear_timeout(&self, key: &str) {
-        let Some(board) = self.runtime.board_for_write() else {
+        let _ = self;
+        let Some(board) = crate::reactive::runtime().board_for_write() else {
             return;
         };
         board.push_timer_command(TimerCommand::Clear {

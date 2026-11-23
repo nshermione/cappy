@@ -24,11 +24,14 @@ pub fn fonts() -> &'static FontContext {
 }
 
 pub fn context() -> Context {
-    Application::new().context().clone()
+    {
+        Application::new();
+        Context::current()
+    }
 }
 
 pub fn harness(context: &Context, root: Element) -> TestUi {
-    let mut ui = Ui::new(context, root, Theme::light());
+    let mut ui = Ui::new(root, Theme::light());
     ui.set_text_measurer(CosmicTextMeasurer::new(fonts()));
     let mut harness = TestUi::from_ui(ui);
     harness.resize(VIEWPORT);
@@ -41,7 +44,7 @@ pub fn background() -> Color {
 
 pub fn counter(cx: &Context, count: Reactive<i32>) -> Element {
     let label = count.clone();
-    element!((cx) {
+    element! {
         div(class = "app") {
             div(class = "row", key = "row") {
                 text(:format!("Count: {}", label.get()), key = "label")
@@ -50,11 +53,11 @@ pub fn counter(cx: &Context, count: Reactive<i32>) -> Element {
                 }
             }
         }
-    })
+    }
 }
 
 pub fn shapes(cx: &Context) -> Element {
-    element!((cx) {
+    element! {
         div(class = "app", key = "root") {
             div(class = "row") {
                 div(style = style! { size: 60, background: ColorToken::Primary, radius: Radius::Lg })
@@ -68,7 +71,7 @@ pub fn shapes(cx: &Context) -> Element {
                 div(style = style! { size: 60, background: Color::hex("#22c55e") })
             }
         }
-    })
+    }
 }
 
 pub fn effects(cx: &Context) -> Element {
@@ -82,7 +85,7 @@ pub fn effects(cx: &Context) -> Element {
         )
         .expect("2x2 rgba"),
     );
-    element!((cx) {
+    element! {
         div(style = style! { padding: 24, gap: 16 }) {
             div(key = "gradient", style = style! {
                 size: 64,
@@ -102,7 +105,7 @@ pub fn effects(cx: &Context) -> Element {
                 style = style! { size: 64, radius: 16, background: Color::hex("#e4e4e7") },
             )
         }
-    })
+    }
 }
 
 pub fn full_repaint(frame: &RenderFrame) -> RenderFrame {

@@ -15,18 +15,17 @@
 //! ```
 //! use cappy::prelude::*;
 //!
-//! let application = Application::new();
-//! let cx = application.context();
-//! let count = cx.reactive(0_i32);
-//! let root = element!((cx) {
+//! let _application = Application::new();
+//! let count = Context::current().reactive(0_i32);
+//! let root = element! {
 //!     div(class = "app") {
 //!         text(:format!("Clicked {} times", count.get()))
 //!         div(class = "btn btn-primary", on_click = move |_| count.update(|n| *n += 1)) {
 //!             text("Click")
 //!         }
 //!     }
-//! });
-//! let mut ui = Ui::new(cx, root, Theme::light());
+//! };
+//! let mut ui = Ui::new(root, Theme::light());
 //! assert!(ui.update(FrameInput::new(800, 600, 1.0)).needs_redraw());
 //! ```
 
@@ -70,14 +69,13 @@ pub use cappy_components as components;
 pub mod prelude {
     pub use cappy_core::{
         Align, Application, Color, ColorToken, Component, Context, CursorIcon, Display, Dynamic,
-        Element, FlexDirection, FocusScope, FontSize, FontWeight, FrameInput, HasContext,
-        ImageClip, ImageDecodeError, ImagePixels, ImageSource, IntoElement, IntoReactive, Justify,
-        ObjectFit, Overflow, PointerEvents, Position, Radius, Reactive, Signal, Slot, Space,
-        StyleRefinement, Stylesheet, SurfaceId, SurfaceOptions, TextAlign, Theme, ThemeCatalog,
-        ThemeHandle, Themes, Ui, UpdateOutcome, asset_path, div, for_each, fragment, hex, if_else,
-        image, input, linear, list_window, on, on_before_mount, on_before_unmount, on_mounted,
-        on_unmounted, on_updated, percent, reactive, shadow, show, slot, text, text_dyn,
-        use_local_store, use_store,
+        Element, FlexDirection, FocusScope, FontSize, FontWeight, FrameInput, ImageClip,
+        ImageDecodeError, ImagePixels, ImageSource, IntoElement, IntoReactive, Justify, ObjectFit,
+        Overflow, PointerEvents, Position, Radius, Reactive, Signal, Slot, Space, StyleRefinement,
+        Stylesheet, SurfaceId, SurfaceOptions, TextAlign, Theme, ThemeCatalog, ThemeHandle, Themes,
+        Ui, UpdateOutcome, asset_path, div, for_each, fragment, hex, if_else, image, input, linear,
+        list_window, on, on_before_mount, on_before_unmount, on_mounted, on_unmounted, on_updated,
+        percent, reactive, shadow, show, slot, text, text_dyn, use_local_store, use_store,
     };
     #[cfg(not(feature = "cpu"))]
     pub use cappy_core::{Anim, AnimHandle, Ease, Motion, Repeat};

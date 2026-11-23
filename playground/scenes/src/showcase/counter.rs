@@ -13,24 +13,17 @@ pub struct CounterTab {}
 
 impl Component for CounterTab {
     fn render(&self) -> Element {
-        let cx = Context::current();
         let shared = use_store(Counter);
         let mirror = use_store(Counter);
         let local = use_local_store(Counter);
         let name = reactive(String::new());
         let open_popup = {
-            let cx = cx.clone();
             let shared = shared.clone();
             move |_: &cappy::ClickEvent| {
-                let host = cx.clone();
                 let shared = shared.clone();
-                let popup_cx = host.clone();
-                let popup_shared = shared.clone();
-                host.open_surface(
+                Context::current().open_surface(
                     SurfaceOptions::new("Counter").with_size(320.0, 200.0),
-                    move |id| {
-                        popup_cx.enter(|| popup_window(popup_cx.clone(), popup_shared.clone(), id))
-                    },
+                    move |id| popup_window(shared.clone(), id),
                 );
             }
         };
@@ -69,13 +62,13 @@ impl Component for CounterTab {
     }
 }
 
-fn popup_window(cx: Context, shared: Counter, id: SurfaceId) -> Element {
+fn popup_window(shared: Counter, id: SurfaceId) -> Element {
     // The root fills the window. A card radius would leave the window background in the corners.
     element! {
         div(class = ThemeClass::App) {
             text("Popup", class = ThemeClass::Subtitle)
             text(:format!("Count: {}", shared.count), key = "popup-count", class = ThemeClass::Muted)
-            div(class = ThemeClass::Btn, key = "popup-close", on_click = move |_| cx.close_surface(id)) {
+            div(class = ThemeClass::Btn, key = "popup-close", on_click = move |_| Context::current().close_surface(id)) {
                 text("Close")
             }
         }

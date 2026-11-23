@@ -1,14 +1,17 @@
-use cappy_core::{Application, Damage, Element, Reactive, Theme, UpdateOutcome};
+use cappy_core::{Application, Context, Damage, Element, Reactive, Theme, UpdateOutcome};
 use cappy_dsl::element;
 use cappy_testing::TestUi;
 
 fn context() -> cappy_core::Context {
-    Application::new().context().clone()
+    {
+        Application::new();
+        Context::current()
+    }
 }
 
 fn counter(cx: &cappy_core::Context, count: Reactive<i32>) -> Element {
     let label = count.clone();
-    element!((cx) {
+    element! {
         div(class = "app") {
             div(class = "row", key = "row") {
                 text(:format!("Count: {}", label.get()), key = "label")
@@ -17,14 +20,14 @@ fn counter(cx: &cappy_core::Context, count: Reactive<i32>) -> Element {
                 }
             }
         }
-    })
+    }
 }
 
 #[test]
 fn clicking_updates_the_label() {
     let cx = context();
     let count = cx.reactive(0i32);
-    let mut harness = TestUi::new(&cx, counter(&cx, count.clone()), Theme::light());
+    let mut harness = TestUi::new(counter(&cx, count.clone()), Theme::light());
     harness.click("increment");
     harness.click("increment");
     harness.update();
@@ -35,7 +38,7 @@ fn clicking_updates_the_label() {
 #[test]
 fn click_damage_stays_within_the_row() {
     let cx = context();
-    let mut harness = TestUi::new(&cx, counter(&cx, cx.reactive(0)), Theme::light());
+    let mut harness = TestUi::new(counter(&cx, cx.reactive(0)), Theme::light());
     harness.click("increment");
     let Damage::Regions(regions) = harness.damage() else {
         panic!("a click should cause partial damage");
@@ -47,7 +50,7 @@ fn click_damage_stays_within_the_row() {
 #[test]
 fn ui_is_idle_once_settled() {
     let cx = context();
-    let mut harness = TestUi::new(&cx, counter(&cx, cx.reactive(0)), Theme::light());
+    let mut harness = TestUi::new(counter(&cx, cx.reactive(0)), Theme::light());
     assert_eq!(harness.update(), UpdateOutcome::Idle);
     assert_eq!(harness.damage(), Damage::None);
 }
@@ -55,6 +58,6 @@ fn ui_is_idle_once_settled() {
 #[test]
 fn text_falls_back_to_the_first_text_child() {
     let cx = context();
-    let harness = TestUi::new(&cx, counter(&cx, cx.reactive(0)), Theme::light());
+    let harness = TestUi::new(counter(&cx, cx.reactive(0)), Theme::light());
     assert_eq!(harness.text("increment"), "+1");
 }

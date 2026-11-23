@@ -3,6 +3,7 @@
 
 use crate::Context;
 use crate::element::Element;
+use crate::reactive::runtime;
 
 /// Identifies one popup surface requested from a [`Context`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -60,13 +61,15 @@ impl Context {
         options: SurfaceOptions,
         build: impl FnOnce(SurfaceId) -> Element,
     ) -> SurfaceId {
-        let id = self.allocate_surface();
+        let _ = self;
+        let id = Self::allocate_surface();
         let root = build(id);
-        self.runtime
+        let runtime = runtime();
+        runtime
             .surfaces
             .borrow_mut()
             .push(SurfaceCommand::Open { id, options, root });
-        self.runtime.wake_host();
+        runtime.wake_host();
         id
     }
 
@@ -74,21 +77,25 @@ impl Context {
     ///
     /// Closing an id the host has already dropped does nothing.
     pub fn close_surface(&self, id: SurfaceId) {
-        self.runtime
+        let _ = self;
+        let runtime = runtime();
+        runtime
             .surfaces
             .borrow_mut()
             .push(SurfaceCommand::Close(id));
-        self.runtime.wake_host();
+        runtime.wake_host();
     }
 
     /// Takes every queued open and close. The next call is empty until another request arrives.
     pub fn drain_surfaces(&self) -> Vec<SurfaceCommand> {
-        std::mem::take(&mut *self.runtime.surfaces.borrow_mut())
+        let _ = self;
+        std::mem::take(&mut *runtime().surfaces.borrow_mut())
     }
 
-    fn allocate_surface(&self) -> SurfaceId {
-        let id = self.runtime.next_surface.get().wrapping_add(1);
-        self.runtime.next_surface.set(id);
+    fn allocate_surface() -> SurfaceId {
+        let runtime = runtime();
+        let id = runtime.next_surface.get().wrapping_add(1);
+        runtime.next_surface.set(id);
         SurfaceId(id)
     }
 }

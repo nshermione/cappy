@@ -34,9 +34,8 @@ pub use bitmap::{ImageClip, ImageDecodeError, ImagePixels, ImagePixelsError, Obj
 pub use clipboard::{Clipboard, MemoryClipboard, NoopClipboard};
 pub use damage::{Damage, DamageTracker, coalesce_regions};
 pub use element::{
-    Component, Element, FocusScope, HasContext, IntoCaret, IntoElement, IntoInputValue,
-    IntoSelection, Slot, div, for_each, fragment, if_else, image, input, list_window, show, slot,
-    text, text_dyn, with_context,
+    Component, Element, FocusScope, IntoCaret, IntoElement, IntoInputValue, IntoSelection, Slot,
+    div, for_each, fragment, if_else, image, input, list_window, show, slot, text, text_dyn,
 };
 #[doc(hidden)]
 pub use element::{DivBuilder, ImageBuilder, InputBuilder, TextBuilder};

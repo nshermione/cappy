@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use crate::reactive::{Runtime, current_runtime, enter_runtime};
+use crate::reactive::{Runtime, runtime};
 
 pub(crate) type Hook = Box<dyn FnMut()>;
 
@@ -89,16 +89,14 @@ impl Runtime {
     }
 }
 
-/// Runs `hooks` while `runtime` is [`crate::Context::current`].
-pub(crate) fn run_hooks(runtime: &Rc<Runtime>, hooks: &mut [Hook]) {
+/// Runs `hooks` on the runtime [`crate::Application::new`] installed.
+pub(crate) fn run_hooks(hooks: &mut [Hook]) {
     if hooks.is_empty() {
         return;
     }
-    enter_runtime(runtime, || {
-        for hook in hooks {
-            hook();
-        }
-    });
+    for hook in hooks {
+        hook();
+    }
 }
 
 /// Registers `hook` to run before this component's nodes are mounted.
@@ -161,7 +159,7 @@ pub fn on_updated(hook: impl FnMut() + 'static) {
 }
 
 fn register(name: &'static str, hook: Hook, slot: fn(&mut HookFrame) -> &mut Vec<Hook>) {
-    let runtime = current_runtime();
+    let runtime = runtime();
     let mut frames = runtime.hook_frames.borrow_mut();
     let Some(frame) = frames.last_mut() else {
         panic!("{name} called outside a component render");

@@ -1,6 +1,6 @@
 use cappy_core::{
-    Application, Color, ColorToken, Component, Context, Element, FrameInput, HasContext, Radius,
-    Space, StyleRefinement, Theme, Ui, div, text, text_dyn,
+    Application, Color, ColorToken, Component, Context, Element, FrameInput, Radius, Space,
+    StyleRefinement, Theme, Ui, div, text, text_dyn,
 };
 use cappy_dsl::{element, style};
 
@@ -11,11 +11,14 @@ const VIEWPORT: FrameInput = FrameInput {
 };
 
 fn context() -> Context {
-    Application::new().context().clone()
+    {
+        Application::new();
+        Context::current()
+    }
 }
 
 fn mounted(context: &Context, tree: Element) -> Ui {
-    let mut ui = Ui::new(context, tree, Theme::light());
+    let mut ui = Ui::new(tree, Theme::light());
     ui.update(VIEWPORT);
     ui
 }
@@ -30,14 +33,12 @@ fn card() -> Element {
 
 #[derive(Clone)]
 struct Badge {
-    context: Context,
     label: String,
 }
 
 impl Badge {
-    fn open(context: &Context) -> Self {
+    fn open() -> Self {
         Self {
-            context: context.clone(),
             label: String::new(),
         }
     }
@@ -45,12 +46,6 @@ impl Badge {
     fn label(mut self, label: &str) -> Self {
         self.label = label.to_owned();
         self
-    }
-}
-
-impl HasContext for Badge {
-    fn context(&self) -> &Context {
-        &self.context
     }
 }
 
@@ -68,7 +63,7 @@ fn ui_builds_nested_nodes_with_attributes() {
     let cx = context();
     let ui = mounted(
         &cx,
-        element!((cx) {
+        element! {
             div(class = "app", key = "root") {
                 text("Title", class = "title", key = "title")
                 div(class = "row", key = "row") {
@@ -76,7 +71,7 @@ fn ui_builds_nested_nodes_with_attributes() {
                     text("b")
                 }
             }
-        }),
+        },
     );
     let root = ui.find_by_key("root").unwrap();
     assert_eq!(ui.node_children(root).len(), 2);
@@ -91,7 +86,7 @@ fn one_reactive_is_read_from_two_bindings_and_a_click() {
     let count = cx.reactive(0_i32);
     let mut ui = mounted(
         &cx,
-        element!((cx) {
+        element! {
             div {
                 text(:format!("{}", count.get()), key = "a")
                 text(:format!("{}", count.get()), key = "b")
@@ -99,7 +94,7 @@ fn one_reactive_is_read_from_two_bindings_and_a_click() {
                     text("+")
                 }
             }
-        }),
+        },
     );
     assert_eq!(text_of(&ui, "a").as_deref(), Some("0"));
     assert_eq!(text_of(&ui, "b").as_deref(), Some("0"));
@@ -116,11 +111,11 @@ fn closure_text_is_reactive() {
     let label = count.clone();
     let mut ui = mounted(
         &cx,
-        element!((cx) {
+        element! {
             div {
                 text(:format!("Count: {}", label.get()), key = "label")
             }
-        }),
+        },
     );
     count.set(2);
     ui.update(VIEWPORT);
@@ -135,7 +130,7 @@ fn colon_fields_rebind_classes_and_styles() {
     let active_style = active.clone();
     let mut ui = mounted(
         &cx,
-        element!((cx) {
+        element! {
             div {
                 div(
                     key = "chip",
@@ -144,7 +139,7 @@ fn colon_fields_rebind_classes_and_styles() {
                     :style = style! { width: if active_style.get() { 120 } else { 80 } },
                 )
             }
-        }),
+        },
     );
     let chip = ui.find_by_key("chip").unwrap();
     assert_eq!(ui.node_rect(chip).unwrap().width, 80.0);
@@ -168,25 +163,22 @@ fn assert_classes(element: &Element, expected: &str) {
 #[test]
 fn class_takes_one_value_without_brackets() {
     let cx = context();
-    assert_classes(&element!((cx) { div(class = "btn") }), r#"["btn"]"#);
-    assert_classes(
-        &element!((cx) { text("Title", class = "title") }),
-        r#"["title"]"#,
-    );
+    assert_classes(&element! { div(class = "btn") }, r#"["btn"]"#);
+    assert_classes(&element! { text("Title", class = "title") }, r#"["title"]"#);
 }
 
 #[test]
 fn class_list_adds_every_item() {
     let cx = context();
     assert_classes(
-        &element!((cx) { div(class = ["btn", "btn-primary large"]) }),
+        &element! { div(class = ["btn", "btn-primary large"]) },
         r#"["btn", "btn-primary", "large"]"#,
     );
     assert_classes(
-        &element!((cx) { div(class = ["card", String::from("raised")], class = "wide") }),
+        &element! { div(class = ["card", String::from("raised")], class = "wide") },
         r#"["card", "raised", "wide"]"#,
     );
-    assert_classes(&element!((cx) { div(class = []) }), "[]");
+    assert_classes(&element! { div(class = []) }, "[]");
 }
 
 #[test]
@@ -194,12 +186,12 @@ fn fields_after_a_class_list_still_apply() {
     let cx = context();
     let ui = mounted(
         &cx,
-        element!((cx) {
+        element! {
             div {
                 div(class = ["card"], key = "box")
                 text("Title", class = ["title", "muted",], key = "title")
             }
-        }),
+        },
     );
     assert!(ui.find_by_key("box").is_some());
     assert_eq!(text_of(&ui, "title").as_deref(), Some("Title"));
@@ -212,14 +204,14 @@ fn colon_class_list_rebinds_every_item() {
     let active_class = active.clone();
     let mut ui = mounted(
         &cx,
-        element!((cx) {
+        element! {
             div {
                 div(
                     key = "chip",
                     :class = ["btn", if active_class.get() { "btn-primary" } else { "" }],
                 )
             }
-        }),
+        },
     );
     let chip = ui.find_by_key("chip").unwrap();
     let idle_background = ui.node_style(chip).unwrap().visual.background;
@@ -236,9 +228,9 @@ fn colon_class_list_rebinds_every_item() {
 fn handlers_pass_through_as_attributes() {
     let cx = context();
     let clicked = cx.reactive(false);
-    let tree = element!((cx) {
+    let tree = element! {
         div(key = "button", on_click = move |_| clicked.set(true), style = style! { size: 40 })
-    });
+    };
     let ui = mounted(&cx, div().child(tree));
     assert!(ui.find_by_key("button").is_some());
 }
@@ -249,7 +241,7 @@ fn embedded_expressions_iterators_functions_and_components() {
     let cx = context();
     let ui = mounted(
         &cx,
-        element!((cx) {
+        element! {
             div(key = "root") {
                 { text("embedded") }
                 div(key = "list") {
@@ -258,7 +250,7 @@ fn embedded_expressions_iterators_functions_and_components() {
                 { card().key("card") }
                 Badge(label = "new")
             }
-        }),
+        },
     );
     let root = ui.find_by_key("root").unwrap();
     assert_eq!(ui.node_children(root).len(), 4);
@@ -273,17 +265,17 @@ fn embedded_expressions_iterators_functions_and_components() {
 fn component_root_keeps_host_attributes_and_appended_children() {
     let cx = context();
     assert_classes(
-        &element!((cx) { Badge(label = "new", class = ["wrap", "wide"]) }),
+        &element! { Badge(label = "new", class = ["wrap", "wide"]) },
         r#"["badge", "wrap", "wide"]"#,
     );
     let cx = context();
     let ui = mounted(
         &cx,
-        element!((cx) {
+        element! {
             Badge(label = "new", class = "wrap", key = "hosted") {
                 text("extra", key = "extra")
             }
-        }),
+        },
     );
     assert!(ui.find_by_key("badge").is_none());
     let hosted = ui.find_by_key("hosted").unwrap();
@@ -301,13 +293,13 @@ fn any_element_function_takes_content_fields_and_comma_separated_children() {
     let cx = context();
     let ui = mounted(
         &cx,
-        element!((cx) {
+        element! {
             div(key = "root") {
                 { label("hello").key("label") },
                 div,
                 { text("embedded") },
             }
-        }),
+        },
     );
     let root = ui.find_by_key("root").unwrap();
     assert_eq!(ui.node_children(root).len(), 3);
@@ -378,7 +370,7 @@ fn control_flow_macros_mount_show_if_and_for() {
     let items_source = items.clone();
     let mut ui = mounted(
         &cx,
-        element!((cx) {
+        element! {
             div(key = "root") {
                 show (:open_visible.get()) {
                     {{
@@ -405,7 +397,7 @@ fn control_flow_macros_mount_show_if_and_for() {
                     text(:item.with(|row| row.title.clone()), key = "row")
                 }
             }
-        }),
+        },
     );
     assert_eq!(text_of(&ui, "panel").as_deref(), Some("open true"));
     assert_eq!(text_of(&ui, "state").as_deref(), Some("no"));
@@ -433,21 +425,11 @@ fn control_flow_macros_mount_show_if_and_for() {
 }
 
 #[derive(Clone)]
-struct Mark {
-    context: Context,
-}
+struct Mark {}
 
 impl Mark {
-    fn open(context: &Context) -> Self {
-        Self {
-            context: context.clone(),
-        }
-    }
-}
-
-impl HasContext for Mark {
-    fn context(&self) -> &Context {
-        &self.context
+    fn open() -> Self {
+        Self {}
     }
 }
 
@@ -457,15 +439,14 @@ impl Component for Mark {
     }
 }
 
-fn marked(cx: &Context) -> Element {
-    let value = cx.reactive(String::from("helper"));
-    element!((cx) {
+fn marked() -> Element {
+    let value = Context::current().reactive(String::from("helper"));
+    element! {
         text(:value.get(), key = "helper")
-    })
+    }
 }
 
-/// `show` / `if` / `for` build elements later. `cx` is only borrowed for the call, and each block
-/// still receives it.
+/// `show` / `if` / `for` build elements later, on the runtime `Application::new` installed.
 #[test]
 fn deferred_blocks_receive_the_callers_context() {
     fn tree(context: &Context) -> Element {
@@ -473,7 +454,7 @@ fn deferred_blocks_receive_the_callers_context() {
         let first = context.reactive(false);
         let second = context.reactive(true);
         let rows = context.reactive(vec!["row".to_owned()]);
-        element!((context) {
+        element! {
             div(key = "root") {
                 show (:shown.get()) {
                     Mark(key = "mark-show")
@@ -489,14 +470,14 @@ fn deferred_blocks_receive_the_callers_context() {
                     Mark(key = "mark-else")
                 }
                 show (:shown.get()) {
-                    { marked(context) }
+                    { marked() }
                 }
                 for (item in :rows, key = item) {
                     Mark(key = "mark-row")
                     text(:item.get(), key = "row-text")
                 }
             }
-        })
+        }
     }
 
     let cx = context();

@@ -199,15 +199,17 @@ impl Ui {
     /// [`Context::apply_theme`](crate::Context::apply_theme) or [`Ui::set_theme`].
     ///
     /// The theme signal belongs to the context. Dropping this `Ui` does not dispose it.
-    pub fn new(context: &Context, root: impl IntoElement, theme: Theme) -> Self {
-        if !context.runtime.has_themes() {
+    pub fn new(root: impl IntoElement, theme: Theme) -> Self {
+        let context = Context::current();
+        let runtime = crate::reactive::runtime();
+        if !runtime.has_themes() {
             context.set_themes([theme]);
         }
         let theme_signal = context.current_theme().as_signal();
         let initial_theme = theme_signal.get_untracked();
         let board = Rc::new(GeometryBoard::default());
         // Mount evaluates bindings. They subscribe to geometry only while this board is current.
-        let _entered = context.runtime.enter_board(&board);
+        let _entered = runtime.enter_board(&board);
         let mut ui = Self {
             nodes: Vec::new(),
             free_nodes: Vec::new(),
@@ -219,7 +221,7 @@ impl Ui {
             free_components: Vec::new(),
             ticking: Vec::new(),
             root_component: None,
-            queue: Rc::new(BindingQueue::new(Rc::clone(&context.runtime))),
+            queue: Rc::new(BindingQueue::new(runtime)),
             theme_signal,
             theme: initial_theme,
             layout: LayoutTree::new(),
@@ -304,11 +306,6 @@ impl Ui {
     /// The context theme this UI follows. The signal stays alive after this `Ui` drops.
     pub fn theme_signal(&self) -> Signal<ThemeHandle> {
         self.theme_signal
-    }
-
-    /// True when `context` is the runtime this UI mounts signals into.
-    pub fn shares_context(&self, context: &Context) -> bool {
-        Rc::ptr_eq(&self.queue.runtime, &context.runtime)
     }
 
     pub fn set_theme(&mut self, theme: Theme) {
@@ -627,7 +624,7 @@ impl Ui {
 #[cfg_attr(feature = "cpu", allow(dead_code))]
 impl Context {
     fn queue_motion(&self, apply: impl FnOnce(&mut MotionCtx) + 'static) {
-        self.runtime.push_motion(Box::new(move |ui| {
+        crate::reactive::runtime().push_motion(Box::new(move |ui| {
             apply(&mut MotionCtx::new(ui));
         }));
     }

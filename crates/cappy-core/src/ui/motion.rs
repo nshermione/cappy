@@ -317,14 +317,13 @@ impl<'a> MotionCtx<'a> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct AnimHandle {
     id: u64,
-    runtime_index: u32,
 }
 
 impl AnimHandle {
     /// Stops this group on the next update. The value on screen stays put, and later sequence
     /// steps do not run. Safe to call where no [`Ui`] is in scope. A finished handle is ignored.
     pub fn stop(self) {
-        let runtime = crate::reactive::runtime_by_index(self.runtime_index);
+        let runtime = crate::reactive::runtime();
         runtime.push_motion(Box::new(move |ui| ui.stop(self)));
     }
 }
@@ -641,10 +640,7 @@ impl Ui {
             id,
             active: Active::from_clip(anim.clip),
         });
-        AnimHandle {
-            id,
-            runtime_index: crate::reactive::register_runtime(&self.queue.runtime),
-        }
+        AnimHandle { id }
     }
 
     /// Drops the group and the tweens it still owns. The value on screen stays put.

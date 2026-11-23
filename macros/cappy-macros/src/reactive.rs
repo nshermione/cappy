@@ -40,7 +40,7 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     });
     let field_inits = fields.iter().map(|field| {
         let field_name = field.ident.as_ref().expect("named field");
-        quote!(#field_name: cx.reactive(#field_name))
+        quote!(#field_name: ::cappy::IntoReactive::into_reactive(#field_name))
     });
     let tracked = tracked_impls(name, &generics, &copy_types);
     let marker = singleton_marker(vis, name, &generics);
@@ -54,7 +54,7 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         }
 
         impl #impl_generics #name #type_generics #where_clause {
-            pub fn new(cx: &::cappy::Context, #(#field_args),*) -> Self {
+            pub fn new(#(#field_args),*) -> Self {
                 Self {
                     #(#field_inits,)*
                 }
@@ -102,18 +102,18 @@ fn singleton_impl(name: &Ident, generics: &Generics, fields: &[&Field]) -> Token
     let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
     let inits = fields.iter().map(|field| {
         let ty = &field.ty;
-        quote!(<#ty as ::cappy::FieldInit>::field_init(cx))
+        quote!(<#ty as ::cappy::FieldInit>::field_init())
     });
     quote! {
         impl #impl_generics ::cappy::FieldInit for #name #type_generics #where_clause {
-            fn field_init(cx: &::cappy::Context) -> Self {
-                Self::new(cx, #(#inits),*)
+            fn field_init() -> Self {
+                Self::new(#(#inits),*)
             }
         }
 
         impl #impl_generics ::cappy::Singleton for #name #type_generics #where_clause {
-            fn create(cx: &::cappy::Context) -> Self {
-                <Self as ::cappy::FieldInit>::field_init(cx)
+            fn create() -> Self {
+                <Self as ::cappy::FieldInit>::field_init()
             }
         }
     }
@@ -158,7 +158,7 @@ pub(crate) fn tracked_impls(
         impl #impl_generics ::cappy::IntoReactive for #name #type_generics #where_clause {
             type Output = Self;
 
-            fn into_reactive(self, _context: &::cappy::Context) -> Self::Output {
+            fn into_reactive(self) -> Self::Output {
                 self
             }
         }

@@ -11,19 +11,12 @@ enum Class {
 /// A labelled card.
 #[derive(Clone, Props)]
 struct InfoCard {
-    context: Context,
     /// Shown in bold at the top.
     title: String,
     subtitle: Option<String>,
     #[props(skip)]
     #[allow(dead_code)]
     internal_counter: u32,
-}
-
-impl HasContext for InfoCard {
-    fn context(&self) -> &Context {
-        &self.context
-    }
 }
 
 impl Component for InfoCard {
@@ -39,9 +32,8 @@ impl Component for InfoCard {
     }
 }
 
-fn info_card(context: &Context) -> InfoCard {
+fn info_card() -> InfoCard {
     InfoCard {
-        context: context.clone(),
         title: String::new(),
         subtitle: None,
         internal_counter: 0,
@@ -55,9 +47,7 @@ struct Generic<T: Clone> {
 
 #[test]
 fn props_setters_accept_conversions_and_wrap_options() {
-    let card = info_card(&Application::new().context().clone())
-        .title("Hello")
-        .subtitle("world");
+    let card = info_card().title("Hello").subtitle("world");
     assert_eq!(card.title, "Hello");
     assert_eq!(card.subtitle.as_deref(), Some("world"));
 }
@@ -70,10 +60,12 @@ fn props_work_with_generic_structs() {
 
 #[test]
 fn derived_component_mounts_with_typed_classes() {
-    let context = Application::new().context().clone();
+    let context = {
+        Application::new();
+        Context::current()
+    };
     let mut ui = Ui::new(
-        &context,
-        div().child(info_card(&context).title("Hello").subtitle("world")),
+        div().child(info_card().title("Hello").subtitle("world")),
         Theme::light(),
     );
     ui.update(FrameInput::new(320, 240, 1.0));
@@ -116,8 +108,11 @@ struct Row {
 
 #[test]
 fn nested_reactive_fields_are_independent() {
-    let context = Application::new().context().clone();
-    let state = AppState::new(&context, CounterState::new(&context, 1), "a".into());
+    let context = {
+        Application::new();
+        Context::current()
+    };
+    let state = AppState::new(CounterState::new(1), "a".into());
     state.counter.count.set(2);
     assert_eq!(state.counter.count.get(), 2);
     assert_eq!(state.name.get(), "a");
@@ -131,9 +126,12 @@ fn nested_reactive_fields_are_independent() {
 
 #[test]
 fn already_reactive_field_keeps_its_handle() {
-    let context = Application::new().context().clone();
+    let context = {
+        Application::new();
+        Context::current()
+    };
     let label = context.reactive(String::from("hi"));
-    let row = Row::new(&context, 1, label.clone());
+    let row = Row::new(1, label.clone());
     assert_eq!(row.label, label);
     label.set(String::from("yo"));
     assert_eq!(row.label.get(), "yo");
@@ -146,12 +144,11 @@ struct Badge {
 
 impl Component for Badge {
     fn render(&self) -> Element {
-        let cx = Context::current();
-        element!((cx) {
+        element! {
             div(class = "badge", key = "badge") {
                 text(:format!("{}", self.label))
             }
-        })
+        }
     }
 }
 
@@ -172,7 +169,10 @@ struct Pair<T> {
 
 #[test]
 fn singleton_is_shared_and_new_is_separate() {
-    let context = Application::new().context().clone();
+    let context = {
+        Application::new();
+        Context::current()
+    };
     let shared = context.use_store(SharedCount);
     shared.count.set(0);
     let again = context.use_store(SharedCount);
@@ -189,7 +189,7 @@ fn singleton_is_shared_and_new_is_separate() {
     let name = context.use_store(SharedName);
     name.name.set(String::from("a"));
     assert_eq!(context.use_store(SharedName).name.get(), "a");
-    assert_eq!(SharedName::new(&context, String::from("b")).name.get(), "b");
+    assert_eq!(SharedName::new(String::from("b")).name.get(), "b");
     assert_eq!(shared.count.get(), 4);
     shared.count.set(0);
 
@@ -197,7 +197,7 @@ fn singleton_is_shared_and_new_is_separate() {
     ints.value.set(3);
     assert_eq!(context.use_store(Pair::<i64>()).value.get(), 3);
     assert!(!context.use_store(Pair::<bool>()).value.get());
-    assert_eq!(Pair::new(&context, 9_i64).value.get(), 9);
+    assert_eq!(Pair::new(9_i64).value.get(), 9);
     assert_eq!(ints.value.get(), 3);
     ints.value.set(0);
 }
@@ -220,7 +220,10 @@ struct Screen {
 
 #[test]
 fn derive_reactive_wraps_a_plain_value() {
-    let context = Application::new().context().clone();
+    let context = {
+        Application::new();
+        Context::current()
+    };
     let label = context.reactive(Label(String::from("a")));
     assert_eq!(label.get(), Label(String::from("a")));
     label.set(Label(String::from("b")));
@@ -234,9 +237,12 @@ fn derive_reactive_wraps_a_plain_value() {
 
 #[test]
 fn reactive_component_label_updates_after_mount() {
-    let context = Application::new().context().clone();
-    let badge = Badge::new(&context, String::from("new"));
-    let mut ui = Ui::new(&context, badge.clone(), Theme::light());
+    let context = {
+        Application::new();
+        Context::current()
+    };
+    let badge = Badge::new(String::from("new"));
+    let mut ui = Ui::new(badge.clone(), Theme::light());
     let viewport = FrameInput::new(320, 240, 1.0);
     ui.update(viewport);
     let node = ui.find_by_key("badge").unwrap();

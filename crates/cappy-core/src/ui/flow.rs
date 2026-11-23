@@ -247,7 +247,7 @@ impl Ui {
     }
 
     fn fire_hooks(&self, hooks: &mut [crate::lifecycle::Hook]) {
-        run_hooks(&self.queue.runtime, hooks);
+        run_hooks(hooks);
     }
 
     fn insert_component(&mut self, hooks: Lifecycle, parts: Vec<ChildPart>) -> ComponentId {
@@ -1152,7 +1152,7 @@ where
 {
     let guard = enter_owner(&ui.queue.runtime);
     let owner = guard.id();
-    let signal = Signal::create(&ui.queue.runtime, value, false);
+    let signal = Signal::create(value, false);
     let element = view(signal.clone());
     drop(guard);
     let parts = ui.adopt(parent, element, suppressed);

@@ -2,8 +2,9 @@
 //!
 //! A [`Signal`] is a [`Copy`] handle to a value stored in a [`crate::Context`] runtime. Reading a
 //! signal inside a tracked scope subscribes that scope; writing the signal queues every subscriber
-//! so the UI re-evaluates only the bindings that depend on it. The handle stores the runtime's
-//! index, not an [`Rc`](std::rc::Rc), so copying it does not clone anything.
+//! so the UI re-evaluates only the bindings that depend on it. The handle stores the slot, not an
+//! [`Rc`](std::rc::Rc), so copying it does not clone anything. The value lives in the thread's
+//! runtime.
 //!
 //! [`Context::reactive`] turns a primitive into a [`Reactive`] handle. `#[store]` on a struct keeps the
 //! struct's name and tracks each field. A value that is already reactive is returned as itself.
@@ -262,8 +263,6 @@ pub(crate) type MotionJob = Box<dyn FnOnce(&mut crate::ui::Ui)>;
 
 #[derive(Default)]
 pub(crate) struct Runtime {
-    /// Slot in [`RUNTIMES`]. `None` until the first signal is created in this runtime.
-    registry_index: Cell<Option<u32>>,
     slots: RefCell<Vec<Option<SignalSlot>>>,
     free_slots: RefCell<Vec<u32>>,
     next_generation: RefCell<u32>,
@@ -640,8 +639,8 @@ impl Runtime {
             catalog_signal.set(catalog);
             active.set(selected);
         } else {
-            let active = Signal::create(runtime, selected, false);
-            let catalog = Signal::create(runtime, catalog, false);
+            let active = Signal::create(selected, false);
+            let catalog = Signal::create(catalog, false);
             *runtime.themes.borrow_mut() = Some(ThemeSlot { catalog, active });
         }
     }
@@ -767,83 +766,53 @@ pub(crate) fn track<R>(observer: Observer, scope: impl FnOnce() -> R) -> R {
 }
 
 thread_local! {
-    /// Runtimes created on this thread. A `static` cannot hold them: [`Runtime`] contains
-    /// [`RefCell`]s and the handle would need [`Rc`], which is not [`Send`](std::marker::Send).
+    /// The runtime [`crate::Application::new`] installed on this thread.
     ///
-    /// The slot stays for the life of the thread. Reusing an index would make an old copied
-    /// handle point at a new runtime. [`Context`] also keeps its own [`Rc`], so dropping a
-    /// context does not free the runtime while this list still holds it.
-    static RUNTIMES: RefCell<Vec<Rc<Runtime>>> = RefCell::new(Vec::new());
-
-    /// Indexes into `RUNTIMES` for the contexts `Context::enter` is inside.
-    /// The last index is `Context::current`. Nested enters push and pop.
-    static CURRENT: RefCell<Vec<u32>> = RefCell::new(Vec::new());
+    /// A `static` cannot hold it: [`Runtime`] contains [`RefCell`]s, and the handle is an [`Rc`],
+    /// which is not [`Send`](std::marker::Send). The next [`install_runtime`] replaces this slot.
+    /// Signals created before that replacement read this new runtime and must not be used.
+    static RUNTIME: RefCell<Option<Rc<Runtime>>> = const { RefCell::new(None) };
 }
 
-/// Records `runtime` the first time a signal is created in it and returns its index.
-pub(crate) fn register_runtime(runtime: &Rc<Runtime>) -> u32 {
-    if let Some(index) = runtime.registry_index.get() {
-        return index;
+/// Replaces this thread's runtime with a new one.
+pub(crate) fn install_runtime() {
+    RUNTIME.with(|slot| {
+        *slot.borrow_mut() = Some(Rc::new(Runtime::default()));
+    });
+}
+
+/// Installs a runtime when this thread does not have one yet.
+#[cfg(test)]
+pub(crate) fn ensure_runtime() {
+    let missing = RUNTIME.with(|slot| slot.borrow().is_none());
+    if missing {
+        install_runtime();
     }
-    RUNTIMES.with(|runtimes| {
-        let mut runtimes = runtimes.borrow_mut();
-        if let Some(index) = runtime.registry_index.get() {
-            return index;
-        }
-        let index = u32::try_from(runtimes.len()).expect("too many runtimes");
-        runtimes.push(Rc::clone(runtime));
-        runtime.registry_index.set(Some(index));
-        index
+}
+
+/// The runtime installed by [`install_runtime`].
+///
+/// # Panics
+/// Panics when [`crate::Application::new`] has not run on this thread.
+pub(crate) fn runtime() -> Rc<Runtime> {
+    RUNTIME.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .cloned()
+            .expect("Context::current called before Application::new")
     })
 }
 
-pub(crate) fn runtime_by_index(index: u32) -> Rc<Runtime> {
-    RUNTIMES.with(|runtimes| Rc::clone(runtimes.borrow().get(index as usize).expect(DEAD_SIGNAL)))
-}
-
-struct PopCurrent;
-
-impl Drop for PopCurrent {
-    fn drop(&mut self) {
-        CURRENT.with(|stack| {
-            stack.borrow_mut().pop();
-        });
-    }
-}
-
-/// Pushes `runtime`'s registry index for the duration of `body`.
-pub(crate) fn enter_runtime<R>(runtime: &Rc<Runtime>, body: impl FnOnce() -> R) -> R {
-    let index = register_runtime(runtime);
-    CURRENT.with(|stack| stack.borrow_mut().push(index));
-    let _pop = PopCurrent;
-    body()
-}
-
-/// The runtime whose index is on top of the enter stack.
+/// A reactive value. Copying copies the slot; every copy refers to the same value.
 ///
-/// # Panics
-/// Panics when the stack is empty.
-pub(crate) fn current_runtime() -> Rc<Runtime> {
-    let index = CURRENT.with(|stack| {
-        stack
-            .borrow()
-            .last()
-            .copied()
-            .expect("Context::current called outside Context::enter")
-    });
-    runtime_by_index(index)
-}
-
-/// A reactive value. Copying copies its runtime index; every copy refers to the same value.
-///
-/// The value lives until [`Signal::dispose`]. The runtime stays in the thread registry, so a
-/// copy remains usable after the [`crate::Context`] that created it is dropped.
+/// The value lives until [`Signal::dispose`]. It belongs to the runtime
+/// [`crate::Application::new`] installed on this thread. A later `Application::new` replaces that
+/// runtime, and this handle must not be used after that.
 pub struct Signal<T: 'static> {
-    runtime_index: u32,
     index: u32,
     generation: u32,
     _value: PhantomData<fn() -> T>,
-    /// `Rc` used to make this `!Send`. The registry is thread-local, so a handle must stay that way.
+    /// Makes this `!Send`. The runtime is thread-local, so a handle must stay on that thread.
     _thread: PhantomData<*const ()>,
 }
 
@@ -857,9 +826,7 @@ impl<T: 'static> Clone for Signal<T> {
 
 impl<T: 'static> PartialEq for Signal<T> {
     fn eq(&self, other: &Self) -> bool {
-        self.runtime_index == other.runtime_index
-            && self.index == other.index
-            && self.generation == other.generation
+        self.index == other.index && self.generation == other.generation
     }
 }
 
@@ -876,15 +843,14 @@ impl<T: 'static> fmt::Debug for Signal<T> {
 
 impl<T: 'static> Signal<T> {
     fn runtime(&self) -> Rc<Runtime> {
-        runtime_by_index(self.runtime_index)
+        runtime()
     }
 
-    pub(crate) fn create(runtime: &Rc<Runtime>, value: T, ephemeral: bool) -> Self {
-        let runtime_index = register_runtime(runtime);
+    pub(crate) fn create(value: T, ephemeral: bool) -> Self {
+        let runtime = runtime();
         let (index, generation) = runtime.create(Box::new(value), ephemeral);
         runtime.record_signal(index, generation);
         Self {
-            runtime_index,
             index,
             generation,
             _value: PhantomData,
@@ -960,8 +926,8 @@ impl<T: Clone + 'static> Signal<T> {
 ///
 /// Built by [`Context::reactive`]. Formatting and `==` against the inner value read it. [`Reactive::set`]
 /// and [`Reactive::update`] write it. The handle does not implement [`Deref`](std::ops::Deref):
-/// the value lives in the context runtime, not inside the handle. Copying copies the runtime
-/// index, the same way [`Signal`] does.
+/// the value lives in the thread runtime, not inside the handle. Copying copies the slot, the
+/// same way [`Signal`] does.
 pub struct Reactive<T: 'static> {
     inner: Signal<T>,
 }
@@ -1004,11 +970,11 @@ impl<T: PartialEq + 'static> PartialEq<T> for Reactive<T> {
 }
 
 impl<T: 'static> Reactive<T> {
-    /// Tracks `value` in `context`. [`IntoReactive`] for a plain type returns this.
+    /// Tracks `value` in the current runtime. [`IntoReactive`] for a plain type returns this.
     #[must_use]
-    pub fn new(context: &crate::Context, value: T) -> Self {
+    pub fn new(value: T) -> Self {
         Self {
-            inner: Signal::create(&context.runtime, value, false),
+            inner: Signal::create(value, false),
         }
     }
 
@@ -1023,9 +989,9 @@ impl<T: 'static> Reactive<T> {
     /// A component prop default. The setter disposes this signal when another handle replaces it.
     /// [`ByValue`](crate::ByValue) keeps the signal and clears that mark.
     #[must_use]
-    pub(crate) fn placeholder(runtime: &Rc<Runtime>, value: T) -> Self {
+    pub(crate) fn placeholder(value: T) -> Self {
         Self {
-            inner: Signal::create(runtime, value, true),
+            inner: Signal::create(value, true),
         }
     }
 
@@ -1077,15 +1043,15 @@ pub trait IntoReactive {
     type Output;
 
     /// Converts this value into its tracked form.
-    fn into_reactive(self, context: &crate::Context) -> Self::Output;
+    fn into_reactive(self) -> Self::Output;
 
     /// Prop default. Primitives, [`String`] and [`Option`] allocate a placeholder the setter can
     /// dispose when it switches the prop to another handle. Other values use [`into_reactive`](Self::into_reactive).
-    fn into_prop_default(self, context: &crate::Context) -> Self::Output
+    fn into_prop_default(self) -> Self::Output
     where
         Self: Sized,
     {
-        self.into_reactive(context)
+        self.into_reactive()
     }
 }
 
@@ -1103,7 +1069,8 @@ impl<T: 'static> RetirePlaceholder for Reactive<T> {
 impl crate::Context {
     /// Allocates one runtime slot. Application code calls [`Context::reactive`].
     pub(crate) fn signal<T: 'static>(&self, value: T) -> Signal<T> {
-        Signal::create(&self.runtime, value, false)
+        let _ = self;
+        Signal::create(value, false)
     }
 
     /// Tracks `value` in this context.
@@ -1113,14 +1080,14 @@ impl crate::Context {
     /// [`Reactive`] and [`Signal`] become a [`Reactive`] handle without wrapping them again.
     /// Another plain type does the same through `#[derive(Reactive)]`.
     pub fn reactive<T: IntoReactive>(&self, value: T) -> T::Output {
-        value.into_reactive(self)
+        value.into_reactive()
     }
 
     /// Returns the one `T` stored for this context, creating it on the first call.
     ///
     /// Pass the marker `#[store]` emits under the struct's name: `cx.use_store(Counter)`.
     pub fn use_store<T: crate::Singleton>(&self, _of: crate::SingletonOf<T>) -> T {
-        self.runtime.singleton(|| T::create(self))
+        runtime().singleton(T::create)
     }
 
     /// Builds a new `T` in this context. Each call is a separate value.
@@ -1130,7 +1097,7 @@ impl crate::Context {
     /// singleton. [`Context::reactive`] does the same kind of step for a `#[derive(Reactive)]`
     /// value: the caller names the value, and the context allocates the handle.
     pub fn use_local_store<T: crate::Singleton>(&self, _of: crate::SingletonOf<T>) -> T {
-        T::create(self)
+        T::create()
     }
 
     /// Replaces the themes this context can [`apply_theme`](Self::apply_theme).
@@ -1141,7 +1108,7 @@ impl crate::Context {
     /// # Panics
     /// Panics when `themes` is empty or two themes share a name.
     pub fn set_themes(&self, themes: impl IntoIterator<Item = Theme>) {
-        Runtime::set_themes(&self.runtime, themes.into_iter().collect());
+        Runtime::set_themes(&runtime(), themes.into_iter().collect());
     }
 
     /// Makes the theme named `name` active. Every [`Ui`](crate::Ui) on this context restyles.
@@ -1152,7 +1119,7 @@ impl crate::Context {
     /// # Panics
     /// Panics when no themes have been set, or when `name` is not in the catalog.
     pub fn apply_theme(&self, name: impl AsRef<str>) {
-        self.runtime.apply_theme(name.as_ref());
+        runtime().apply_theme(name.as_ref());
     }
 
     /// The themes registered with [`set_themes`](Self::set_themes).
@@ -1163,7 +1130,7 @@ impl crate::Context {
     /// # Panics
     /// Panics when no themes have been set.
     pub fn themes(&self) -> Themes {
-        self.runtime.themes()
+        runtime().themes()
     }
 
     /// The active theme. Every call returns a handle to the same signal.
@@ -1172,7 +1139,7 @@ impl crate::Context {
     /// Panics when no themes have been set.
     pub fn current_theme(&self) -> Reactive<ThemeHandle> {
         Reactive {
-            inner: self.runtime.theme_signal(),
+            inner: runtime().theme_signal(),
         }
     }
 }
@@ -1183,14 +1150,14 @@ macro_rules! primitive_reactive {
             impl IntoReactive for $ty {
                 type Output = Reactive<$ty>;
 
-                fn into_reactive(self, context: &crate::Context) -> Self::Output {
+                fn into_reactive(self) -> Self::Output {
                     Reactive {
-                        inner: context.signal(self),
+                        inner: crate::Context::current().signal(self),
                     }
                 }
 
-                fn into_prop_default(self, context: &crate::Context) -> Self::Output {
-                    Reactive::placeholder(&context.runtime, self)
+                fn into_prop_default(self) -> Self::Output {
+                    Reactive::placeholder(self)
                 }
             }
         )*
@@ -1204,23 +1171,23 @@ primitive_reactive!(
 impl IntoReactive for String {
     type Output = Reactive<String>;
 
-    fn into_reactive(self, context: &crate::Context) -> Self::Output {
+    fn into_reactive(self) -> Self::Output {
         Reactive {
-            inner: context.signal(self),
+            inner: crate::Context::current().signal(self),
         }
     }
 
-    fn into_prop_default(self, context: &crate::Context) -> Self::Output {
-        Reactive::placeholder(&context.runtime, self)
+    fn into_prop_default(self) -> Self::Output {
+        Reactive::placeholder(self)
     }
 }
 
 impl<T: 'static> IntoReactive for Vec<T> {
     type Output = Reactive<Vec<T>>;
 
-    fn into_reactive(self, context: &crate::Context) -> Self::Output {
+    fn into_reactive(self) -> Self::Output {
         Reactive {
-            inner: context.signal(self),
+            inner: crate::Context::current().signal(self),
         }
     }
 }
@@ -1228,21 +1195,21 @@ impl<T: 'static> IntoReactive for Vec<T> {
 impl<T: 'static> IntoReactive for Option<T> {
     type Output = Reactive<Option<T>>;
 
-    fn into_reactive(self, context: &crate::Context) -> Self::Output {
+    fn into_reactive(self) -> Self::Output {
         Reactive {
-            inner: context.signal(self),
+            inner: crate::Context::current().signal(self),
         }
     }
 
-    fn into_prop_default(self, context: &crate::Context) -> Self::Output {
-        Reactive::placeholder(&context.runtime, self)
+    fn into_prop_default(self) -> Self::Output {
+        Reactive::placeholder(self)
     }
 }
 
 impl<T: 'static> IntoReactive for Reactive<T> {
     type Output = Self;
 
-    fn into_reactive(self, _context: &crate::Context) -> Self::Output {
+    fn into_reactive(self) -> Self::Output {
         self
     }
 }
@@ -1251,23 +1218,23 @@ impl<T> crate::FieldInit for Reactive<T>
 where
     T: Default + IntoReactive<Output = Reactive<T>> + 'static,
 {
-    fn field_init(cx: &crate::Context) -> Self {
-        T::default().into_reactive(cx)
+    fn field_init() -> Self {
+        T::default().into_reactive()
     }
 }
 
 impl<T: 'static> IntoReactive for std::sync::Arc<T> {
     type Output = Reactive<std::sync::Arc<T>>;
 
-    fn into_reactive(self, context: &crate::Context) -> Self::Output {
-        Reactive::new(context, self)
+    fn into_reactive(self) -> Self::Output {
+        Reactive::new(self)
     }
 }
 
 impl<T: 'static> IntoReactive for Signal<T> {
     type Output = Reactive<T>;
 
-    fn into_reactive(self, _context: &crate::Context) -> Self::Output {
+    fn into_reactive(self) -> Self::Output {
         Reactive { inner: self }
     }
 }
@@ -1377,12 +1344,13 @@ mod tests {
     use std::cell::Cell;
 
     fn context() -> crate::Context {
-        crate::Application::new().context().clone()
+        crate::Application::new();
+        crate::Context::current()
     }
 
     fn session() -> (crate::Context, Rc<BindingQueue>) {
         let context = context();
-        let queue = Rc::new(BindingQueue::new(Rc::clone(&context.runtime)));
+        let queue = Rc::new(BindingQueue::new(runtime()));
         (context, queue)
     }
 
@@ -1400,20 +1368,6 @@ mod tests {
         let copy = name;
         copy.update(|value| value.push('b'));
         assert_eq!(name.get(), "ab");
-    }
-
-    #[test]
-    fn each_context_is_registered_once() {
-        let first_context = context();
-        let first = first_context.signal(1);
-        let second = first_context.signal(2);
-        assert_eq!(first.runtime_index, second.runtime_index);
-
-        let other = context().signal(1);
-        assert_ne!(first.runtime_index, other.runtime_index);
-        first.set(3);
-        assert_eq!(second.get(), 2);
-        assert_eq!(other.get(), 1);
     }
 
     #[test]
@@ -1475,7 +1429,7 @@ mod tests {
         let (context, _) = session();
         let count = context.signal(0);
         {
-            let queue = Rc::new(BindingQueue::new(Rc::clone(&context.runtime)));
+            let queue = Rc::new(BindingQueue::new(runtime()));
             track(Observer::new(&queue, BindingId::from_index(1)), || {
                 count.get()
             });
@@ -1525,19 +1479,19 @@ mod tests {
     #[test]
     fn owner_disposes_only_signals_created_inside_it() {
         let context = context();
-        let before = live_signal_count(&context.runtime);
+        let before = live_signal_count(&runtime());
         let outer = context.signal(1);
-        let guard = enter_owner(&context.runtime);
+        let guard = enter_owner(&runtime());
         let inner = context.signal(2);
         let owner = guard.id();
         drop(guard);
         assert!(signal_is_alive(&inner));
-        dispose_owner(&context.runtime, owner);
-        dispose_owner(&context.runtime, owner);
+        dispose_owner(&runtime(), owner);
+        dispose_owner(&runtime(), owner);
         assert!(!signal_is_alive(&inner));
         assert!(signal_is_alive(&outer));
         assert_eq!(outer.get(), 1);
-        assert_eq!(live_signal_count(&context.runtime), before + 1);
+        assert_eq!(live_signal_count(&runtime()), before + 1);
     }
 
     #[test]
@@ -1620,7 +1574,7 @@ mod tests {
         let (context, _) = session();
         let watched = context.signal(0);
         {
-            let binding_queue = Rc::new(BindingQueue::new(Rc::clone(&context.runtime)));
+            let binding_queue = Rc::new(BindingQueue::new(runtime()));
             track(
                 Observer::new(&binding_queue, BindingId::from_index(7)),
                 || watched.get(),
@@ -1633,15 +1587,15 @@ mod tests {
     #[test]
     fn placeholder_replaced_by_a_handle_returns_its_slot() {
         let context = context();
-        let before = live_signal_count(&context.runtime);
-        let mut slot = Reactive::placeholder(&context.runtime, String::new());
+        let before = live_signal_count(&runtime());
+        let mut slot = Reactive::placeholder(String::new());
         let placeholder = slot.inner.clone();
         let parent = context.reactive(String::from("parent"));
         apply_prop(&mut slot, parent.clone());
         assert_eq!(slot, parent);
         assert!(!signal_is_alive(&placeholder));
         assert!(signal_is_alive(&parent.inner));
-        assert_eq!(live_signal_count(&context.runtime), before + 1);
+        assert_eq!(live_signal_count(&runtime()), before + 1);
 
         let reused = context.signal(String::from("next"));
         assert_eq!(reused.index, placeholder.index);
@@ -1651,7 +1605,7 @@ mod tests {
     #[test]
     fn by_value_keeps_the_placeholder_slot() {
         let context = context();
-        let mut slot = Reactive::placeholder(&context.runtime, String::new());
+        let mut slot = Reactive::placeholder(String::new());
         let placeholder = slot.inner.clone();
         apply_prop(&mut slot, "once");
         assert_eq!(slot.get(), "once");
@@ -1670,11 +1624,11 @@ mod tests {
         let value = context.signal(1);
         let again = value.clone();
         let probe = value.clone();
-        let before = live_signal_count(&context.runtime);
+        let before = live_signal_count(&runtime());
         value.dispose();
         again.dispose();
         assert!(!signal_is_alive(&probe));
-        assert_eq!(live_signal_count(&context.runtime), before - 1);
+        assert_eq!(live_signal_count(&runtime()), before - 1);
     }
 
     #[test]
@@ -1682,16 +1636,16 @@ mod tests {
         use crate::{Theme, Ui, div};
 
         let context = context();
-        let before = live_signal_count(&context.runtime);
+        let before = live_signal_count(&runtime());
         let theme = {
-            let ui = Ui::new(&context, div(), Theme::light());
+            let ui = Ui::new(div(), Theme::light());
             let theme = ui.theme_signal();
             assert!(signal_is_alive(&theme));
-            assert_eq!(live_signal_count(&context.runtime), before + 2);
+            assert_eq!(live_signal_count(&runtime()), before + 2);
             theme
         };
         assert!(signal_is_alive(&theme));
-        assert_eq!(live_signal_count(&context.runtime), before + 2);
+        assert_eq!(live_signal_count(&runtime()), before + 2);
         assert_eq!(context.current_theme().as_signal(), theme);
     }
 
@@ -1702,10 +1656,10 @@ mod tests {
         let context = context();
         context.set_themes([Theme::light(), Theme::dark()]);
         let theme = context.current_theme();
-        let before = live_signal_count(&context.runtime);
-        drop(Ui::new(&context, div(), Theme::light()));
+        let before = live_signal_count(&runtime());
+        drop(Ui::new(div(), Theme::light()));
         assert!(signal_is_alive(&theme.as_signal()));
-        assert_eq!(live_signal_count(&context.runtime), before);
+        assert_eq!(live_signal_count(&runtime()), before);
         context.apply_theme("dark");
         assert_eq!(theme.with(|current| current.name().to_owned()), "dark");
     }
@@ -1732,7 +1686,6 @@ mod tests {
         let count = context.reactive(1_i64);
         let label_count = count.clone();
         let mut ui = Ui::new(
-            &context,
             div().child(text_dyn(move || format!("{label_count}")).key("label")),
             Theme::light(),
         );

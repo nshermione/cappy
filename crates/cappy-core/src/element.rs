@@ -393,19 +393,6 @@ pub fn show(when: impl Fn() -> bool + 'static, view: impl Fn() -> Element + 'sta
     Element::new(ElementContent::Flow(crate::ui::flow::show_spec(when, view)))
 }
 
-/// Gives `view` the caller's [`Context`](crate::Context) without the `'static` closure borrowing it.
-///
-/// `element!` uses this for `show` and `if`. The closure receives `&Context` when it runs, and that
-/// call also enters the context so [`Context::current`](crate::Context::current) resolves to it.
-#[doc(hidden)]
-pub fn with_context(
-    context: &crate::Context,
-    view: impl Fn(&crate::Context) -> Element + 'static,
-) -> impl Fn() -> Element + 'static {
-    let context = context.clone();
-    move || context.enter(|| view(&context))
-}
-
 /// Keeps the branch `when` selects and disposes the other one, including every nested `show`,
 /// `for_each` and `if_else`. Coming back mounts that branch again.
 ///
@@ -950,11 +937,7 @@ impl fmt::Debug for Element {
 /// [`stylesheet`](Component::stylesheet) is stamped onto every node `render` returns that does not
 /// already carry a sheet. It is not registered on the theme. A class the sheet does not define
 /// still resolves against the theme. `None` is not stamped.
-pub trait HasContext {
-    fn context(&self) -> &crate::Context;
-}
-
-pub trait Component: HasContext + Clone {
+pub trait Component: Clone {
     fn render(&self) -> Element;
 
     fn stylesheet() -> Option<Arc<Stylesheet>> {
@@ -979,21 +962,18 @@ impl IntoElement for Element {
 
 impl<C: Component + 'static> IntoElement for C {
     fn into_element(self) -> Element {
-        let context = self.context().clone();
-        context.enter(|| {
-            context.with(&self, || {
-                let guard = context.runtime.begin_hooks();
-                let mut element = self.render();
-                if let Some(mut hooks) = guard.finish() {
-                    hooks.inner = element.lifecycle.take().map(Box::new);
-                    element.lifecycle = Some(hooks);
-                }
-                element.slot_owner = COMPONENT_SLOT_OWNER;
-                if let Some(sheet) = C::stylesheet() {
-                    stamp_stylesheet(&mut element, &sheet);
-                }
-                element
-            })
+        crate::Context::current().with(&self, || {
+            let guard = crate::reactive::runtime().begin_hooks();
+            let mut element = self.render();
+            if let Some(mut hooks) = guard.finish() {
+                hooks.inner = element.lifecycle.take().map(Box::new);
+                element.lifecycle = Some(hooks);
+            }
+            element.slot_owner = COMPONENT_SLOT_OWNER;
+            if let Some(sheet) = C::stylesheet() {
+                stamp_stylesheet(&mut element, &sheet);
+            }
+            element
         })
     }
 }
@@ -1014,7 +994,7 @@ pub struct DivBuilder {
 
 impl DivBuilder {
     #[must_use]
-    pub fn open(_cx: &crate::Context) -> Self {
+    pub fn open() -> Self {
         Self {
             on_click: None,
             on_hover: None,
@@ -1105,7 +1085,7 @@ pub struct TextBuilder<T> {
 
 impl TextBuilder<()> {
     #[must_use]
-    pub fn open(_cx: &crate::Context) -> Self {
+    pub fn open() -> Self {
         Self { content: () }
     }
 }
@@ -1140,7 +1120,7 @@ pub struct ImageBuilder<T> {
 
 impl ImageBuilder<()> {
     #[must_use]
-    pub fn open(_cx: &crate::Context) -> Self {
+    pub fn open() -> Self {
         Self {
             content: (),
             fit: ObjectFit::Fill,
@@ -1185,7 +1165,7 @@ pub struct InputBuilder<T> {
 
 impl InputBuilder<()> {
     #[must_use]
-    pub fn open(_cx: &crate::Context) -> Self {
+    pub fn open() -> Self {
         Self {
             value: (),
             placeholder: String::new(),
@@ -1321,14 +1301,7 @@ mod tests {
 
     #[derive(Clone)]
     struct Badge {
-        context: crate::Context,
         text: &'static str,
-    }
-
-    impl HasContext for Badge {
-        fn context(&self) -> &crate::Context {
-            &self.context
-        }
     }
 
     impl Component for Badge {
@@ -1346,10 +1319,8 @@ mod tests {
 
     #[test]
     fn components_convert_into_elements() {
-        let element = div().child(Badge {
-            context: crate::Application::new().context().clone(),
-            text: "new",
-        });
+        crate::Application::new();
+        let element = div().child(Badge { text: "new" });
         assert!(element.children[0].is_text());
         assert_eq!(element.children[0].classes[0].as_str(), "badge");
     }
@@ -1372,7 +1343,7 @@ mod tests {
 
     #[test]
     fn container_into_element_is_not_a_slot_boundary() {
-        let element = DivBuilder::open(&crate::Application::new().context()).into_element();
+        let element = DivBuilder::open().into_element();
         assert_eq!(element.slot_owner, 0);
     }
 

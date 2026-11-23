@@ -15,11 +15,11 @@ struct Greeting {
 impl Component for Greeting {
     fn render(&self) -> Element {
         let cx = Context::current();
-        element!((cx) {
+        element! {
             div(class = Class::Card.as_str(), key = "greeting") {
                 text(format!("Hello, {}!", self.name), class = Class::Title.as_str())
             }
-        })
+        }
     }
 }
 
@@ -29,13 +29,16 @@ fn prelude_covers_a_small_app() {
     let mut custom = Theme::light();
     custom.set_name("warm");
     custom.patch_tokens(ColorToken::patch().primary(accent));
-    let cx = Application::new().context().clone();
-    let app = element!((cx) {
+    let cx = {
+        Application::new();
+        Context::current()
+    };
+    let app = element! {
         div(class = "app", style = style! { gap: Space::Lg, background: ColorToken::Background }) {
             Greeting(name = "cappy")
         }
-    });
-    let mut ui = Ui::new(&cx, app, custom);
+    };
+    let mut ui = Ui::new(app, custom);
     assert!(ui.update(FrameInput::new(400, 300, 1.0)).needs_redraw());
     assert_eq!(ui.theme().tokens().colors.primary, accent);
     let greeting = ui.find_by_key("greeting").unwrap();

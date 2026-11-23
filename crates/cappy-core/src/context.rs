@@ -1,29 +1,20 @@
-//! The value passed through the UI. [`Application`] owns one [`Context`]. Signals, listeners and
-//! component render all use that same runtime.
+//! The value passed through the UI. [`Application::new`] installs one runtime on this thread.
+//! Signals, listeners and component render all use it. [`Context::current`] reads that runtime.
 
 use std::fmt;
 use std::marker::PhantomData;
 use std::rc::Rc;
 
-use crate::reactive::Runtime;
+use crate::reactive::{Runtime, runtime};
 
-/// Root of a cappy process. Window code receives this. UI code receives [`Context`].
-pub struct Application {
-    context: Context,
-}
+/// Installs this thread's runtime. A later call replaces it. Signals and [`crate::Ui`] values
+/// from the previous runtime must not be used after that.
+pub struct Application;
 
 impl Application {
     pub fn new() -> Self {
-        Self {
-            context: Context {
-                runtime: Rc::new(Runtime::default()),
-            },
-        }
-    }
-
-    /// The handle UI code threads from this application downward.
-    pub fn context(&self) -> &Context {
-        &self.context
+        crate::reactive::install_runtime();
+        Self
     }
 }
 
@@ -33,10 +24,10 @@ impl Default for Application {
     }
 }
 
-/// One value of this type per [`Context`]. `#[store]` on a struct implements it.
+/// One value of this type per runtime. `#[store]` on a struct implements it.
 pub trait Singleton: Clone + 'static {
     /// Builds the value stored the first time [`Context::use_store`] sees this type.
-    fn create(cx: &Context) -> Self;
+    fn create() -> Self;
 }
 
 /// Marker passed to [`Context::use_store`]. `#[store]` emits one under the struct's name.
@@ -60,11 +51,10 @@ impl<T> Clone for SingletonOf<T> {
 
 impl<T> Copy for SingletonOf<T> {}
 
-/// Handle to one reactive runtime. Cloning clones an [`Rc`](std::rc::Rc).
-#[derive(Clone)]
-pub struct Context {
-    pub(crate) runtime: Rc<Runtime>,
-}
+/// Handle to the thread's runtime. It holds no pointer: every method reads [`Context::current`]'s
+/// runtime.
+#[derive(Clone, Copy)]
+pub struct Context;
 
 impl fmt::Debug for Context {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -78,11 +68,11 @@ impl fmt::Debug for Context {
 /// inner default. The `#[store]` macro implements this for the struct itself.
 #[doc(hidden)]
 pub trait FieldInit: Sized {
-    fn field_init(cx: &Context) -> Self;
+    fn field_init() -> Self;
 }
 
 impl<T: Default> FieldInit for T {
-    fn field_init(_cx: &Context) -> Self {
+    fn field_init() -> Self {
         T::default()
     }
 }
@@ -95,16 +85,17 @@ impl Context {
     where
         T: Clone + 'static,
     {
-        self.runtime.push_component(component);
-        let _pop = PopComponent(Rc::clone(&self.runtime));
+        let runtime = runtime();
+        runtime.push_component(component);
+        let _pop = PopComponent(Rc::clone(&runtime));
         body()
     }
 
     /// Binds `method` to the component [`Context::with`] is rendering.
     ///
-    /// The returned closure owns a clone of that component and of this context, so it outlives
-    /// `render`. The method receives `&self`, then the event. The call enters this context, so
-    /// [`use_store`](use_store) and [`reactive`](reactive) see it.
+    /// The returned closure owns a clone of that component, so it outlives `render`. The method
+    /// receives `&self`, then the event. The call runs inside [`Context::with`], so a nested
+    /// [`Context::on`] sees that component.
     ///
     /// # Panics
     /// Panics when called outside [`Context::with`], or when `method`'s receiver is not the
@@ -114,32 +105,24 @@ impl Context {
         T: Clone + 'static,
         E: 'static,
     {
-        bind_handler(self.clone(), method)
+        let _ = self;
+        bind_handler(method)
     }
 
-    /// Runs `body` while this context is [`Context::current`].
-    ///
-    /// Nested calls push their own runtime index and pop it before this one is current again.
-    /// Entering the same context twice pushes its index twice.
-    pub fn enter<R>(&self, body: impl FnOnce() -> R) -> R {
-        crate::reactive::enter_runtime(&self.runtime, body)
-    }
-
-    /// The context the innermost [`Context::enter`] selected.
+    /// The runtime [`Application::new`] installed on this thread.
     ///
     /// # Panics
-    /// Panics when called outside [`Context::enter`].
+    /// Panics when [`Application::new`] has not run on this thread.
     pub fn current() -> Self {
-        Self {
-            runtime: crate::reactive::current_runtime(),
-        }
+        let _ = runtime();
+        Self
     }
 }
 
 /// [`Context::reactive`] on [`Context::current`].
 ///
 /// # Panics
-/// Panics when called outside [`Context::enter`].
+/// Panics when [`Application::new`] has not run on this thread.
 pub fn reactive<T: crate::reactive::IntoReactive>(value: T) -> T::Output {
     Context::current().reactive(value)
 }
@@ -147,7 +130,7 @@ pub fn reactive<T: crate::reactive::IntoReactive>(value: T) -> T::Output {
 /// [`Context::use_store`] on [`Context::current`].
 ///
 /// # Panics
-/// Panics when called outside [`Context::enter`].
+/// Panics when [`Application::new`] has not run on this thread.
 pub fn use_store<T: Singleton>(of: SingletonOf<T>) -> T {
     Context::current().use_store(of)
 }
@@ -155,7 +138,7 @@ pub fn use_store<T: Singleton>(of: SingletonOf<T>) -> T {
 /// [`Context::use_local_store`] on [`Context::current`].
 ///
 /// # Panics
-/// Panics when called outside [`Context::enter`].
+/// Panics when [`Application::new`] has not run on this thread.
 pub fn use_local_store<T: Singleton>(of: SingletonOf<T>) -> T {
     Context::current().use_local_store(of)
 }
@@ -163,22 +146,23 @@ pub fn use_local_store<T: Singleton>(of: SingletonOf<T>) -> T {
 /// [`Context::on`] on [`Context::current`].
 ///
 /// # Panics
-/// Panics when called outside [`Context::enter`], or when [`Context::on`] would panic.
+/// Panics when [`Application::new`] has not run on this thread, or when [`Context::on`] would
+/// panic.
 pub fn on<T, E>(method: fn(&T, &E)) -> impl FnMut(&E) + use<T, E>
 where
     T: Clone + 'static,
     E: 'static,
 {
-    bind_handler(Context::current(), method)
+    let _ = Context::current();
+    bind_handler(method)
 }
 
-fn bind_handler<T, E>(cx: Context, method: fn(&T, &E)) -> impl FnMut(&E) + use<T, E>
+fn bind_handler<T, E>(method: fn(&T, &E)) -> impl FnMut(&E) + use<T, E>
 where
     T: Clone + 'static,
     E: 'static,
 {
-    let frame = cx
-        .runtime
+    let frame = runtime()
         .components
         .borrow()
         .last()
@@ -187,40 +171,8 @@ where
     let instance = frame
         .downcast::<T>()
         .unwrap_or_else(|_| panic!("cx.on method does not belong to the component being rendered"));
-    move |event| cx.enter(|| cx.with(instance.as_ref(), || method(instance.as_ref(), event)))
-}
-
-#[cfg(test)]
-mod tests {
-    use std::rc::Rc;
-
-    use super::{Application, Context};
-
-    #[test]
-    fn nested_enter_keeps_each_runtime() {
-        let first = Application::new();
-        let second = Application::new();
-        first.context().enter(|| {
-            let left = Context::current().reactive(1_i32);
-            assert!(Rc::ptr_eq(
-                &Context::current().runtime,
-                &first.context().runtime
-            ));
-            let right = second.context().enter(|| {
-                assert!(Rc::ptr_eq(
-                    &Context::current().runtime,
-                    &second.context().runtime
-                ));
-                Context::current().reactive(2_i32)
-            });
-            assert!(Rc::ptr_eq(
-                &Context::current().runtime,
-                &first.context().runtime
-            ));
-            left.set(3);
-            assert_eq!(left.get(), 3);
-            assert_eq!(right.get(), 2);
-        });
+    move |event| {
+        Context.with(instance.as_ref(), || method(instance.as_ref(), event));
     }
 }
 

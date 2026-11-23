@@ -13,11 +13,7 @@
 //! use cappy_winit::{Run, WindowOptions};
 //!
 //! let application = Application::new();
-//! let ui = Ui::new(
-//!     application.context(),
-//!     div().class("app").child(text("Hello")),
-//!     Theme::light(),
-//! );
+//! let ui = Ui::new(div().class("app").child(text("Hello")), Theme::light());
 //! application
 //!     .run(WindowOptions::new("Hello"), ui)
 //!     .expect("app failed");
@@ -128,8 +124,6 @@ pub enum RunError {
     EventLoop(winit::error::EventLoopError),
     CreateWindow(winit::error::OsError),
     Renderer(RendererError),
-    /// `ui` was built from a different [`Application`] than the one [`Run::run`] was called on.
-    ContextMismatch,
 }
 
 impl fmt::Display for RunError {
@@ -139,12 +133,6 @@ impl fmt::Display for RunError {
             Self::EventLoop(error) => write!(f, "winit event loop failed: {error}"),
             Self::CreateWindow(error) => write!(f, "failed to create the window: {error}"),
             Self::Renderer(error) => write!(f, "{error}"),
-            Self::ContextMismatch => {
-                write!(
-                    f,
-                    "ui was built with a different context than the application"
-                )
-            }
         }
     }
 }
@@ -156,7 +144,6 @@ impl std::error::Error for RunError {
             Self::EventLoop(error) => Some(error),
             Self::CreateWindow(error) => Some(error),
             Self::Renderer(error) => Some(error),
-            Self::ContextMismatch => None,
         }
     }
 }
@@ -176,9 +163,7 @@ impl Run for Application {
 }
 
 fn run_window(application: &Application, options: WindowOptions, ui: Ui) -> Result<(), RunError> {
-    if !ui.shares_context(application.context()) {
-        return Err(RunError::ContextMismatch);
-    }
+    let _ = application;
     let renderer =
         select_renderer(options.renderer, AVAILABLE_RENDERERS).map_err(RunError::SelectRenderer)?;
     let event_loop = EventLoop::<Wake>::with_user_event()
@@ -189,7 +174,6 @@ fn run_window(application: &Application, options: WindowOptions, ui: Ui) -> Resu
         options,
         renderer,
         proxy: event_loop.create_proxy(),
-        context: application.context().clone(),
         pending_ui: Some(ui),
         session: WindowSession::new(),
         primary: None,
@@ -260,7 +244,6 @@ struct WinitHost {
     options: WindowOptions,
     renderer: RendererKind,
     proxy: EventLoopProxy<Wake>,
-    context: Context,
     pending_ui: Option<Ui>,
     /// Dropped before [`Self::primary`] and [`Self::popups`] so each renderer releases its
     /// surface before the window.
@@ -458,7 +441,7 @@ impl WinitHost {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            for command in self.context.drain_surfaces() {
+            for command in Context::current().drain_surfaces() {
                 match command {
                     SurfaceCommand::Open { id, options, root } => {
                         if let Err(error) = self.open_popup(event_loop, id, options, root) {
@@ -474,7 +457,7 @@ impl WinitHost {
 
     #[cfg(target_arch = "wasm32")]
     fn discard_surface_commands(&mut self) {
-        if self.context.drain_surfaces().is_empty() || self.warned_surface {
+        if Context::current().drain_surfaces().is_empty() || self.warned_surface {
             return;
         }
         self.warned_surface = true;
@@ -499,7 +482,7 @@ impl WinitHost {
             .map(|chrome| Arc::clone(&chrome.window));
         let attributes = popup_attributes(&options, self.renderer, owner.as_deref());
         let window = self.create_window(event_loop, attributes)?;
-        let ui = Ui::new(&self.context, root, Theme::light());
+        let ui = Ui::new(root, Theme::light());
         let renderer =
             renderer::open_renderer(self.renderer, &window, &fonts).map_err(RunError::Renderer)?;
         let (mut host, mut chrome) = self.finish(window, &fonts, ui, renderer);

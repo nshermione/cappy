@@ -133,33 +133,31 @@ use cappy_winit::{Run, WindowOptions};
 
 fn main() {
     let application = Application::new();
-    let cx = application.context();
-    let count = cx.reactive(0_i32);
-    let root = element!((cx) {
+    let count = Context::current().reactive(0_i32);
+    let root = element! {
         div(class = "app") {
             text(:format!("Clicked {} times", count.get()))
             div(class = "btn btn-primary", on_click = move |_| count.update(|n| *n += 1)) {
                 text("Click")
             }
         }
-    });
-    let ui = Ui::new(cx, root, Theme::light());
+    };
+    let ui = Ui::new(root, Theme::light());
     application
         .run(WindowOptions::new("My app"), ui)
         .expect("app failed");
 }
 ```
 
-`element!` without a `(cx)` argument reads `Context::current`. That is set by `Context::enter` and by a component's `IntoElement`. Calling it outside either of those panics when the tree is built.
+`element!` reads the runtime `Application::new` installed on this thread. Calling it before that panics when a node allocates a signal.
 
 The same tree can be driven with no window. `Ui::update` returns `UpdateOutcome::Idle` or `UpdateOutcome::Redraw { damage }`. `Ui::prepare_frame` then yields the display list.
 
 ```rust
 use cappy::prelude::*;
 
-let application = Application::new();
-let cx = application.context();
-let mut ui = Ui::new(cx, div().child(text("Hello")), Theme::light());
+let _application = Application::new();
+let mut ui = Ui::new(div().child(text("Hello")), Theme::light());
 assert!(ui.update(FrameInput::new(800, 600, 1.0)).needs_redraw());
 ```
 
@@ -224,7 +222,7 @@ A `Signal<T>` is the storage. `Reactive<T>` is the handle application code holds
 
 Reading a signal during a binding subscribes that binding. `update`, `set` and similar writes enqueue the subscribers. The next `Ui::update` flushes them. The winit host also wakes immediately so the frame is not delayed until the next input event.
 
-`Context` is the owner of signals, listeners and singletons. `Application::new` creates one. `Ui` must be built from that same context; `Run::run` returns `RunError::ContextMismatch` otherwise.
+`Application::new` installs one runtime on this thread. `Context::current` reads it. A later `Application::new` replaces that runtime, and signals from the previous one must not be used.
 
 ### Styles
 
@@ -256,11 +254,10 @@ The playground scene under `playground/scenes/src/showcase/` is the worked examp
 ```rust
 use cappy::prelude::*;
 
-let application = Application::new();
-let cx = application.context();
-let count = cx.reactive(0_i32);
+let _application = Application::new();
+let count = Context::current().reactive(0_i32);
 
-let tree = element!((cx) {
+let tree = element! {
     div(class = "app") {
         text("Counter", class = "title"),
         div(class = "row", style = style! { gap: Space::Sm }) {
@@ -270,7 +267,7 @@ let tree = element!((cx) {
             }
         }
     }
-});
+};
 ```
 
 - `div`, `text`, `image` and `input` are the built-in nodes. A leading value is content, so `text("Title")` calls `.content("Title")`.
@@ -420,7 +417,7 @@ use cappy::prelude::*;
 use cappy_winit::{RendererKind, Run, WindowOptions};
 
 let application = Application::new();
-let ui = Ui::new(application.context(), div().child(text("Hello")), Theme::light());
+let ui = Ui::new(div().child(text("Hello")), Theme::light());
 let options = WindowOptions::new("My app").with_renderer(RendererKind::Cpu);
 application.run(options, ui).expect("app failed");
 ```
@@ -500,15 +497,14 @@ cargo fmt --all --check
 use cappy::prelude::*;
 use cappy_testing::TestUi;
 
-let application = Application::new();
-let cx = application.context();
-let count = cx.reactive(0_i32);
-let root = element!((cx) {
+let _application = Application::new();
+let count = Context::current().reactive(0_i32);
+let root = element! {
     div(key = "button", on_click = move |_| count.update(|n| *n += 1)) {
         text(:format!("{}", count.get()), key = "label")
     }
-});
-let mut harness = TestUi::new(cx, root, Theme::light());
+};
+let mut harness = TestUi::new(root, Theme::light());
 harness.click("button");
 ```
 
@@ -562,17 +558,11 @@ cargo run -p winit-demo --no-default-features --features cpu
 Remove-Item Env:CAPPY_RENDERER
 ```
 
-### The UI context does not match the application
-
-**Error:** `ui was built with a different context than the application`
-
-**Fix:** build the `Ui` with `application.context()`, and call `application.run(...)`. A second `Application::new()` is a different context.
-
 ### `element!` panics while building the tree
 
-**Error:** a panic from `Context::current`
+**Error:** `Context::current called before Application::new`
 
-**Fix:** write `element!((cx) { ... })`, or call `element! { ... }` inside `cx.enter(|| ...)` or inside `Component::render`.
+**Fix:** call `Application::new` on this thread before building signals or a `Ui`. A second `Application::new` replaces the runtime, so do not keep signals from the first one.
 
 ### Toolchain mismatch
 

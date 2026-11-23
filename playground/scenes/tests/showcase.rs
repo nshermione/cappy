@@ -3,8 +3,8 @@ use cappy_testing::TestUi;
 use playground_scenes::showcase;
 
 fn harness() -> TestUi {
-    let application = Application::new();
-    TestUi::from_ui(showcase(application.context()))
+    let _application = Application::new();
+    TestUi::from_ui(showcase())
 }
 
 fn open_tab(harness: &mut TestUi, tab: &str) {

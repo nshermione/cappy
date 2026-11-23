@@ -182,26 +182,6 @@ pub fn ui_closure(input: TokenStream) -> TokenStream {
     ui_closure::expand(input.into()).into()
 }
 
-/// Builds a `'static` element closure that still sees the context passed to `element!`.
-///
-/// Input is `with_context ; context_ident ; move || body`. `for` goes through
-/// [`ui_for_view`](ui_for_view).
-#[doc(hidden)]
-#[proc_macro]
-pub fn ui_view(input: TokenStream) -> TokenStream {
-    ui_closure::expand_view(input.into()).into()
-}
-
-/// Builds a `for_each` whose row closure sees the caller's `cx`.
-///
-/// The row closure is an argument of `for_each`. A block in that argument position hides the row
-/// type from inference.
-#[doc(hidden)]
-#[proc_macro]
-pub fn ui_for_view(input: TokenStream) -> TokenStream {
-    ui_closure::expand_for_view(input.into()).into()
-}
-
 /// Turns a fieldless enum into a style token whose values live in a generated `{Enum}Values`
 /// struct. The argument is the value type of every variant. A second argument names the field of
 /// [`Tokens`](cappy::Tokens) that stores a built-in set; without it, a theme stores the values

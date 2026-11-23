@@ -19,7 +19,7 @@ fn main() {
     let application = Application::new();
     let options = window_options("cappy playground (web)")
         .with_fonts(FontOptions::new().with_data([INTER_REGULAR.to_vec()]));
-    if let Err(error) = application.run(options, showcase(application.context())) {
+    if let Err(error) = application.run(options, showcase()) {
         log::error!("web demo failed: {error}");
     }
 }

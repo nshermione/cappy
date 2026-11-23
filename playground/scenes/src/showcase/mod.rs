@@ -31,13 +31,11 @@ mod tiles;
 use cappy::prelude::*;
 
 /// Header with a theme switcher, and one tab per demo: counter, tiles, checklist, paint, motion.
-pub fn showcase(cx: &Context) -> Ui {
-    cx.enter(|| {
-        // A context reused for another scene still holds the previous singletons.
-        use_store(store::Counter).reset();
-        use_store(store::App).select(store::Tab::Counter);
-        cx.set_themes(style::themes().into_iter().map(style::stylesheet));
-        // The catalog is already set, so this theme value is not installed.
-        Ui::new(cx, layout::root(), Theme::light())
-    })
+pub fn showcase() -> Ui {
+    // A runtime reused for another scene still holds the previous singletons.
+    use_store(store::Counter).reset();
+    use_store(store::App).select(store::Tab::Counter);
+    Context::current().set_themes(style::themes().into_iter().map(style::stylesheet));
+    // The catalog is already set, so this theme value is not installed.
+    Ui::new(layout::root(), Theme::light())
 }

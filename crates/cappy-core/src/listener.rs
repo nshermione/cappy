@@ -7,7 +7,6 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::rc::Rc;
 
-use crate::Context;
 use crate::reactive::{ListenerSlot, Runtime};
 
 const DEAD_LISTENER: &str = "listener was disposed";
@@ -91,8 +90,8 @@ impl<T: 'static> fmt::Debug for Listener<T> {
 impl<T: 'static> Listener<T> {
     /// An empty slot. [`Listener::emit`] does nothing until [`Listener::set`] stores a closure.
     #[must_use]
-    pub fn empty(context: &Context) -> Self {
-        let (runtime, index, generation) = context.runtime.create_listener();
+    pub fn empty() -> Self {
+        let (runtime, index, generation) = crate::reactive::runtime().create_listener();
         Self {
             runtime,
             index,
@@ -136,20 +135,25 @@ mod tests {
     use std::rc::Rc;
 
     use super::Listener;
-    use crate::Application;
+    use crate::{Application, Context};
 
-    fn context() -> crate::Context {
-        Application::new().context().clone()
+    fn context() -> Context {
+        {
+            Application::new();
+            Context::current()
+        }
     }
 
     #[test]
     fn emit_without_a_handler_does_nothing() {
-        Listener::<i32>::empty(&context()).emit(1);
+        let _runtime = context();
+        Listener::<i32>::empty().emit(1);
     }
 
     #[test]
     fn emit_calls_the_handler_and_set_replaces_it() {
-        let listener = Listener::<i32>::empty(&context());
+        let _runtime = context();
+        let listener = Listener::<i32>::empty();
         let seen = Rc::new(Cell::new(0));
         let first = Rc::clone(&seen);
         listener.set(move |value| first.set(*value));
@@ -164,7 +168,8 @@ mod tests {
 
     #[test]
     fn set_during_emit_is_kept() {
-        let listener = Listener::<()>::empty(&context());
+        let _runtime = context();
+        let listener = Listener::<()>::empty();
         let during = listener.clone();
         let seen = Rc::new(Cell::new(0));
         let flag = Rc::clone(&seen);

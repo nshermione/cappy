@@ -1,8 +1,8 @@
 //! Headless driver for writing UI tests against a [`Ui`] without a window or GPU.
 
 use cappy_core::{
-    ButtonState, Context, Damage, FrameInput, InputEvent, IntoElement, Key, KeyEvent, Modifiers,
-    NodeId, Point, PointerButton, Rect, RenderFrame, Theme, Ui, UpdateOutcome,
+    ButtonState, Damage, FrameInput, InputEvent, IntoElement, Key, KeyEvent, Modifiers, NodeId,
+    Point, PointerButton, Rect, RenderFrame, Theme, Ui, UpdateOutcome,
 };
 
 const DEFAULT_VIEWPORT: FrameInput = FrameInput {
@@ -21,8 +21,8 @@ pub struct TestUi {
 
 impl TestUi {
     /// Mounts `root` in an 800x600 viewport and runs the first update.
-    pub fn new(context: &Context, root: impl IntoElement, theme: Theme) -> Self {
-        Self::from_ui(Ui::new(context, root, theme))
+    pub fn new(root: impl IntoElement, theme: Theme) -> Self {
+        Self::from_ui(Ui::new(root, theme))
     }
 
     /// Wraps an already configured [`Ui`] and runs the first update.

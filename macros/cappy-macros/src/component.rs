@@ -5,7 +5,7 @@ use syn::{Attribute, DeriveInput, Field, Generics, Token, Type, parse_quote, spa
 
 use crate::reactive::{named_fields, tracked_impls, with_into_reactive};
 
-const RESERVED: &[&str] = &["class", "style", "key", "context"];
+const RESERVED: &[&str] = &["class", "style", "key"];
 
 #[derive(Clone, Copy)]
 enum Section {
@@ -146,14 +146,12 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         #[derive(Clone)]
         #(#attrs)*
         #vis struct #name #impl_generics #where_clause {
-            context: ::cappy::Context,
             #(#struct_fields)*
         }
 
         impl #impl_generics #name #type_generics #where_clause {
-            pub fn new(cx: &::cappy::Context, #(#new_args),*) -> Self {
+            pub fn new(#(#new_args),*) -> Self {
                 Self {
-                    context: cx.clone(),
                     #(#new_inits,)*
                 }
             }
@@ -161,12 +159,6 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
             #open
             #(#setters)*
             #(#slot_consts)*
-        }
-
-        impl #impl_generics ::cappy::HasContext for #name #type_generics #where_clause {
-            fn context(&self) -> &::cappy::Context {
-                &self.context
-            }
         }
 
         #tracked
@@ -328,20 +320,24 @@ fn field_init(field: &Field, kind: &FieldKind, default_value: bool) -> TokenStre
     let name = field.ident.as_ref().expect("named field");
     let ty = &field.ty;
     match kind {
-        FieldKind::Event => quote!(#name: ::cappy::Listener::empty(cx)),
+        FieldKind::Event => quote!(#name: ::cappy::Listener::empty()),
         FieldKind::Slot(index) => quote!(#name: ::cappy::Slot::new(#index)),
         FieldKind::Prop if default_value => {
             quote!(
                 #name: <#ty as ::cappy::IntoReactive>::into_prop_default(
                     <#ty as ::core::default::Default>::default(),
-                    cx,
                 )
             )
         }
         FieldKind::State if default_value => {
-            quote!(#name: cx.reactive(<#ty as ::core::default::Default>::default()))
+            quote!(
+                #name: ::cappy::Context::current()
+                    .reactive(<#ty as ::core::default::Default>::default())
+            )
         }
-        FieldKind::State | FieldKind::Prop => quote!(#name: cx.reactive(#name)),
+        FieldKind::State | FieldKind::Prop => {
+            quote!(#name: ::cappy::Context::current().reactive(#name))
+        }
     }
 }
 
@@ -428,11 +424,10 @@ fn open_method(
         .zip(kinds)
         .map(|(field, kind)| field_init(field, kind, true));
     quote! {
-        pub fn open(cx: &::cappy::Context) -> Self
+        pub fn open() -> Self
         #where_clause
         {
             Self {
-                context: cx.clone(),
                 #(#inits,)*
             }
         }

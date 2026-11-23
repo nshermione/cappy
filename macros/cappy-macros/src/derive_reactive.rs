@@ -27,8 +27,8 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         impl #impl_generics ::cappy::IntoReactive for #name #type_generics #where_clause {
             type Output = ::cappy::Reactive<Self>;
 
-            fn into_reactive(self, context: &::cappy::Context) -> Self::Output {
-                ::cappy::Reactive::new(context, self)
+            fn into_reactive(self) -> Self::Output {
+                ::cappy::Reactive::new(self)
             }
         }
     })

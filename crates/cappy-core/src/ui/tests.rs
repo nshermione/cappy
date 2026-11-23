@@ -8,11 +8,11 @@ use super::*;
 use crate::paint::Primitive;
 use crate::reactive::{live_signal_count, signal_is_alive, signal_subscriber_count};
 use crate::{
-    Application, ButtonState, Component, Context, Dynamic, Element, FocusScope, HasContext,
-    ImeEvent, InputEvent, IntoElement, Key, KeyEvent, Modifiers, PointerButton, PointerPhase,
-    Signal, Singleton, SingletonOf, Slot, SurfaceCommand, SurfaceOptions, div, for_each, fragment,
-    if_else, input, list_window, on_before_mount, on_before_unmount, on_mounted, on_unmounted,
-    on_updated, show, slot, text, text_dyn, use_store,
+    Application, ButtonState, Component, Context, Dynamic, Element, FocusScope, ImeEvent,
+    InputEvent, IntoElement, Key, KeyEvent, Modifiers, PointerButton, PointerPhase, Signal,
+    Singleton, SingletonOf, Slot, SurfaceCommand, SurfaceOptions, div, for_each, fragment, if_else,
+    input, list_window, on_before_mount, on_before_unmount, on_mounted, on_unmounted, on_updated,
+    show, slot, text, text_dyn, use_store,
 };
 use cappy_style::{Background, Color, FlexDirection, Overflow, StyleRefinement};
 
@@ -23,7 +23,10 @@ const VIEWPORT: FrameInput = FrameInput {
 };
 
 fn context() -> Context {
-    Application::new().context().clone()
+    {
+        Application::new();
+        Context::current()
+    }
 }
 
 fn counter(count: Signal<i32>) -> Element {
@@ -40,8 +43,9 @@ fn counter(count: Signal<i32>) -> Element {
     )
 }
 
-fn settled(context: &Context, root: Element) -> Ui {
-    let mut ui = Ui::new(context, root, Theme::light());
+fn settled(root: Element) -> Ui {
+    crate::reactive::ensure_runtime();
+    let mut ui = Ui::new(root, Theme::light());
     ui.update(VIEWPORT);
     ui.prepare_frame();
     ui
@@ -75,7 +79,7 @@ fn click(ui: &mut Ui, key: &str) {
 #[test]
 fn first_update_repaints_everything() {
     let cx = context();
-    let mut ui = Ui::new(&cx, counter(cx.signal(0)), Theme::light());
+    let mut ui = Ui::new(counter(cx.signal(0)), Theme::light());
     assert!(ui.needs_update());
     assert_eq!(
         ui.update(VIEWPORT),
@@ -92,7 +96,7 @@ fn first_update_repaints_everything() {
 #[test]
 fn root_fills_the_viewport() {
     let cx = context();
-    let ui = settled(&cx, counter(cx.signal(0)));
+    let ui = settled(counter(cx.signal(0)));
     assert_eq!(
         ui.node_rect(ui.root()),
         Some(Rect::new(0.0, 0.0, 800.0, 600.0))
@@ -102,7 +106,7 @@ fn root_fills_the_viewport() {
 #[test]
 fn nothing_changed_means_idle() {
     let cx = context();
-    let mut ui = settled(&cx, counter(cx.signal(0)));
+    let mut ui = settled(counter(cx.signal(0)));
     assert!(!ui.needs_update());
     assert_eq!(ui.update(VIEWPORT), UpdateOutcome::Idle);
     assert_eq!(ui.prepare_frame().unwrap().damage, Damage::None);
@@ -112,7 +116,7 @@ fn nothing_changed_means_idle() {
 fn signal_change_damages_only_the_bound_text() {
     let cx = context();
     let count = cx.signal(0);
-    let mut ui = settled(&cx, counter(count.clone()));
+    let mut ui = settled(counter(count.clone()));
     let label = ui.find_by_key("label").unwrap();
     let before = ui.node_rect(label).unwrap();
 
@@ -128,7 +132,7 @@ fn signal_change_damages_only_the_bound_text() {
 fn growing_text_also_damages_the_siblings_it_pushes() {
     let cx = context();
     let count = cx.signal(0);
-    let mut ui = settled(&cx, counter(count.clone()));
+    let mut ui = settled(counter(count.clone()));
     let button = ui.find_by_key("button").unwrap();
     let button_before = ui.node_rect(button).unwrap();
 
@@ -145,7 +149,7 @@ fn growing_text_also_damages_the_siblings_it_pushes() {
 fn clicking_runs_the_handler_and_updates_the_label() {
     let cx = context();
     let count = cx.signal(0);
-    let mut ui = settled(&cx, counter(count.clone()));
+    let mut ui = settled(counter(count.clone()));
     click(&mut ui, "button");
     assert_eq!(count.get_untracked(), 1);
     ui.update(VIEWPORT);
@@ -159,7 +163,7 @@ fn clicking_runs_the_handler_and_updates_the_label() {
 fn click_damage_stays_inside_the_row() {
     let cx = context();
     let count = cx.signal(0);
-    let mut ui = settled(&cx, counter(count.clone()));
+    let mut ui = settled(counter(count.clone()));
     click(&mut ui, "button");
     let damaged = regions(ui.update(VIEWPORT));
     let row = ui.node_rect(ui.find_by_key("row").unwrap()).unwrap();
@@ -173,7 +177,7 @@ fn click_damage_stays_inside_the_row() {
 fn releasing_outside_the_pressed_node_does_not_click() {
     let cx = context();
     let count = cx.signal(0);
-    let mut ui = settled(&cx, counter(count.clone()));
+    let mut ui = settled(counter(count.clone()));
     ui.handle_event(InputEvent::PointerMoved {
         position: center_of(&ui, "button"),
     });
@@ -194,7 +198,7 @@ fn releasing_outside_the_pressed_node_does_not_click() {
 #[test]
 fn hover_applies_the_hover_variant_and_pointer_cursor() {
     let cx = context();
-    let mut ui = settled(&cx, counter(cx.signal(0)));
+    let mut ui = settled(counter(cx.signal(0)));
     let button = ui.find_by_key("button").unwrap();
     let colors = ui.theme().tokens().colors.clone();
 
@@ -246,7 +250,7 @@ fn a_disabled_node_ignores_hover_click_and_the_pointer() {
         .focusable()
         .on_focus(move |is_focused| focused_handle.set(is_focused))
         .on_click(move |_| clicks_handle.update(|value| *value += 1));
-    let mut ui = Ui::new(&cx, root, theme);
+    let mut ui = Ui::new(root, theme);
     ui.update(VIEWPORT);
     let gate = ui.find_by_key("gate").unwrap();
     ui.handle_event(InputEvent::PointerMoved {
@@ -285,7 +289,7 @@ fn hover_handlers_fire_on_enter_and_leave() {
             .style(StyleRefinement::default().size(50))
             .on_hover(move |is_over| hovered_flag.set(is_over)),
     );
-    let mut ui = settled(&cx, root);
+    let mut ui = settled(root);
     ui.handle_event(InputEvent::PointerMoved {
         position: center_of(&ui, "target"),
     });
@@ -297,7 +301,7 @@ fn hover_handlers_fire_on_enter_and_leave() {
 #[test]
 fn switching_theme_repaints_without_moving_anything() {
     let cx = context();
-    let mut ui = settled(&cx, counter(cx.signal(0)));
+    let mut ui = settled(counter(cx.signal(0)));
     let rects: Vec<_> = (0..6)
         .map(|index| ui.node_rect(NodeId::from_index(index)))
         .collect();
@@ -339,7 +343,7 @@ fn theme_signal_shared_with_the_scene_switches_theme() {
             });
             cx_click.apply_theme(next);
         });
-    let mut ui = Ui::new(&cx, div().class("app").child(toggle), Theme::light());
+    let mut ui = Ui::new(div().class("app").child(toggle), Theme::light());
     ui.update(VIEWPORT);
     click(&mut ui, "toggle");
     ui.update(VIEWPORT);
@@ -349,7 +353,7 @@ fn theme_signal_shared_with_the_scene_switches_theme() {
 #[test]
 fn resizing_relayouts_and_repaints_everything() {
     let cx = context();
-    let mut ui = settled(&cx, counter(cx.signal(0)));
+    let mut ui = settled(counter(cx.signal(0)));
     let resized = FrameInput::new(400, 300, 1.0);
     assert_eq!(
         ui.update(resized),
@@ -366,7 +370,7 @@ fn resizing_relayouts_and_repaints_everything() {
 #[test]
 fn scale_factor_keeps_logical_layout() {
     let cx = context();
-    let mut ui = settled(&cx, counter(cx.signal(0)));
+    let mut ui = settled(counter(cx.signal(0)));
     let label_rect = ui.node_rect(ui.find_by_key("label").unwrap());
     ui.update(FrameInput::new(1600, 1200, 2.0));
     assert_eq!(ui.node_rect(ui.find_by_key("label").unwrap()), label_rect);
@@ -379,7 +383,7 @@ fn scale_factor_keeps_logical_layout() {
 fn waker_fires_when_a_signal_needs_the_ui() {
     let cx = context();
     let count = cx.signal(0);
-    let mut ui = settled(&cx, counter(count.clone()));
+    let mut ui = settled(counter(count.clone()));
     let wakes = Rc::new(Cell::new(0));
     let counter_handle = wakes.clone();
     ui.set_waker(move || counter_handle.set(counter_handle.get() + 1));
@@ -408,7 +412,7 @@ fn dynamic_classes_and_styles_rebind() {
                 StyleRefinement::default().width(width)
             }),
     );
-    let mut ui = settled(&cx, root);
+    let mut ui = settled(root);
     let chip = ui.find_by_key("chip").unwrap();
     active.set(true);
     ui.update(VIEWPORT);
@@ -420,7 +424,7 @@ fn dynamic_classes_and_styles_rebind() {
 #[test]
 fn text_inherits_color_from_its_ancestors() {
     let cx = context();
-    let ui = settled(&cx, counter(cx.signal(0)));
+    let ui = settled(counter(cx.signal(0)));
     let button = ui.find_by_key("button").unwrap();
     let label = ui.node_children(button)[0];
     assert_eq!(
@@ -435,7 +439,6 @@ fn a_linear_background_is_a_quad_fill() {
 
     let cx = context();
     let ui = settled(
-        &cx,
         div().style(
             StyleRefinement::default()
                 .size(40)
@@ -473,7 +476,7 @@ fn shadow_repaint_covers_the_old_box_and_the_new_ink() {
             .background(Color::WHITE)
             .shadow(shadow(offset_for_style.get(), 0, 0, 0, Color::BLACK))
     }));
-    let mut ui = settled(&cx, root);
+    let mut ui = settled(root);
     let card = ui.node_rect(ui.find_by_key("card").unwrap()).unwrap();
     assert!(
         ui.display_list()
@@ -507,7 +510,7 @@ fn a_background_change_without_a_shadow_stays_inside_the_box() {
             .size(40)
             .background(color)
     }));
-    let mut ui = settled(&cx, root);
+    let mut ui = settled(root);
     let card = ui.node_rect(ui.find_by_key("card").unwrap()).unwrap();
     dark.set(true);
     let damaged = regions(ui.update(VIEWPORT));
@@ -533,7 +536,6 @@ fn an_image_leaf_paints_its_bitmap() {
         ImagePixels::from_rgba(2, 1, vec![255, 0, 0, 255, 0, 0, 255, 255]).expect("2x1 rgba"),
     );
     let ui = settled(
-        &cx,
         image(pixels)
             .fit(ObjectFit::Contain)
             .key("photo")
@@ -556,7 +558,6 @@ fn an_image_loads_from_a_filesystem_path() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/sample.png");
     let cx = context();
     let ui = settled(
-        &cx,
         crate::image(path)
             .key("photo")
             .style(StyleRefinement::default().size(40)),
@@ -580,7 +581,6 @@ fn a_gif_advances_when_its_delay_elapses() {
     let clip = ImageClip::decode(include_bytes!("../../fixtures/sample.gif")).expect("gif");
     let cx = context();
     let mut ui = Ui::new(
-        &cx,
         crate::image(clip)
             .key("gif")
             .style(StyleRefinement::default().size(40)),
@@ -614,7 +614,7 @@ fn gif_pixel(ui: &Ui) -> [u8; 4] {
 #[test]
 fn display_list_paints_back_to_front() {
     let cx = context();
-    let ui = settled(&cx, counter(cx.signal(0)));
+    let ui = settled(counter(cx.signal(0)));
     let list = ui.display_list();
     let Primitive::Quad(first) = &list[0] else {
         panic!("root background must come first")
@@ -643,7 +643,7 @@ fn hidden_nodes_are_not_painted_or_hit() {
             )
             .child(text("secret")),
     );
-    let ui = settled(&cx, root);
+    let ui = settled(root);
     assert!(
         ui.display_list()
             .iter()
@@ -655,7 +655,7 @@ fn hidden_nodes_are_not_painted_or_hit() {
 #[test]
 fn prepare_frame_before_update_is_none() {
     let cx = context();
-    let mut ui = Ui::new(&cx, div(), Theme::light());
+    let mut ui = Ui::new(div(), Theme::light());
     assert!(ui.prepare_frame().is_none());
 }
 
@@ -664,7 +664,7 @@ fn component_stylesheet_covers_the_rendered_tree() {
     let cx = context();
     use std::sync::Arc;
 
-    use crate::{Component, HasContext};
+    use crate::Component;
     use cappy_style::{Color, Stylesheet};
 
     fn sheet() -> Arc<Stylesheet> {
@@ -686,15 +686,7 @@ fn component_stylesheet_covers_the_rendered_tree() {
     }
 
     #[derive(Clone)]
-    struct Panel {
-        context: Context,
-    }
-
-    impl HasContext for Panel {
-        fn context(&self) -> &Context {
-            &self.context
-        }
-    }
+    struct Panel {}
 
     impl Component for Panel {
         fn stylesheet() -> Option<Arc<Stylesheet>> {
@@ -709,13 +701,7 @@ fn component_stylesheet_covers_the_rendered_tree() {
         }
     }
 
-    let ui = settled(
-        &cx,
-        Panel {
-            context: cx.clone(),
-        }
-        .into_element(),
-    );
+    let ui = settled(Panel {}.into_element());
     assert!(!ui.theme().has_class("panel-skin"));
     let panel = ui.node_style(ui.find_by_key("panel").unwrap()).unwrap();
     let inner = ui.node_style(ui.find_by_key("inner").unwrap()).unwrap();
@@ -733,7 +719,7 @@ fn unfilled_slots_are_not_mounted() {
         slot(Slot::<(), Element>::new(0)),
         text("b").key("b"),
     ]);
-    let ui = settled(&cx, tree);
+    let ui = settled(tree);
     let root = ui.find_by_key("root").unwrap();
     assert_eq!(ui.node_children(root).len(), 2);
     assert_eq!(ui.node_text(ui.find_by_key("a").unwrap()), Some("a"));
@@ -762,29 +748,26 @@ fn show_hides_without_dropping_state() {
     let open_visible = open.clone();
     let label_text = label.clone();
     let cx_view = cx.clone();
-    let mut ui = settled(
-        &cx,
-        div().key("root").children([
-            text("head").key("head"),
-            show(
-                move || open_visible.get(),
-                move || {
-                    let count = cx_view.signal(1);
-                    state_slot.borrow_mut().replace(count.clone());
-                    let label_text = label_text.clone();
-                    text_dyn(move || format!("{}:{}", label_text.get(), count.get())).key("body")
-                },
-            ),
-            text("tail").key("tail"),
-        ]),
-    );
+    let mut ui = settled(div().key("root").children([
+        text("head").key("head"),
+        show(
+            move || open_visible.get(),
+            move || {
+                let count = cx_view.signal(1);
+                state_slot.borrow_mut().replace(count.clone());
+                let label_text = label_text.clone();
+                text_dyn(move || format!("{}:{}", label_text.get(), count.get())).key("body")
+            },
+        ),
+        text("tail").key("tail"),
+    ]));
     let root = ui.find_by_key("root").unwrap();
     let head = ui.find_by_key("head").unwrap();
     let body = ui.find_by_key("body").unwrap();
     let tail = ui.find_by_key("tail").unwrap();
     assert_eq!(ui.node_children(root), &[head, body, tail]);
     assert_eq!(ui.node_text(body), Some("one:1"));
-    let signals = live_signal_count(&cx.runtime);
+    let signals = live_signal_count(&crate::reactive::runtime());
     let label_subs = signal_subscriber_count(&label);
     let open_subs = signal_subscriber_count(&open);
     let count = state.borrow().clone().unwrap();
@@ -808,7 +791,7 @@ fn show_hides_without_dropping_state() {
     assert!(!paints(&ui, "two:5"));
     assert_eq!(signal_subscriber_count(&label), label_subs);
     assert_eq!(signal_subscriber_count(&open), open_subs);
-    assert_eq!(live_signal_count(&cx.runtime), signals);
+    assert_eq!(live_signal_count(&crate::reactive::runtime()), signals);
     assert!(signal_is_alive(&count));
 
     open.set(true);
@@ -828,7 +811,7 @@ fn show_hides_without_dropping_state() {
     assert!(ui.node_rect(tail).unwrap().x > tail_hidden.x + 1.0);
     assert_eq!(signal_subscriber_count(&label), label_subs);
     assert_eq!(signal_subscriber_count(&open), open_subs);
-    assert_eq!(live_signal_count(&cx.runtime), signals);
+    assert_eq!(live_signal_count(&crate::reactive::runtime()), signals);
     assert_eq!(count.get(), 5);
 }
 
@@ -844,29 +827,26 @@ fn if_else_disposes_the_branch_it_leaves() {
     let left_text = left.clone();
     let right_text = right.clone();
     let cx_view = cx.clone();
-    let mut ui = settled(
-        &cx,
-        div().key("root").children([
-            text("head").key("head"),
-            if_else(
-                move || flag_branch.get(),
-                {
-                    let slot = Rc::clone(&slot);
-                    move || {
-                        let inner = cx_view.signal(9);
-                        slot.borrow_mut().replace(inner);
-                        let left_text = left_text.clone();
-                        text_dyn(move || left_text.get().to_string()).key("branch")
-                    }
-                },
+    let mut ui = settled(div().key("root").children([
+        text("head").key("head"),
+        if_else(
+            move || flag_branch.get(),
+            {
+                let slot = Rc::clone(&slot);
                 move || {
-                    let right_text = right_text.clone();
-                    text_dyn(move || right_text.get().to_string()).key("branch")
-                },
-            ),
-            text("tail").key("tail"),
-        ]),
-    );
+                    let inner = cx_view.signal(9);
+                    slot.borrow_mut().replace(inner);
+                    let left_text = left_text.clone();
+                    text_dyn(move || left_text.get().to_string()).key("branch")
+                }
+            },
+            move || {
+                let right_text = right_text.clone();
+                text_dyn(move || right_text.get().to_string()).key("branch")
+            },
+        ),
+        text("tail").key("tail"),
+    ]));
     let root = ui.find_by_key("root").unwrap();
     let head = ui.find_by_key("head").unwrap();
     let tail = ui.find_by_key("tail").unwrap();
@@ -877,7 +857,7 @@ fn if_else_disposes_the_branch_it_leaves() {
     assert_eq!(signal_subscriber_count(&left), 1);
     assert_eq!(signal_subscriber_count(&right), 0);
     assert_eq!(signal_subscriber_count(&flag), 1);
-    let while_then = live_signal_count(&cx.runtime);
+    let while_then = live_signal_count(&crate::reactive::runtime());
 
     flag.set(false);
     ui.update(VIEWPORT);
@@ -889,7 +869,7 @@ fn if_else_disposes_the_branch_it_leaves() {
     assert_eq!(signal_subscriber_count(&left), 0);
     assert_eq!(signal_subscriber_count(&right), 1);
     assert_eq!(signal_subscriber_count(&flag), 1);
-    assert!(live_signal_count(&cx.runtime) < while_then);
+    assert!(live_signal_count(&crate::reactive::runtime()) < while_then);
 
     flag.set(true);
     ui.update(VIEWPORT);
@@ -920,18 +900,15 @@ fn if_without_else_removes_its_content() {
     let cx = context();
     let open = cx.signal(true);
     let open_visible = open.clone();
-    let mut ui = settled(
-        &cx,
-        div().key("root").children([
-            text("head").key("head"),
-            if_else(
-                move || open_visible.get(),
-                || text("yes").key("yes"),
-                || fragment(Vec::<Element>::new()),
-            ),
-            text("tail").key("tail"),
-        ]),
-    );
+    let mut ui = settled(div().key("root").children([
+        text("head").key("head"),
+        if_else(
+            move || open_visible.get(),
+            || text("yes").key("yes"),
+            || fragment(Vec::<Element>::new()),
+        ),
+        text("tail").key("tail"),
+    ]));
     let root = ui.find_by_key("root").unwrap();
     let head = ui.find_by_key("head").unwrap();
     let yes = ui.find_by_key("yes").unwrap();
@@ -966,31 +943,28 @@ fn for_keeps_rows_by_key() {
     let rows = Rc::new(RefCell::new(Vec::new()));
     let captured = Rc::clone(&rows);
     let items_source = items.clone();
-    let mut ui = settled(
-        &cx,
-        div().key("root").children([
-            text("head").key("head"),
-            for_each(
-                move |visit| {
-                    items_source.with(|list| {
-                        for item in list {
-                            visit(item);
-                        }
-                    });
-                },
-                |item| &item.id,
-                {
-                    let captured = Rc::clone(&captured);
-                    move |item: Signal<Row>| {
-                        captured.borrow_mut().push(item.clone());
-                        let key = item.with_untracked(|row| row.id.to_string());
-                        text_dyn(move || item.with(|row| row.title.clone())).key(key)
+    let mut ui = settled(div().key("root").children([
+        text("head").key("head"),
+        for_each(
+            move |visit| {
+                items_source.with(|list| {
+                    for item in list {
+                        visit(item);
                     }
-                },
-            ),
-            text("tail").key("tail"),
-        ]),
-    );
+                });
+            },
+            |item| &item.id,
+            {
+                let captured = Rc::clone(&captured);
+                move |item: Signal<Row>| {
+                    captured.borrow_mut().push(item.clone());
+                    let key = item.with_untracked(|row| row.id.to_string());
+                    text_dyn(move || item.with(|row| row.title.clone())).key(key)
+                }
+            },
+        ),
+        text("tail").key("tail"),
+    ]));
     let root = ui.find_by_key("root").unwrap();
     let head = ui.find_by_key("head").unwrap();
     let tail = ui.find_by_key("tail").unwrap();
@@ -999,7 +973,7 @@ fn for_keeps_rows_by_key() {
     assert_eq!(ui.node_children(root), &[head, first, second, tail]);
     let row_signals = rows.borrow().clone();
     assert_eq!(row_signals.len(), 2);
-    let signals = live_signal_count(&cx.runtime);
+    let signals = live_signal_count(&crate::reactive::runtime());
     assert_eq!(signal_subscriber_count(&items), 1);
 
     items.set(vec![
@@ -1017,7 +991,7 @@ fn for_keeps_rows_by_key() {
     assert_eq!(ui.find_by_key("2"), Some(second));
     assert_eq!(ui.node_children(root), &[head, second, first, tail]);
     assert_eq!(rows.borrow().len(), 2);
-    assert_eq!(live_signal_count(&cx.runtime), signals);
+    assert_eq!(live_signal_count(&crate::reactive::runtime()), signals);
     assert!(signal_is_alive(&row_signals[0]));
     assert!(signal_is_alive(&row_signals[1]));
 
@@ -1036,7 +1010,7 @@ fn for_keeps_rows_by_key() {
     assert_eq!(ui.node_text(first), Some("a"));
     assert_eq!(row_signals[1].with_untracked(|row| row.title.clone()), "b2");
     assert_eq!(ui.find_by_key("1"), Some(first));
-    assert_eq!(live_signal_count(&cx.runtime), signals);
+    assert_eq!(live_signal_count(&crate::reactive::runtime()), signals);
     assert_eq!(rows.borrow().len(), 2);
 
     items.set(vec![Row {
@@ -1052,13 +1026,13 @@ fn for_keeps_rows_by_key() {
     assert_eq!(ui.node_children(root), &[head, first, tail]);
     assert_eq!(signal_subscriber_count(&items), 1);
 
-    let after_delete = live_signal_count(&cx.runtime);
+    let after_delete = live_signal_count(&crate::reactive::runtime());
     items.set(vec![Row {
         id: 1,
         title: "a".into(),
     }]);
     ui.update(VIEWPORT);
-    assert_eq!(live_signal_count(&cx.runtime), after_delete);
+    assert_eq!(live_signal_count(&crate::reactive::runtime()), after_delete);
     assert_eq!(ui.find_by_key("1"), Some(first));
     assert_eq!(rows.borrow().len(), 2);
 }
@@ -1069,7 +1043,6 @@ fn duplicate_for_key_panics() {
     let cx = context();
     let items = cx.signal(vec![1_u64, 1]);
     let _ui = Ui::new(
-        &cx,
         for_each(
             move |visit| {
                 items.with(|list| {
@@ -1110,69 +1083,66 @@ fn switching_if_disposes_hidden_show_rows_and_nested_if() {
     let nested_text = nested.clone();
     let items_source = items.clone();
     let cx_view = cx.clone();
-    let mut ui = settled(
-        &cx,
-        if_else(
-            move || outer_branch.get(),
-            {
-                let rows = Rc::clone(&rows);
-                let inner_state = Rc::clone(&inner_state);
-                move || {
-                    let cx_view = cx_view.clone();
-                    fragment([
-                        show(
-                            {
-                                let panel_open = panel_open.clone();
-                                move || panel_open.get()
-                            },
-                            {
+    let mut ui = settled(if_else(
+        move || outer_branch.get(),
+        {
+            let rows = Rc::clone(&rows);
+            let inner_state = Rc::clone(&inner_state);
+            move || {
+                let cx_view = cx_view.clone();
+                fragment([
+                    show(
+                        {
+                            let panel_open = panel_open.clone();
+                            move || panel_open.get()
+                        },
+                        {
+                            let shown_text = shown_text.clone();
+                            move || {
                                 let shown_text = shown_text.clone();
-                                move || {
-                                    let shown_text = shown_text.clone();
-                                    text_dyn(move || shown_text.get()).key("hidden-show")
-                                }
-                            },
-                        ),
-                        for_each(
-                            {
-                                let items_source = items_source.clone();
-                                move |visit| {
-                                    items_source.with(|list| {
-                                        for item in list {
-                                            visit(item);
-                                        }
-                                    });
-                                }
-                            },
-                            |item| &item.id,
-                            {
-                                let rows = Rc::clone(&rows);
-                                move |item: Signal<Row>| {
-                                    rows.borrow_mut().push(item.clone());
-                                    text_dyn(move || item.with(|row| row.title.clone()))
-                                }
-                            },
-                        ),
-                        if_else(
-                            || true,
-                            {
-                                let inner_state = Rc::clone(&inner_state);
+                                text_dyn(move || shown_text.get()).key("hidden-show")
+                            }
+                        },
+                    ),
+                    for_each(
+                        {
+                            let items_source = items_source.clone();
+                            move |visit| {
+                                items_source.with(|list| {
+                                    for item in list {
+                                        visit(item);
+                                    }
+                                });
+                            }
+                        },
+                        |item| &item.id,
+                        {
+                            let rows = Rc::clone(&rows);
+                            move |item: Signal<Row>| {
+                                rows.borrow_mut().push(item.clone());
+                                text_dyn(move || item.with(|row| row.title.clone()))
+                            }
+                        },
+                    ),
+                    if_else(
+                        || true,
+                        {
+                            let inner_state = Rc::clone(&inner_state);
+                            let nested_text = nested_text.clone();
+                            move || {
+                                let state = cx_view.signal(3);
+                                inner_state.borrow_mut().replace(state);
                                 let nested_text = nested_text.clone();
-                                move || {
-                                    let state = cx_view.signal(3);
-                                    inner_state.borrow_mut().replace(state);
-                                    let nested_text = nested_text.clone();
-                                    text_dyn(move || nested_text.get()).key("nested")
-                                }
-                            },
-                            || text("no"),
-                        ),
-                    ])
-                }
-            },
-            || text("other").key("other"),
-        ),
-    );
+                                text_dyn(move || nested_text.get()).key("nested")
+                            }
+                        },
+                        || text("no"),
+                    ),
+                ])
+            }
+        },
+        || text("other").key("other"),
+    ));
 
     let hidden = ui.find_by_key("hidden-show").unwrap();
     assert_eq!(ui.node_text(hidden), Some("keep"));
@@ -1229,30 +1199,27 @@ fn switching_branches_and_rows_reuses_slots() {
     let items = cx.signal(vec![1_u64, 2]);
     let flag_branch = flag.clone();
     let items_source = items.clone();
-    let mut ui = settled(
-        &cx,
-        div().children([
-            if_else(
-                move || flag_branch.get(),
-                || text_dyn(|| "yes".to_owned()).key("branch"),
-                || text_dyn(|| "no".to_owned()).key("branch"),
-            ),
-            for_each(
-                move |visit| {
-                    items_source.with(|list| {
-                        for item in list {
-                            visit(item);
-                        }
-                    });
-                },
-                |item| item,
-                |item| text_dyn(move || item.get().to_string()),
-            ),
-        ]),
-    );
+    let mut ui = settled(div().children([
+        if_else(
+            move || flag_branch.get(),
+            || text_dyn(|| "yes".to_owned()).key("branch"),
+            || text_dyn(|| "no".to_owned()).key("branch"),
+        ),
+        for_each(
+            move |visit| {
+                items_source.with(|list| {
+                    for item in list {
+                        visit(item);
+                    }
+                });
+            },
+            |item| item,
+            |item| text_dyn(move || item.get().to_string()),
+        ),
+    ]));
     let nodes = ui.node_slots();
     let bindings = ui.binding_slots();
-    let signals = live_signal_count(&cx.runtime);
+    let signals = live_signal_count(&crate::reactive::runtime());
     for turn in 0..40 {
         flag.update(|value| *value = !*value);
         if turn % 2 == 0 {
@@ -1265,7 +1232,7 @@ fn switching_branches_and_rows_reuses_slots() {
     assert_eq!(ui.node_text(ui.find_by_key("branch").unwrap()), Some("yes"));
     assert_eq!(ui.node_slots(), nodes);
     assert_eq!(ui.binding_slots(), bindings);
-    assert_eq!(live_signal_count(&cx.runtime), signals);
+    assert_eq!(live_signal_count(&crate::reactive::runtime()), signals);
 }
 
 #[test]
@@ -1274,37 +1241,34 @@ fn add_and_drop_returns_resources_to_the_baseline() {
     let items = cx.signal(Vec::<u64>::new());
     let items_source = items.clone();
     let cx_row = cx.clone();
-    let mut ui = settled(
-        &cx,
-        div().child(for_each(
-            move |visit| {
-                items_source.with(|list| {
-                    for item in list {
-                        visit(item);
+    let mut ui = settled(div().child(for_each(
+        move |visit| {
+            items_source.with(|list| {
+                for item in list {
+                    visit(item);
+                }
+            });
+        },
+        |item| item,
+        move |item| {
+            let flag = cx_row.signal(false);
+            let shown = flag.clone();
+            let id = item.get_untracked();
+            div().key(format!("row-{id}")).children([
+                text_dyn(move || item.get().to_string()).key(format!("label-{id}")),
+                text_dyn(move || {
+                    if shown.get() {
+                        "on".to_owned()
+                    } else {
+                        "off".to_owned()
                     }
-                });
-            },
-            |item| item,
-            move |item| {
-                let flag = cx_row.signal(false);
-                let shown = flag.clone();
-                let id = item.get_untracked();
-                div().key(format!("row-{id}")).children([
-                    text_dyn(move || item.get().to_string()).key(format!("label-{id}")),
-                    text_dyn(move || {
-                        if shown.get() {
-                            "on".to_owned()
-                        } else {
-                            "off".to_owned()
-                        }
-                    }),
-                    div()
-                        .on_click(move |_| flag.update(|value| *value = !*value))
-                        .child(text("Drop")),
-                ])
-            },
-        )),
-    );
+                }),
+                div()
+                    .on_click(move |_| flag.update(|value| *value = !*value))
+                    .child(text("Drop")),
+            ])
+        },
+    )));
     let baseline = ui.resources();
     let mut peak_at_thirty = None;
     for round in 0..3 {
@@ -1333,10 +1297,7 @@ fn add_and_drop_returns_resources_to_the_baseline() {
 fn a_long_list_mounts_only_the_visible_window_plus_a_buffer() {
     let cx = context();
     let calls = Rc::new(Cell::new(0));
-    let mut ui = settled(
-        &cx,
-        scroll_window(80.0, 20.0, 1, || 50, counted_row(&calls)),
-    );
+    let mut ui = settled(scroll_window(80.0, 20.0, 1, || 50, counted_row(&calls)));
     assert_eq!(calls.get(), 5);
     assert_mounted(&ui, &[0, 1, 2, 3, 4]);
     assert_absent(&ui, &[5, 49]);
@@ -1363,10 +1324,7 @@ fn a_long_list_mounts_only_the_visible_window_plus_a_buffer() {
 fn scrolling_reuses_rows_that_stay_in_the_window() {
     let cx = context();
     let calls = Rc::new(Cell::new(0));
-    let mut ui = settled(
-        &cx,
-        scroll_window(80.0, 20.0, 1, || 50, counted_row(&calls)),
-    );
+    let mut ui = settled(scroll_window(80.0, 20.0, 1, || 50, counted_row(&calls)));
     let kept = ui.find_by_key("row-1").unwrap();
     let edge = ui.find_by_key("row-4").unwrap();
     assert_eq!(calls.get(), 5);
@@ -1410,21 +1368,18 @@ fn shrinking_the_list_drops_rows_past_the_end_and_updates_text() {
     let counted = items.clone();
     let source = items.clone();
     let built = Rc::clone(&calls);
-    let mut ui = settled(
-        &cx,
-        scroll_window(
-            80.0,
-            20.0,
-            1,
-            move || counted.with(|list| list.len()),
-            move |index| {
-                built.set(built.get() + 1);
-                let source = source.clone();
-                text_dyn(move || source.with(|list| list.get(index).cloned().unwrap_or_default()))
-                    .key(format!("row-{index}"))
-            },
-        ),
-    );
+    let mut ui = settled(scroll_window(
+        80.0,
+        20.0,
+        1,
+        move || counted.with(|list| list.len()),
+        move |index| {
+            built.set(built.get() + 1);
+            let source = source.clone();
+            text_dyn(move || source.with(|list| list.get(index).cloned().unwrap_or_default()))
+                .key(format!("row-{index}"))
+        },
+    ));
     let first = ui.find_by_key("row-0").unwrap();
     assert_eq!(ui.node_text(first), Some("row 0"));
     assert_eq!(calls.get(), 5);
@@ -1449,14 +1404,11 @@ fn dropping_the_window_disposes_its_rows() {
     let cx = context();
     let open = cx.signal(true);
     let flag = open.clone();
-    let mut ui = settled(
-        &cx,
-        if_else(
-            move || flag.get(),
-            || scroll_window(80.0, 20.0, 1, || 8, row_slot),
-            || text("closed").key("closed"),
-        ),
-    );
+    let mut ui = settled(if_else(
+        move || flag.get(),
+        || scroll_window(80.0, 20.0, 1, || 8, row_slot),
+        || text("closed").key("closed"),
+    ));
     assert!(ui.find_by_key("row-0").is_some());
     open.set(false);
     ui.update(VIEWPORT);
@@ -1483,7 +1435,6 @@ fn a_taller_scrollport_mounts_more_rows() {
     let calls = Rc::new(Cell::new(0));
     let built = Rc::clone(&calls);
     let mut ui = settled(
-        &cx,
         div().child(
             div()
                 .key("scroller")
@@ -1523,10 +1474,10 @@ fn a_taller_scrollport_mounts_more_rows() {
 fn a_missing_scrollport_mounts_no_rows() {
     let cx = context();
     let read = cx.clone();
-    let mut ui = settled(
-        &cx,
-        scrolled_offset_probe(list_window("absent", || 10, 20.0, 1, row_slot), read),
-    );
+    let mut ui = settled(scrolled_offset_probe(
+        list_window("absent", || 10, 20.0, 1, row_slot),
+        read,
+    ));
     assert!(ui.find_by_key("row-0").is_none());
     assert_eq!(ui.node_text(ui.find_by_key("offset").unwrap()), Some("0"));
 
@@ -1540,10 +1491,10 @@ fn a_missing_scrollport_mounts_no_rows() {
 fn a_non_positive_extent_mounts_no_rows() {
     let cx = context();
     let read = cx.clone();
-    let mut ui = settled(
-        &cx,
-        scrolled_offset_probe(list_window("scroller", || 10, 0.0, 1, row_slot), read),
-    );
+    let mut ui = settled(scrolled_offset_probe(
+        list_window("scroller", || 10, 0.0, 1, row_slot),
+        read,
+    ));
     assert!(ui.find_by_key("row-0").is_none());
     cx.set_scroll_offset("scroller", Point::new(0.0, 1_000.0));
     ui.update(VIEWPORT);
@@ -1660,7 +1611,7 @@ fn scroll_column(overflow: Overflow) -> Element {
 fn visual_motion_above_the_scroll_clip_does_not_enlarge_damage() {
     let cx = context();
     let start = Instant::now();
-    let mut ui = Ui::new(&cx, clipped_motion_column(), Theme::light());
+    let mut ui = Ui::new(clipped_motion_column(), Theme::light());
     ui.update_at(VIEWPORT, start);
     let scroller_id = ui.find_by_key("scroller").unwrap();
     let box_id = ui.find_by_key("box").unwrap();
@@ -1737,7 +1688,7 @@ fn settle_scroll(ui: &mut Ui, start: Instant) {
 fn overflow_auto_clips_layout_eases_to_the_wheel_target_and_stops() {
     let cx = context();
     let start = Instant::now();
-    let mut ui = Ui::new(&cx, scroll_column(Overflow::Auto), Theme::light());
+    let mut ui = Ui::new(scroll_column(Overflow::Auto), Theme::light());
     ui.update_at(VIEWPORT, start);
     ui.prepare_frame();
     let scroller = ui.node_rect(ui.find_by_key("scroller").unwrap()).unwrap();
@@ -1804,7 +1755,7 @@ fn overflow_auto_clips_layout_eases_to_the_wheel_target_and_stops() {
 fn overflow_hidden_clips_without_scrolling() {
     let cx = context();
     let start = Instant::now();
-    let mut ui = Ui::new(&cx, scroll_column(Overflow::Hidden), Theme::light());
+    let mut ui = Ui::new(scroll_column(Overflow::Hidden), Theme::light());
     ui.update_at(VIEWPORT, start);
     let scroller = ui.node_rect(ui.find_by_key("scroller").unwrap()).unwrap();
     let tall_id = ui.find_by_key("tall").unwrap();
@@ -1862,7 +1813,7 @@ fn nested_scroll_gives_leftover_wheel_to_the_parent() {
             ]),
     );
     let start = Instant::now();
-    let mut ui = Ui::new(&cx, root, Theme::light());
+    let mut ui = Ui::new(root, Theme::light());
     ui.update_at(VIEWPORT, start);
     let inner = ui.node_rect(ui.find_by_key("inner").unwrap()).unwrap();
     let inner_body = ui
@@ -1924,7 +1875,7 @@ fn dragging_the_thumb_scrolls_immediately_and_does_not_click() {
             ),
     );
     let start = Instant::now();
-    let mut ui = Ui::new(&cx, root, Theme::light());
+    let mut ui = Ui::new(root, Theme::light());
     ui.update_at(VIEWPORT, start);
     ui.prepare_frame();
     let scroller = ui.node_rect(ui.find_by_key("scroller").unwrap()).unwrap();
@@ -2025,10 +1976,8 @@ fn solid_fill(ui: &Ui, key: &str) -> Color {
 #[test]
 fn translation_moves_the_node_without_moving_its_sibling() {
     let cx = context();
-    let mut ui = settled(
-        &cx,
-        div().children([sized_box("a", Color::BLACK), sized_box("b", Color::BLACK)]),
-    );
+    let mut ui =
+        settled(div().children([sized_box("a", Color::BLACK), sized_box("b", Color::BLACK)]));
     let a = ui.find_by_key("a").unwrap();
     let b = ui.find_by_key("b").unwrap();
     let a_start = ui.node_rect(a).unwrap();
@@ -2055,10 +2004,7 @@ fn translation_moves_the_node_without_moving_its_sibling() {
 #[test]
 fn a_child_moves_with_its_parent_translation() {
     let cx = context();
-    let mut ui = settled(
-        &cx,
-        div().key("parent").child(sized_box("child", Color::BLACK)),
-    );
+    let mut ui = settled(div().key("parent").child(sized_box("child", Color::BLACK)));
     let parent = ui.find_by_key("parent").unwrap();
     let child = ui.find_by_key("child").unwrap();
     let child_start = ui.node_rect(child).unwrap();
@@ -2078,7 +2024,7 @@ fn a_child_moves_with_its_parent_translation() {
 #[test]
 fn opacity_scales_the_fill_and_a_new_animate_replaces_the_tween() {
     let cx = context();
-    let mut ui = settled(&cx, sized_box("box", Color::rgb(0, 0, 255)));
+    let mut ui = settled(sized_box("box", Color::rgb(0, 0, 255)));
     let id = ui.find_by_key("box").unwrap();
     let start = Instant::now();
     ui.animate(
@@ -2110,20 +2056,17 @@ fn style_dyn_does_not_reset_a_running_opacity_tween() {
     let cx = context();
     let red = cx.signal(false);
     let paint = red.clone();
-    let mut ui = settled(
-        &cx,
-        div().key("box").style_dyn(move || {
-            let color = if paint.get() {
-                Color::rgb(255, 0, 0)
-            } else {
-                Color::rgb(0, 0, 255)
-            };
-            StyleRefinement::default()
-                .width(40)
-                .height(20)
-                .background(color)
-        }),
-    );
+    let mut ui = settled(div().key("box").style_dyn(move || {
+        let color = if paint.get() {
+            Color::rgb(255, 0, 0)
+        } else {
+            Color::rgb(0, 0, 255)
+        };
+        StyleRefinement::default()
+            .width(40)
+            .height(20)
+            .background(color)
+    }));
     let id = ui.find_by_key("box").unwrap();
     let start = Instant::now();
     ui.animate(
@@ -2147,15 +2090,12 @@ fn a_finished_tween_stays_put_when_style_changes_later() {
     let cx = context();
     let wide = cx.signal(false);
     let width = wide.clone();
-    let mut ui = settled(
-        &cx,
-        div().key("box").style_dyn(move || {
-            StyleRefinement::default()
-                .width(if width.get() { 80 } else { 40 })
-                .height(20)
-                .background(Color::BLACK)
-        }),
-    );
+    let mut ui = settled(div().key("box").style_dyn(move || {
+        StyleRefinement::default()
+            .width(if width.get() { 80 } else { 40 })
+            .height(20)
+            .background(Color::BLACK)
+    }));
     let id = ui.find_by_key("box").unwrap();
     let start_y = ui.node_rect(id).unwrap().y;
     let start = Instant::now();
@@ -2192,10 +2132,7 @@ fn hiding_a_node_cancels_its_tween() {
     let cx = context();
     let open = cx.signal(true);
     let shown = open.clone();
-    let mut ui = settled(
-        &cx,
-        show(move || shown.get(), || sized_box("box", Color::BLACK)),
-    );
+    let mut ui = settled(show(move || shown.get(), || sized_box("box", Color::BLACK)));
     let id = ui.find_by_key("box").unwrap();
     let start_y = ui.node_rect(id).unwrap().y;
     let start = Instant::now();
@@ -2222,14 +2159,11 @@ fn disposing_a_node_drops_its_tween() {
     let cx = context();
     let left = cx.signal(true);
     let branch = left.clone();
-    let mut ui = settled(
-        &cx,
-        if_else(
-            move || branch.get(),
-            || sized_box("box", Color::BLACK),
-            || sized_box("box", Color::BLACK),
-        ),
-    );
+    let mut ui = settled(if_else(
+        move || branch.get(),
+        || sized_box("box", Color::BLACK),
+        || sized_box("box", Color::BLACK),
+    ));
     let id = ui.find_by_key("box").unwrap();
     let rest_y = ui.node_rect(id).unwrap().y;
     let start = Instant::now();
@@ -2259,7 +2193,7 @@ fn disposing_a_node_drops_its_tween() {
 #[test]
 fn context_animate_reads_layout_and_shares_the_driver() {
     let cx = context();
-    let mut ui = settled(&cx, sized_box("panel", Color::BLACK));
+    let mut ui = settled(sized_box("panel", Color::BLACK));
     let start_y = ui.node_rect(ui.find_by_key("panel").unwrap()).unwrap().y;
     cx.animate(|motion| {
         let id = motion.find_by_key("panel").expect("panel");
@@ -2285,7 +2219,7 @@ fn context_animate_reads_layout_and_shares_the_driver() {
 #[test]
 fn context_animate_wakes_the_host_once_per_batch() {
     let cx = context();
-    let mut ui = settled(&cx, div());
+    let mut ui = settled(div());
     let wakes = Rc::new(Cell::new(0));
     let counter = wakes.clone();
     ui.set_waker(move || counter.set(counter.get() + 1));
@@ -2303,7 +2237,7 @@ fn a_loop_wraps_and_a_ping_pong_comes_back() {
     let start = Instant::now();
     {
         let cx = context();
-        let mut ui = settled(&cx, sized_box("box", Color::BLACK));
+        let mut ui = settled(sized_box("box", Color::BLACK));
         let id = ui.find_by_key("box").unwrap();
         let start_y = ui.node_rect(id).unwrap().y;
         ui.animate(
@@ -2320,7 +2254,7 @@ fn a_loop_wraps_and_a_ping_pong_comes_back() {
     }
 
     let cx = context();
-    let mut ui = settled(&cx, sized_box("pong", Color::BLACK));
+    let mut ui = settled(sized_box("pong", Color::BLACK));
     let id = ui.find_by_key("pong").unwrap();
     let start_y = ui.node_rect(id).unwrap().y;
     ui.animate(
@@ -2338,7 +2272,7 @@ fn a_loop_wraps_and_a_ping_pong_comes_back() {
     assert!(ui.motion_animating());
 
     let cx = context();
-    let mut ui = settled(&cx, sized_box("pong-ease", Color::BLACK));
+    let mut ui = settled(sized_box("pong-ease", Color::BLACK));
     let id = ui.find_by_key("pong-ease").unwrap();
     let start_y = ui.node_rect(id).unwrap().y;
     ui.animate(
@@ -2358,7 +2292,7 @@ fn a_loop_wraps_and_a_ping_pong_comes_back() {
 #[test]
 fn delay_holds_the_start_until_it_elapses() {
     let cx = context();
-    let mut ui = settled(&cx, sized_box("box", Color::BLACK));
+    let mut ui = settled(sized_box("box", Color::BLACK));
     let id = ui.find_by_key("box").unwrap();
     let start_y = ui.node_rect(id).unwrap().y;
     let start = Instant::now();
@@ -2381,7 +2315,7 @@ fn sequence_waits_and_together_starts_at_once() {
     let start = Instant::now();
     {
         let cx = context();
-        let mut ui = settled(&cx, div().children([sized_box("box", Color::BLACK)]));
+        let mut ui = settled(div().children([sized_box("box", Color::BLACK)]));
         let id = ui.find_by_key("box").unwrap();
         let start_y = ui.node_rect(id).unwrap().y;
         ui.play(Anim::sequence([
@@ -2408,13 +2342,10 @@ fn sequence_waits_and_together_starts_at_once() {
     }
 
     let cx = context();
-    let mut ui = settled(
-        &cx,
-        div().children([
-            sized_box("left", Color::BLACK),
-            sized_box("right", Color::BLACK),
-        ]),
-    );
+    let mut ui = settled(div().children([
+        sized_box("left", Color::BLACK),
+        sized_box("right", Color::BLACK),
+    ]));
     let left = ui.find_by_key("left").unwrap();
     let right = ui.find_by_key("right").unwrap();
     let left_y = ui.node_rect(left).unwrap().y;
@@ -2441,7 +2372,7 @@ fn sequence_waits_and_together_starts_at_once() {
 #[test]
 fn stopping_a_play_handle_holds_the_value_and_skips_the_rest() {
     let cx = context();
-    let mut ui = settled(&cx, sized_box("box", Color::BLACK));
+    let mut ui = settled(sized_box("box", Color::BLACK));
     let id = ui.find_by_key("box").unwrap();
     let start_y = ui.node_rect(id).unwrap().y;
     let start = Instant::now();
@@ -2472,7 +2403,7 @@ fn stopping_a_play_handle_holds_the_value_and_skips_the_rest() {
 #[test]
 fn scale_grows_the_painted_box_and_the_hit_target() {
     let cx = context();
-    let mut ui = settled(&cx, sized_box("box", Color::BLACK));
+    let mut ui = settled(sized_box("box", Color::BLACK));
     let id = ui.find_by_key("box").unwrap();
     let layout = ui.node_rect(id).unwrap();
     let start = Instant::now();
@@ -2496,7 +2427,7 @@ fn scale_grows_the_painted_box_and_the_hit_target() {
 #[test]
 fn background_lerps_and_rotation_spins_the_quad() {
     let cx = context();
-    let mut ui = settled(&cx, sized_box("box", Color::BLACK));
+    let mut ui = settled(sized_box("box", Color::BLACK));
     let id = ui.find_by_key("box").unwrap();
     let start = Instant::now();
     ui.animate(
@@ -2522,7 +2453,7 @@ fn background_lerps_and_rotation_spins_the_quad() {
 #[test]
 fn shake_offsets_sideways_for_one_cycle() {
     let cx = context();
-    let mut ui = settled(&cx, sized_box("box", Color::BLACK));
+    let mut ui = settled(sized_box("box", Color::BLACK));
     let id = ui.find_by_key("box").unwrap();
     let start_x = ui.node_rect(id).unwrap().x;
     let start = Instant::now();
@@ -2563,7 +2494,6 @@ fn two_uis_share_a_signal_and_surface_commands_drain_once() {
     let primary_wakes = Rc::new(Cell::new(0));
     let secondary_wakes = Rc::new(Cell::new(0));
     let mut first = Ui::new(
-        &cx,
         text_dyn({
             let count = count.clone();
             move || count.get().to_string()
@@ -2571,7 +2501,6 @@ fn two_uis_share_a_signal_and_surface_commands_drain_once() {
         Theme::light(),
     );
     let mut second = Ui::new(
-        &cx,
         text_dyn({
             let count = count.clone();
             move || count.get().to_string()
@@ -2624,14 +2553,7 @@ fn phase(log: &Rc<RefCell<Vec<String>>>, label: &'static str) -> impl FnMut() + 
 
 #[derive(Clone)]
 struct HookChild {
-    context: Context,
     log: Rc<RefCell<Vec<String>>>,
-}
-
-impl HasContext for HookChild {
-    fn context(&self) -> &Context {
-        &self.context
-    }
 }
 
 impl Component for HookChild {
@@ -2651,23 +2573,16 @@ struct HookNote {
 }
 
 impl Singleton for HookNote {
-    fn create(cx: &Context) -> Self {
+    fn create() -> Self {
         Self {
-            value: cx.signal(0),
+            value: Context::current().signal(0),
         }
     }
 }
 
 #[derive(Clone)]
 struct HookParent {
-    context: Context,
     log: Rc<RefCell<Vec<String>>>,
-}
-
-impl HasContext for HookParent {
-    fn context(&self) -> &Context {
-        &self.context
-    }
 }
 
 impl Component for HookParent {
@@ -2678,7 +2593,6 @@ impl Component for HookParent {
         on_before_unmount(phase(&self.log, "parent:before_unmount"));
         on_unmounted(phase(&self.log, "parent:unmounted"));
         div().key("parent").child(HookChild {
-            context: self.context.clone(),
             log: Rc::clone(&self.log),
         })
     }
@@ -2686,14 +2600,7 @@ impl Component for HookParent {
 
 #[derive(Clone)]
 struct HookChain {
-    context: Context,
     log: Rc<RefCell<Vec<String>>>,
-}
-
-impl HasContext for HookChain {
-    fn context(&self) -> &Context {
-        &self.context
-    }
 }
 
 impl Component for HookChain {
@@ -2703,7 +2610,6 @@ impl Component for HookChain {
         on_before_unmount(phase(&self.log, "chain:before_unmount"));
         on_unmounted(phase(&self.log, "chain:unmounted"));
         HookChild {
-            context: self.context.clone(),
             log: Rc::clone(&self.log),
         }
         .into_element()
@@ -2712,14 +2618,7 @@ impl Component for HookChain {
 
 #[derive(Clone)]
 struct HookFragment {
-    context: Context,
     log: Rc<RefCell<Vec<String>>>,
-}
-
-impl HasContext for HookFragment {
-    fn context(&self) -> &Context {
-        &self.context
-    }
 }
 
 impl Component for HookFragment {
@@ -2732,15 +2631,8 @@ impl Component for HookFragment {
 
 #[derive(Clone)]
 struct HookTicker {
-    context: Context,
     ticks: Rc<Cell<u32>>,
     value: Signal<i32>,
-}
-
-impl HasContext for HookTicker {
-    fn context(&self) -> &Context {
-        &self.context
-    }
 }
 
 impl Component for HookTicker {
@@ -2756,14 +2648,7 @@ impl Component for HookTicker {
 
 #[derive(Clone)]
 struct HookQuiet {
-    context: Context,
     mounts: Rc<Cell<u32>>,
-}
-
-impl HasContext for HookQuiet {
-    fn context(&self) -> &Context {
-        &self.context
-    }
 }
 
 impl Component for HookQuiet {
@@ -2780,9 +2665,7 @@ fn component_hooks_run_parent_before_child_and_unmount_in_reverse() {
     let log = Rc::new(RefCell::new(Vec::new()));
     {
         let ui = Ui::new(
-            &cx,
             HookParent {
-                context: cx.clone(),
                 log: Rc::clone(&log),
             },
             Theme::light(),
@@ -2798,11 +2681,9 @@ fn component_hooks_run_parent_before_child_and_unmount_in_reverse() {
             ]
         );
         assert_eq!(ui.resources().live_components, 2);
-        let note = cx.enter(|| {
-            use_store(SingletonOf::<HookNote>::new())
-                .value
-                .get_untracked()
-        });
+        let note = use_store(SingletonOf::<HookNote>::new())
+            .value
+            .get_untracked();
         assert_eq!(note, 4);
         assert!(ui.find_by_key("child").is_some());
     }
@@ -2828,9 +2709,7 @@ fn component_that_returns_a_child_component_keeps_both_lifecycles() {
     let log = Rc::new(RefCell::new(Vec::new()));
     {
         let ui = Ui::new(
-            &cx,
             HookChain {
-                context: cx.clone(),
                 log: Rc::clone(&log),
             },
             Theme::light(),
@@ -2867,9 +2746,7 @@ fn component_fragment_root_still_mounts_its_hooks() {
     let log = Rc::new(RefCell::new(Vec::new()));
     {
         let ui = Ui::new(
-            &cx,
             HookFragment {
-                context: cx.clone(),
                 log: Rc::clone(&log),
             },
             Theme::light(),
@@ -2888,15 +2765,7 @@ fn component_fragment_root_still_mounts_its_hooks() {
 #[test]
 fn component_without_hooks_adds_no_boundary() {
     #[derive(Clone)]
-    struct Plain {
-        context: Context,
-    }
-
-    impl HasContext for Plain {
-        fn context(&self) -> &Context {
-            &self.context
-        }
-    }
+    struct Plain {}
 
     impl Component for Plain {
         fn render(&self) -> Element {
@@ -2905,13 +2774,7 @@ fn component_without_hooks_adds_no_boundary() {
     }
 
     let cx = context();
-    let ui = Ui::new(
-        &cx,
-        Plain {
-            context: cx.clone(),
-        },
-        Theme::light(),
-    );
+    let ui = Ui::new(Plain {}, Theme::light());
     assert_eq!(ui.resources().live_components, 0);
     assert_eq!(ui.resources().components, 0);
     assert!(ui.find_by_key("plain").is_some());
@@ -2927,20 +2790,16 @@ fn show_hides_a_component_without_unmounting_and_keeps_its_frame_tick() {
     let log_view = Rc::clone(&log);
     let ticks_view = Rc::clone(&ticks);
     let cx_view = cx.clone();
-    let mut ui = settled(
-        &cx,
-        div().child(show(
-            move || flag.get(),
-            move || {
-                HookShown {
-                    context: cx_view.clone(),
-                    log: Rc::clone(&log_view),
-                    ticks: Rc::clone(&ticks_view),
-                }
-                .into_element()
-            },
-        )),
-    );
+    let mut ui = settled(div().child(show(
+        move || flag.get(),
+        move || {
+            HookShown {
+                log: Rc::clone(&log_view),
+                ticks: Rc::clone(&ticks_view),
+            }
+            .into_element()
+        },
+    )));
     assert_eq!(log.borrow().as_slice(), ["shown:mounted"]);
     assert_eq!(ticks.get(), 1);
     shown.set(false);
@@ -2955,15 +2814,8 @@ fn show_hides_a_component_without_unmounting_and_keeps_its_frame_tick() {
 
     #[derive(Clone)]
     struct HookShown {
-        context: Context,
         log: Rc<RefCell<Vec<String>>>,
         ticks: Rc<Cell<u32>>,
-    }
-
-    impl HasContext for HookShown {
-        fn context(&self) -> &Context {
-            &self.context
-        }
     }
 
     impl Component for HookShown {
@@ -2987,28 +2839,23 @@ fn if_branch_unmounts_the_component_it_drops_and_releases_its_slot() {
     let log_else = Rc::clone(&log);
     let cx_then = cx.clone();
     let cx_else = cx.clone();
-    let mut ui = settled(
-        &cx,
-        div().child(if_else(
-            move || flag.get(),
-            move || {
-                HookBranch {
-                    context: cx_then.clone(),
-                    log: Rc::clone(&log_then),
-                    name: "then",
-                }
-                .into_element()
-            },
-            move || {
-                HookBranch {
-                    context: cx_else.clone(),
-                    log: Rc::clone(&log_else),
-                    name: "else",
-                }
-                .into_element()
-            },
-        )),
-    );
+    let mut ui = settled(div().child(if_else(
+        move || flag.get(),
+        move || {
+            HookBranch {
+                log: Rc::clone(&log_then),
+                name: "then",
+            }
+            .into_element()
+        },
+        move || {
+            HookBranch {
+                log: Rc::clone(&log_else),
+                name: "else",
+            }
+            .into_element()
+        },
+    )));
     let baseline = ui.resources();
     assert_eq!(log.borrow().as_slice(), ["else:mounted"]);
     assert_eq!(baseline.live_components, 1);
@@ -3034,15 +2881,8 @@ fn if_branch_unmounts_the_component_it_drops_and_releases_its_slot() {
 
     #[derive(Clone)]
     struct HookBranch {
-        context: Context,
         log: Rc<RefCell<Vec<String>>>,
         name: &'static str,
-    }
-
-    impl HasContext for HookBranch {
-        fn context(&self) -> &Context {
-            &self.context
-        }
     }
 
     impl Component for HookBranch {
@@ -3074,16 +2914,13 @@ fn on_updated_reruns_every_frame_and_flushes_a_signal_in_that_update() {
     let mounts = Rc::new(Cell::new(0));
     let value = cx.signal(0);
     let mut ui = Ui::new(
-        &cx,
         div().children([
             HookTicker {
-                context: cx.clone(),
                 ticks: Rc::clone(&ticks),
                 value: value.clone(),
             }
             .into_element(),
             HookQuiet {
-                context: cx.clone(),
                 mounts: Rc::clone(&mounts),
             }
             .into_element(),
@@ -3108,26 +2945,22 @@ fn on_updated_reruns_every_frame_and_flushes_a_signal_in_that_update() {
     let value_branch = value.clone();
     let cx_branch = cx.clone();
     drop(ui);
-    let mut ui = settled(
-        &cx,
-        div().child(if_else(
-            move || flag.get(),
-            {
-                let ticks_branch = Rc::clone(&ticks_branch);
-                let value_branch = value_branch.clone();
-                let cx_branch = cx_branch.clone();
-                move || {
-                    HookTicker {
-                        context: cx_branch.clone(),
-                        ticks: Rc::clone(&ticks_branch),
-                        value: value_branch.clone(),
-                    }
-                    .into_element()
+    let mut ui = settled(div().child(if_else(
+        move || flag.get(),
+        {
+            let ticks_branch = Rc::clone(&ticks_branch);
+            let value_branch = value_branch.clone();
+            let cx_branch = cx_branch.clone();
+            move || {
+                HookTicker {
+                    ticks: Rc::clone(&ticks_branch),
+                    value: value_branch.clone(),
                 }
-            },
-            || div().key("gone"),
-        )),
-    );
+                .into_element()
+            }
+        },
+        || div().key("gone"),
+    )));
     let after_mount = ticks.get();
     assert!(ui.frame_deadline(Instant::now()).is_some());
     assert!(ui.find_by_key("value").is_some());
@@ -3143,8 +2976,8 @@ fn on_updated_reruns_every_frame_and_flushes_a_signal_in_that_update() {
 #[test]
 #[should_panic(expected = "on_mounted called outside a component render")]
 fn on_mounted_outside_render_panics() {
-    let cx = context();
-    cx.enter(|| on_mounted(|| {}));
+    let _cx = context();
+    on_mounted(|| {});
 }
 
 fn field(value: impl crate::IntoInputValue) -> (Element, Rc<RefCell<String>>) {
@@ -3192,11 +3025,7 @@ fn ctrl() -> Modifiers {
 fn dynamic_text_reads_a_reactive_string() {
     let cx = context();
     let name = cx.reactive(String::from("ada"));
-    let mut ui = Ui::new(
-        &cx,
-        text(Dynamic(move || name)).key("label"),
-        Theme::light(),
-    );
+    let mut ui = Ui::new(text(Dynamic(move || name)).key("label"), Theme::light());
     ui.update(VIEWPORT);
     assert_eq!(ui.node_text(ui.find_by_key("label").unwrap()), Some("ada"));
     name.set(String::from("bea"));
@@ -3209,7 +3038,6 @@ fn tab_focuses_the_input_and_typing_appends_at_the_caret() {
     let cx = context();
     let name = cx.reactive(String::from("hi"));
     let mut ui = Ui::new(
-        &cx,
         input()
             .value(Dynamic(move || name))
             .key("field")
@@ -3226,7 +3054,7 @@ fn tab_focuses_the_input_and_typing_appends_at_the_caret() {
 #[test]
 fn click_between_letters_inserts_there() {
     let (element, seen) = field("hello");
-    let mut ui = settled(&context(), element);
+    let mut ui = settled(element);
     click_at(&mut ui, 11.0, 4.0);
     ui.handle_event(InputEvent::Text("XX".into()));
     assert_eq!(seen.borrow().as_str(), "heXXllo");
@@ -3235,7 +3063,7 @@ fn click_between_letters_inserts_there() {
 #[test]
 fn click_before_the_first_letter_inserts_there() {
     let (element, seen) = field("hello");
-    let mut ui = settled(&context(), element);
+    let mut ui = settled(element);
     click_at(&mut ui, 0.0, 4.0);
     ui.handle_event(InputEvent::Text("A".into()));
     assert_eq!(seen.borrow().as_str(), "Ahello");
@@ -3244,7 +3072,7 @@ fn click_before_the_first_letter_inserts_there() {
 #[test]
 fn click_after_the_last_letter_inserts_there() {
     let (element, seen) = field("hello");
-    let mut ui = settled(&context(), element);
+    let mut ui = settled(element);
     click_at(&mut ui, 80.0, 4.0);
     ui.handle_event(InputEvent::Text("Z".into()));
     assert_eq!(seen.borrow().as_str(), "helloZ");
@@ -3253,7 +3081,7 @@ fn click_after_the_last_letter_inserts_there() {
 #[test]
 fn drag_selects_a_range_and_copy_reads_only_that_range() {
     let (element, _) = field("hello");
-    let mut ui = settled(&context(), element);
+    let mut ui = settled(element);
     ui.clipboard_mut().write_text("keep");
     ui.handle_event(InputEvent::PointerMoved {
         position: Point::new(6.0, 4.0),
@@ -3276,7 +3104,7 @@ fn drag_selects_a_range_and_copy_reads_only_that_range() {
 #[test]
 fn copy_without_a_selection_leaves_the_clipboard_alone() {
     let (element, _) = field("hello");
-    let mut ui = settled(&context(), element);
+    let mut ui = settled(element);
     ui.clipboard_mut().write_text("keep");
     click_at(&mut ui, 11.0, 4.0);
     key(&mut ui, Key::Character('c'), ctrl());
@@ -3286,7 +3114,7 @@ fn copy_without_a_selection_leaves_the_clipboard_alone() {
 #[test]
 fn paste_inserts_at_the_caret_and_replaces_a_selection() {
     let (element, seen) = field("hello");
-    let mut ui = settled(&context(), element);
+    let mut ui = settled(element);
     click_at(&mut ui, 11.0, 4.0);
     ui.clipboard_mut().write_text("XX");
     key(&mut ui, Key::Character('v'), ctrl());
@@ -3296,7 +3124,7 @@ fn paste_inserts_at_the_caret_and_replaces_a_selection() {
 #[test]
 fn paste_replaces_the_selected_range() {
     let (element, seen) = field("hello");
-    let mut ui = settled(&context(), element);
+    let mut ui = settled(element);
     ui.handle_event(InputEvent::PointerMoved {
         position: Point::new(11.0, 4.0),
     });
@@ -3319,7 +3147,7 @@ fn paste_replaces_the_selected_range() {
 #[test]
 fn select_all_and_shift_arrow_copy_the_highlighted_text() {
     let (element, _) = field("hello");
-    let mut ui = settled(&context(), element);
+    let mut ui = settled(element);
     click_at(&mut ui, 0.0, 4.0);
     key(&mut ui, Key::Character('a'), ctrl());
     key(&mut ui, Key::Character('c'), ctrl());
@@ -3339,7 +3167,7 @@ fn select_all_and_shift_arrow_copy_the_highlighted_text() {
 #[test]
 fn backspace_deletes_the_selection_or_the_grapheme_before_the_caret() {
     let (element, seen) = field("hếllo");
-    let mut ui = settled(&context(), element);
+    let mut ui = settled(element);
     click_at(&mut ui, 80.0, 4.0);
     key(&mut ui, Key::Backspace, Modifiers::default());
     assert_eq!(seen.borrow().as_str(), "hếll");
@@ -3350,7 +3178,6 @@ fn ime_commit_inserts_at_the_caret() {
     let cx = context();
     let name = cx.reactive(String::from("he"));
     let mut ui = Ui::new(
-        &cx,
         input()
             .value(Dynamic(move || name))
             .key("field")
@@ -3378,7 +3205,6 @@ fn a_single_line_input_strips_newlines_and_enter_submits() {
     let submitted = Rc::new(Cell::new(false));
     let flag = Rc::clone(&submitted);
     let mut ui = settled(
-        &cx,
         input()
             .value(Dynamic(move || name))
             .on_submit(move |_| flag.set(true))
@@ -3398,7 +3224,6 @@ fn a_multiline_input_keeps_newlines_and_enter_does_not_submit() {
     let submitted = Rc::new(Cell::new(false));
     let flag = Rc::clone(&submitted);
     let mut ui = settled(
-        &cx,
         div()
             .style(StyleRefinement::default().direction(FlexDirection::Column))
             .child(
@@ -3440,7 +3265,6 @@ fn up_and_down_in_a_multiline_input_stay_out_of_a_vertical_scope() {
     let name = cx.reactive(String::from("ab\ncd"));
     let current = cx.reactive(String::new());
     let mut ui = settled(
-        &cx,
         div().focus_scope(FocusScope::Vertical).children([
             focus_mark("mark", &current),
             input()
@@ -3468,7 +3292,6 @@ fn a_masked_input_draws_bullets_copies_the_real_text_and_shows_preedit() {
     let cx = context();
     let name = cx.reactive(String::from("ab"));
     let mut ui = settled(
-        &cx,
         input()
             .mask(true)
             .value(Dynamic(move || name))
@@ -3506,7 +3329,6 @@ fn a_masked_input_draws_bullets_copies_the_real_text_and_shows_preedit() {
 #[test]
 fn ellipsis_clips_a_line_instead_of_wrapping_it() {
     let mut ui = settled(
-        &context(),
         div()
             .style(StyleRefinement::default().direction(FlexDirection::Column))
             .child(
@@ -3533,7 +3355,6 @@ fn ellipsis_clips_a_line_instead_of_wrapping_it() {
 #[test]
 fn the_caret_rect_follows_the_caret_and_clears_when_the_input_blurs() {
     let mut ui = settled(
-        &context(),
         div().children([
             input().value("hi").key("field").style(
                 StyleRefinement::default()
@@ -3559,7 +3380,6 @@ fn the_caret_rect_follows_the_caret_and_clears_when_the_input_blurs() {
 #[test]
 fn centering_shifts_the_caret_rect() {
     let mut ui = settled(
-        &context(),
         input().value("aa").key("field").style(
             StyleRefinement::default()
                 .width(40)
@@ -3576,7 +3396,6 @@ fn centering_shifts_the_caret_rect() {
 #[test]
 fn a_fixed_height_multiline_input_scrolls_the_caret_into_view() {
     let mut ui = settled(
-        &context(),
         div()
             .style(StyleRefinement::default().direction(FlexDirection::Column))
             .child(
@@ -3609,7 +3428,6 @@ fn end_moves_to_the_end_of_the_visual_line() {
     let cx = context();
     let name = cx.reactive(String::from("ab\ncd"));
     let mut ui = settled(
-        &cx,
         div()
             .style(StyleRefinement::default().direction(FlexDirection::Column))
             .child(
@@ -3635,7 +3453,7 @@ fn end_moves_to_the_end_of_the_visual_line() {
 #[test]
 fn an_unchanged_input_frame_stays_idle() {
     let (element, _) = field("hi");
-    let mut ui = settled(&context(), element);
+    let mut ui = settled(element);
     key(&mut ui, Key::Tab, Modifiers::default());
     ui.update(VIEWPORT);
     ui.prepare_frame();
@@ -3665,7 +3483,7 @@ fn painted_text(ui: &Ui) -> Vec<String> {
 fn a_disabled_input_does_not_take_focus_or_text() {
     let (element, seen) = field("hi");
     let element = element.disabled(true);
-    let mut ui = settled(&context(), element);
+    let mut ui = settled(element);
     key(&mut ui, Key::Tab, Modifiers::default());
     ui.handle_event(InputEvent::Text("!".into()));
     assert_eq!(seen.borrow().as_str(), "");
@@ -3676,7 +3494,6 @@ fn external_signal_writes_replace_the_buffer_and_keep_a_caret_inside_it() {
     let cx = context();
     let name = cx.reactive(String::from("hello"));
     let mut ui = Ui::new(
-        &cx,
         input()
             .value(Dynamic(move || name))
             .key("field")
@@ -3707,7 +3524,6 @@ fn a_binding_reads_the_laid_out_rect_and_updates_when_it_changes() {
     let width = cx.signal(100);
     let width_style = width.clone();
     let mut ui = settled(
-        &cx,
         div()
             .key("box")
             .style_dyn(move || {
@@ -3733,7 +3549,7 @@ fn a_binding_reads_the_laid_out_rect_and_updates_when_it_changes() {
 #[test]
 fn a_missing_key_reads_none_and_does_not_keep_the_ui_awake() {
     let cx = context();
-    let ui = settled(&cx, rect_label(&cx, "missing").key("label"));
+    let ui = settled(rect_label(&cx, "missing").key("label"));
     assert_eq!(ui.node_text(ui.find_by_key("label").unwrap()), Some("none"));
     assert!(!ui.needs_update());
 }
@@ -3743,24 +3559,21 @@ fn disposing_a_keyed_node_clears_the_rect_a_binding_reads() {
     let cx = context();
     let show_box = cx.signal(true);
     let visible = show_box.clone();
-    let mut ui = settled(
-        &cx,
-        div().children([
-            if_else(
-                move || visible.get(),
-                || {
-                    div().key("box").style(
-                        StyleRefinement::default()
-                            .width(70)
-                            .height(20)
-                            .flex_shrink(0.0),
-                    )
-                },
-                || div(),
-            ),
-            rect_label(&cx, "box").key("label"),
-        ]),
-    );
+    let mut ui = settled(div().children([
+        if_else(
+            move || visible.get(),
+            || {
+                div().key("box").style(
+                    StyleRefinement::default()
+                        .width(70)
+                        .height(20)
+                        .flex_shrink(0.0),
+                )
+            },
+            || div(),
+        ),
+        rect_label(&cx, "box").key("label"),
+    ]));
     assert_eq!(ui.node_text(ui.find_by_key("label").unwrap()), Some("70"));
     show_box.set(false);
     ui.update(VIEWPORT);
@@ -3773,7 +3586,6 @@ fn set_scroll_offset_jumps_wakes_the_host_and_a_binding_reads_it() {
     let cx = context();
     let read = cx.clone();
     let mut ui = settled(
-        &cx,
         div().children([
             scroll_column(Overflow::Auto),
             text_dyn(move || {
@@ -3808,7 +3620,6 @@ fn a_rect_binding_does_not_rerun_when_only_scroll_changes() {
     let count = Rc::clone(&hits);
     let read = cx.clone();
     let mut ui = settled(
-        &cx,
         div().children([
             scroll_column(Overflow::Auto),
             text_dyn(move || {
@@ -3836,7 +3647,6 @@ fn a_click_reads_the_node_rect_and_writes_its_scroll_offset() {
     let read = cx.clone();
     let write = cx.clone();
     let mut ui = settled(
-        &cx,
         div().children([
             scroll_column(Overflow::Auto),
             div()
@@ -3870,8 +3680,8 @@ fn a_click_reads_the_node_rect_and_writes_its_scroll_offset() {
 #[test]
 fn two_uis_keep_separate_geometry() {
     let cx = context();
-    let mut first = settled(&cx, sized_geometry(&cx, 40));
-    let mut second = settled(&cx, sized_geometry(&cx, 90));
+    let mut first = settled(sized_geometry(&cx, 40));
+    let mut second = settled(sized_geometry(&cx, 90));
     second.update(VIEWPORT);
     first.update(VIEWPORT);
     assert_eq!(
@@ -3893,7 +3703,6 @@ fn two_uis_keep_separate_geometry() {
     let secondary_wakes = Rc::new(Cell::new(0));
     let secondary_flag = Rc::clone(&secondary_wakes);
     let mut second = settled(
-        &cx,
         div()
             .key("box")
             .style(
@@ -3927,7 +3736,6 @@ fn two_uis_keep_separate_geometry() {
 fn overlay_leaves_flow_escapes_clip_and_paints_above() {
     let cx = context();
     let ui = settled(
-        &cx,
         div()
             .style(StyleRefinement::default().direction(FlexDirection::Column))
             .child(
@@ -3989,7 +3797,6 @@ fn wheel_over_an_overlay_does_not_scroll_the_page() {
     let cx = context();
     let start = Instant::now();
     let mut ui = Ui::new(
-        &cx,
         div()
             .style(StyleRefinement::default().direction(FlexDirection::Column))
             .children([
@@ -4066,7 +3873,6 @@ fn place_follows_the_trigger_rect() {
     let cx = context();
     let read = cx.clone();
     let mut ui = settled(
-        &cx,
         div()
             .style(StyleRefinement::default().direction(FlexDirection::Column))
             .children([
@@ -4138,7 +3944,6 @@ fn a_later_overlay_takes_the_hit_and_size_follows_content_or_the_viewport() {
     let back_count = back_clicks.clone();
     let front_count = front_clicks.clone();
     let ui = settled(
-        &cx,
         div().children([
             div()
                 .key("back")
@@ -4215,7 +4020,6 @@ fn a_nested_overlay_hits_and_scrolls_above_its_host() {
     let cx = context();
     let start = Instant::now();
     let mut ui = Ui::new(
-        &cx,
         div().child(
             div()
                 .key("host")
@@ -4284,24 +4088,21 @@ fn a_hidden_overlay_is_not_hit() {
     let cx = context();
     let open = cx.signal(true);
     let shown = open.clone();
-    let mut ui = settled(
-        &cx,
-        div().child(show(
-            move || shown.get(),
-            || {
-                div()
-                    .key("pop")
-                    .overlay()
-                    .place(Point::new(4.0, 4.0))
-                    .style(
-                        StyleRefinement::default()
-                            .width(30)
-                            .height(20)
-                            .flex_shrink(0.0),
-                    )
-            },
-        )),
-    );
+    let mut ui = settled(div().child(show(
+        move || shown.get(),
+        || {
+            div()
+                .key("pop")
+                .overlay()
+                .place(Point::new(4.0, 4.0))
+                .style(
+                    StyleRefinement::default()
+                        .width(30)
+                        .height(20)
+                        .flex_shrink(0.0),
+                )
+        },
+    )));
     let pop = ui.find_by_key("pop").unwrap();
     assert!(ui.hit_path(Point::new(10.0, 10.0)).contains(&pop));
     open.set(false);
@@ -4319,7 +4120,6 @@ fn a_menu_that_closes_on_blur_still_runs_the_item_click() {
     let click_log = Rc::clone(&log);
     let blur_log = Rc::clone(&log);
     let mut ui = settled(
-        &cx,
         div().children([
             div()
                 .key("trigger")
@@ -4384,7 +4184,6 @@ fn a_focusable_item_keeps_its_click_when_the_trigger_blurs() {
     let click_log = Rc::clone(&log);
     let blur_log = Rc::clone(&log);
     let mut ui = settled(
-        &cx,
         div().children([
             div()
                 .key("trigger")
@@ -4443,7 +4242,6 @@ fn an_outside_click_dismisses_after_the_press_finishes() {
     let item_log = Rc::clone(&log);
     let dismiss_log = Rc::clone(&log);
     let mut ui = settled(
-        &cx,
         div().children([
             div()
                 .key("page")
@@ -4500,7 +4298,6 @@ fn a_nested_overlay_click_does_not_dismiss_its_host() {
     let nested_clicks = cx.signal(0);
     let nested_flag = nested_clicks.clone();
     let mut ui = settled(
-        &cx,
         div()
             .key("host")
             .overlay()
@@ -4535,7 +4332,6 @@ fn the_click_that_opens_a_menu_does_not_dismiss_it() {
     let dismissals = cx.signal(0);
     let dismiss_flag = dismissals.clone();
     let mut ui = settled(
-        &cx,
         div().children([
             div()
                 .key("trigger")
@@ -4580,7 +4376,6 @@ fn the_right_and_middle_buttons_reach_on_pointer_without_clicking_or_blurring() 
     let click_order = Rc::clone(&order);
     let blur_order = Rc::clone(&order);
     let mut ui = settled(
-        &cx,
         div().children([
             div()
                 .key("keeper")
@@ -4650,7 +4445,6 @@ fn a_disabled_node_does_not_take_the_right_button() {
     let events = Rc::new(Cell::new(0));
     let seen = events.clone();
     let mut ui = settled(
-        &cx,
         div()
             .key("gate")
             .style(StyleRefinement::default().size(40).flex_shrink(0.0))
@@ -4694,13 +4488,10 @@ fn shift_tab() -> Modifiers {
 fn tab_cycles_focusable_nodes_in_tree_order() {
     let cx = context();
     let current = cx.reactive(String::new());
-    let mut ui = settled(
-        &cx,
-        div().children([
-            focus_mark("first", &current),
-            focus_mark("second", &current),
-        ]),
-    );
+    let mut ui = settled(div().children([
+        focus_mark("first", &current),
+        focus_mark("second", &current),
+    ]));
     click(&mut ui, "first");
     assert_eq!(current.get_untracked(), "first");
     key(&mut ui, Key::Tab, Modifiers::default());
@@ -4715,18 +4506,15 @@ fn tab_cycles_focusable_nodes_in_tree_order() {
 fn tab_stays_inside_the_open_trap() {
     let cx = context();
     let current = cx.reactive(String::new());
-    let trap = crate::DivBuilder::open(&cx)
+    let trap = crate::DivBuilder::open()
         .focus_scope(FocusScope::Trap)
         .into_element()
         .children([focus_mark("a", &current), focus_mark("b", &current)]);
-    let mut ui = settled(
-        &cx,
-        div().children([
-            focus_mark("before", &current),
-            trap,
-            focus_mark("after", &current),
-        ]),
-    );
+    let mut ui = settled(div().children([
+        focus_mark("before", &current),
+        trap,
+        focus_mark("after", &current),
+    ]));
     click(&mut ui, "after");
     key(&mut ui, Key::Tab, Modifiers::default());
     assert_eq!(current.get_untracked(), "a");
@@ -4745,21 +4533,18 @@ fn a_hidden_trap_does_not_keep_tab() {
     let open = cx.reactive(false);
     let open_read = open.clone();
     let trap_current = current.clone();
-    let mut ui = settled(
-        &cx,
-        div().children([
-            focus_mark("before", &current),
-            show(
-                move || open_read.get(),
-                move || {
-                    div()
-                        .focus_scope(FocusScope::Trap)
-                        .child(focus_mark("inside", &trap_current))
-                },
-            ),
-            focus_mark("after", &current),
-        ]),
-    );
+    let mut ui = settled(div().children([
+        focus_mark("before", &current),
+        show(
+            move || open_read.get(),
+            move || {
+                div()
+                    .focus_scope(FocusScope::Trap)
+                    .child(focus_mark("inside", &trap_current))
+            },
+        ),
+        focus_mark("after", &current),
+    ]));
     click(&mut ui, "before");
     key(&mut ui, Key::Tab, Modifiers::default());
     assert_eq!(current.get_untracked(), "after");
@@ -4776,17 +4561,14 @@ fn a_hidden_trap_does_not_keep_tab() {
 fn a_nested_trap_keeps_tab_in_the_inner_one() {
     let cx = context();
     let current = cx.reactive(String::new());
-    let mut ui = settled(
-        &cx,
+    let mut ui = settled(div().focus_scope(FocusScope::Trap).children([
+        focus_mark("outer", &current),
         div().focus_scope(FocusScope::Trap).children([
-            focus_mark("outer", &current),
-            div().focus_scope(FocusScope::Trap).children([
-                focus_mark("inner", &current),
-                focus_mark("inner_b", &current),
-            ]),
-            focus_mark("outer_b", &current),
+            focus_mark("inner", &current),
+            focus_mark("inner_b", &current),
         ]),
-    );
+        focus_mark("outer_b", &current),
+    ]));
     click(&mut ui, "outer");
     key(&mut ui, Key::Tab, Modifiers::default());
     assert_eq!(current.get_untracked(), "inner");
@@ -4800,14 +4582,11 @@ fn a_nested_trap_keeps_tab_in_the_inner_one() {
 fn up_and_down_move_inside_a_vertical_scope_and_wrap() {
     let cx = context();
     let current = cx.reactive(String::new());
-    let mut ui = settled(
-        &cx,
-        div().focus_scope(FocusScope::Vertical).children([
-            focus_mark("one", &current),
-            focus_mark("two", &current),
-            focus_mark("three", &current),
-        ]),
-    );
+    let mut ui = settled(div().focus_scope(FocusScope::Vertical).children([
+        focus_mark("one", &current),
+        focus_mark("two", &current),
+        focus_mark("three", &current),
+    ]));
     click(&mut ui, "one");
     key(&mut ui, Key::Down, Modifiers::default());
     assert_eq!(current.get_untracked(), "two");
@@ -4825,17 +4604,14 @@ fn left_and_right_on_a_vertical_scope_reach_the_item() {
     let current = cx.reactive(String::new());
     let seen = Rc::new(Cell::new(false));
     let flag = Rc::clone(&seen);
-    let mut ui = settled(
-        &cx,
-        div().focus_scope(FocusScope::Vertical).children([
-            focus_mark("one", &current).on_key(move |event, _| {
-                if event.state == ButtonState::Pressed && event.key == Key::Left {
-                    flag.set(true);
-                }
-            }),
-            focus_mark("two", &current),
-        ]),
-    );
+    let mut ui = settled(div().focus_scope(FocusScope::Vertical).children([
+        focus_mark("one", &current).on_key(move |event, _| {
+            if event.state == ButtonState::Pressed && event.key == Key::Left {
+                flag.set(true);
+            }
+        }),
+        focus_mark("two", &current),
+    ]));
     click(&mut ui, "one");
     key(&mut ui, Key::Left, Modifiers::default());
     assert!(seen.get());
@@ -4846,14 +4622,11 @@ fn left_and_right_on_a_vertical_scope_reach_the_item() {
 fn a_disabled_roving_item_is_skipped() {
     let cx = context();
     let current = cx.reactive(String::new());
-    let mut ui = settled(
-        &cx,
-        div().focus_scope(FocusScope::Vertical).children([
-            focus_mark("one", &current),
-            focus_mark("skip", &current).disabled(true),
-            focus_mark("three", &current),
-        ]),
-    );
+    let mut ui = settled(div().focus_scope(FocusScope::Vertical).children([
+        focus_mark("one", &current),
+        focus_mark("skip", &current).disabled(true),
+        focus_mark("three", &current),
+    ]));
     click(&mut ui, "one");
     key(&mut ui, Key::Down, Modifiers::default());
     assert_eq!(current.get_untracked(), "three");
@@ -4865,17 +4638,14 @@ fn left_and_right_move_inside_a_horizontal_scope() {
     let current = cx.reactive(String::new());
     let seen = Rc::new(Cell::new(false));
     let flag = Rc::clone(&seen);
-    let mut ui = settled(
-        &cx,
-        div().focus_scope(FocusScope::Horizontal).children([
-            focus_mark("one", &current),
-            focus_mark("two", &current).on_key(move |event, _| {
-                if event.state == ButtonState::Pressed && event.key == Key::Up {
-                    flag.set(true);
-                }
-            }),
-        ]),
-    );
+    let mut ui = settled(div().focus_scope(FocusScope::Horizontal).children([
+        focus_mark("one", &current),
+        focus_mark("two", &current).on_key(move |event, _| {
+            if event.state == ButtonState::Pressed && event.key == Key::Up {
+                flag.set(true);
+            }
+        }),
+    ]));
     click(&mut ui, "one");
     key(&mut ui, Key::Right, Modifiers::default());
     assert_eq!(current.get_untracked(), "two");
@@ -4893,7 +4663,6 @@ fn tab_stops_once_in_a_roving_scope_then_leaves() {
     let cx = context();
     let current = cx.reactive(String::new());
     let mut ui = settled(
-        &cx,
         div().children([
             focus_mark("before", &current),
             div()
@@ -4924,7 +4693,6 @@ fn an_input_in_a_horizontal_scope_keeps_left_and_right() {
     let text_input = text.clone();
     let current = cx.reactive(String::new());
     let mut ui = settled(
-        &cx,
         div().focus_scope(FocusScope::Horizontal).children([
             input()
                 .value(Dynamic(move || text_input.clone()))
@@ -4947,20 +4715,17 @@ fn showing_a_roving_scope_takes_focus_and_hiding_it_returns_focus() {
     let open = cx.reactive(false);
     let open_read = open.clone();
     let menu = current.clone();
-    let mut ui = settled(
-        &cx,
-        div().children([
-            focus_mark("trigger", &current),
-            show(
-                move || open_read.get(),
-                move || {
-                    div()
-                        .focus_scope(FocusScope::Vertical)
-                        .children([focus_mark("one", &menu), focus_mark("two", &menu)])
-                },
-            ),
-        ]),
-    );
+    let mut ui = settled(div().children([
+        focus_mark("trigger", &current),
+        show(
+            move || open_read.get(),
+            move || {
+                div()
+                    .focus_scope(FocusScope::Vertical)
+                    .children([focus_mark("one", &menu), focus_mark("two", &menu)])
+            },
+        ),
+    ]));
     click(&mut ui, "trigger");
     open.set(true);
     ui.update(VIEWPORT);
@@ -4980,21 +4745,18 @@ fn disposing_a_roving_scope_returns_focus() {
     let open = cx.reactive(false);
     let open_read = open.clone();
     let menu = current.clone();
-    let mut ui = settled(
-        &cx,
-        div().children([
-            focus_mark("trigger", &current),
-            if_else(
-                move || open_read.get(),
-                move || {
-                    div()
-                        .focus_scope(FocusScope::Vertical)
-                        .child(focus_mark("one", &menu))
-                },
-                || div(),
-            ),
-        ]),
-    );
+    let mut ui = settled(div().children([
+        focus_mark("trigger", &current),
+        if_else(
+            move || open_read.get(),
+            move || {
+                div()
+                    .focus_scope(FocusScope::Vertical)
+                    .child(focus_mark("one", &menu))
+            },
+            || div(),
+        ),
+    ]));
     click(&mut ui, "trigger");
     open.set(true);
     ui.update(VIEWPORT);
@@ -5011,21 +4773,18 @@ fn hiding_a_roving_scope_keeps_focus_that_already_left() {
     let open = cx.reactive(false);
     let open_read = open.clone();
     let menu = current.clone();
-    let mut ui = settled(
-        &cx,
-        div().children([
-            focus_mark("trigger", &current),
-            show(
-                move || open_read.get(),
-                move || {
-                    div()
-                        .focus_scope(FocusScope::Vertical)
-                        .child(focus_mark("one", &menu))
-                },
-            ),
-            focus_mark("after", &current),
-        ]),
-    );
+    let mut ui = settled(div().children([
+        focus_mark("trigger", &current),
+        show(
+            move || open_read.get(),
+            move || {
+                div()
+                    .focus_scope(FocusScope::Vertical)
+                    .child(focus_mark("one", &menu))
+            },
+        ),
+        focus_mark("after", &current),
+    ]));
     click(&mut ui, "trigger");
     open.set(true);
     ui.update(VIEWPORT);
@@ -5044,7 +4803,6 @@ fn display_none_on_a_roving_scope_returns_focus() {
     let shown = cx.reactive(false);
     let shown_read = shown.clone();
     let mut ui = settled(
-        &cx,
         div().children([
             focus_mark("trigger", &current),
             div()
@@ -5073,7 +4831,6 @@ fn a_roving_scope_mounted_with_nothing_focused_does_not_take_focus() {
     let cx = context();
     let current = cx.reactive(String::new());
     let ui = settled(
-        &cx,
         div()
             .focus_scope(FocusScope::Vertical)
             .child(focus_mark("tab", &current)),
@@ -5086,7 +4843,7 @@ fn a_roving_scope_mounted_with_nothing_focused_does_not_take_focus() {
 #[test]
 fn a_zero_delay_runs_on_the_update_that_arms_it() {
     let cx = context();
-    let mut ui = settled(&cx, div().key("box"));
+    let mut ui = settled(div().key("box"));
     let fired = Rc::new(Cell::new(false));
     let flag = Rc::clone(&fired);
     cx.timeout("box", Duration::ZERO, move || flag.set(true));
@@ -5101,7 +4858,7 @@ fn a_zero_delay_runs_on_the_update_that_arms_it() {
 #[test]
 fn a_timeout_waits_and_fires_once() {
     let cx = context();
-    let mut ui = settled(&cx, div().key("box"));
+    let mut ui = settled(div().key("box"));
     let fired = Rc::new(Cell::new(0));
     let flag = Rc::clone(&fired);
     let start = Instant::now();
@@ -5140,7 +4897,7 @@ fn a_timeout_waits_and_fires_once() {
 #[test]
 fn the_frame_deadline_is_the_earliest_timeout() {
     let cx = context();
-    let mut ui = settled(&cx, div().children([div().key("soon"), div().key("later")]));
+    let mut ui = settled(div().children([div().key("soon"), div().key("later")]));
     let start = Instant::now();
     cx.timeout("later", Duration::from_millis(100), || {});
     cx.timeout("soon", Duration::from_millis(40), || {});
@@ -5164,7 +4921,7 @@ fn the_frame_deadline_is_the_earliest_timeout() {
 #[test]
 fn a_second_timeout_on_the_same_key_replaces_the_first() {
     let cx = context();
-    let mut ui = settled(&cx, div().key("box"));
+    let mut ui = settled(div().key("box"));
     let which = Rc::new(Cell::new(0));
     let first = Rc::clone(&which);
     let second = Rc::clone(&which);
@@ -5186,7 +4943,7 @@ fn a_second_timeout_on_the_same_key_replaces_the_first() {
 #[test]
 fn clear_timeout_drops_the_callback() {
     let cx = context();
-    let mut ui = settled(&cx, div().key("box"));
+    let mut ui = settled(div().key("box"));
     let fired = Rc::new(Cell::new(false));
     let flag = Rc::clone(&fired);
     let start = Instant::now();
@@ -5204,10 +4961,11 @@ fn disposing_the_node_drops_its_timeout() {
     let cx = context();
     let open = cx.signal(true);
     let visible = open.clone();
-    let mut ui = settled(
-        &cx,
-        if_else(move || visible.get(), || div().key("box"), || div()),
-    );
+    let mut ui = settled(if_else(
+        move || visible.get(),
+        || div().key("box"),
+        || div(),
+    ));
     let fired = Rc::new(Cell::new(false));
     let flag = Rc::clone(&fired);
     let start = Instant::now();
@@ -5226,7 +4984,7 @@ fn hiding_with_show_does_not_cancel_a_timeout() {
     let cx = context();
     let open = cx.signal(true);
     let visible = open.clone();
-    let mut ui = settled(&cx, show(move || visible.get(), || div().key("box")));
+    let mut ui = settled(show(move || visible.get(), || div().key("box")));
     let fired = Rc::new(Cell::new(false));
     let flag = Rc::clone(&fired);
     let start = Instant::now();
@@ -5248,16 +5006,13 @@ fn display_none_does_not_cancel_a_timeout() {
     let cx = context();
     let hidden = cx.signal(false);
     let flag = hidden.clone();
-    let mut ui = settled(
-        &cx,
-        div().key("box").style_dyn(move || {
-            if flag.get() {
-                StyleRefinement::default().display(cappy_style::Display::None)
-            } else {
-                StyleRefinement::default()
-            }
-        }),
-    );
+    let mut ui = settled(div().key("box").style_dyn(move || {
+        if flag.get() {
+            StyleRefinement::default().display(cappy_style::Display::None)
+        } else {
+            StyleRefinement::default()
+        }
+    }));
     let fired = Rc::new(Cell::new(false));
     let seen = Rc::clone(&fired);
     let start = Instant::now();
@@ -5278,7 +5033,7 @@ fn display_none_does_not_cancel_a_timeout() {
 fn a_timeout_callback_paints_the_signal_it_writes() {
     let cx = context();
     let count = cx.signal(0);
-    let mut ui = settled(&cx, counter(count.clone()));
+    let mut ui = settled(counter(count.clone()));
     let label = ui.find_by_key("label").unwrap();
     let before = ui.node_rect(label).unwrap();
     let write = count.clone();
@@ -5294,7 +5049,7 @@ fn a_timeout_callback_paints_the_signal_it_writes() {
 #[test]
 fn an_unknown_key_does_not_run_and_does_not_stay_awake() {
     let cx = context();
-    let mut ui = settled(&cx, div().key("box"));
+    let mut ui = settled(div().key("box"));
     let fired = Rc::new(Cell::new(false));
     let flag = Rc::clone(&fired);
     cx.timeout("missing", Duration::from_millis(10), move || flag.set(true));
@@ -5312,7 +5067,7 @@ fn a_timeout_before_any_ui_does_nothing() {
     let fired = Rc::new(Cell::new(false));
     let flag = Rc::clone(&fired);
     cx.timeout("box", Duration::from_millis(10), move || flag.set(true));
-    let mut ui = settled(&cx, div().key("box"));
+    let mut ui = settled(div().key("box"));
     let start = Instant::now();
     ui.update_at(VIEWPORT, start + Duration::from_secs(1));
     assert!(!fired.get());
@@ -5322,19 +5077,16 @@ fn a_timeout_before_any_ui_does_nothing() {
 #[test]
 fn two_windows_do_not_share_a_timeout() {
     let cx = context();
-    let mut first = settled(&cx, div().key("box"));
+    let mut first = settled(div().key("box"));
     let target = cx.clone();
     let fired = Rc::new(Cell::new(0));
     let flag = Rc::clone(&fired);
-    let mut second = settled(
-        &cx,
-        div().key("box").on_click(move |_| {
-            let flag = Rc::clone(&flag);
-            target.timeout("box", Duration::from_millis(50), move || {
-                flag.set(flag.get() + 1);
-            });
-        }),
-    );
+    let mut second = settled(div().key("box").on_click(move |_| {
+        let flag = Rc::clone(&flag);
+        target.timeout("box", Duration::from_millis(50), move || {
+            flag.set(flag.get() + 1);
+        });
+    }));
     click(&mut second, "box");
     let start = Instant::now();
     second.update_at(VIEWPORT, start);
@@ -5352,7 +5104,7 @@ fn two_windows_do_not_share_a_timeout() {
 #[test]
 fn a_timeout_scheduled_from_a_callback_waits_for_the_next_update() {
     let cx = context();
-    let mut ui = settled(&cx, div().key("box"));
+    let mut ui = settled(div().key("box"));
     let count = Rc::new(Cell::new(0));
     let seen = Rc::clone(&count);
     let again = cx.clone();
@@ -5373,7 +5125,7 @@ fn a_timeout_scheduled_from_a_callback_waits_for_the_next_update() {
 #[test]
 fn timeout_wakes_the_host_once_until_the_next_update() {
     let cx = context();
-    let mut ui = settled(&cx, div().key("box"));
+    let mut ui = settled(div().key("box"));
     let wakes = Rc::new(Cell::new(0));
     let flag = Rc::clone(&wakes);
     ui.set_waker(move || flag.set(flag.get() + 1));
@@ -5391,23 +5143,16 @@ fn timeout_wakes_the_host_once_until_the_next_update() {
 fn on_mounted_arms_a_timeout_before_layout() {
     #[derive(Clone)]
     struct Note {
-        context: Context,
         fired: Rc<Cell<bool>>,
-    }
-
-    impl HasContext for Note {
-        fn context(&self) -> &Context {
-            &self.context
-        }
     }
 
     impl Component for Note {
         fn render(&self) -> Element {
-            let cx = self.context.clone();
             let fired = Rc::clone(&self.fired);
             on_mounted(move || {
                 let fired = Rc::clone(&fired);
-                cx.timeout("note", Duration::from_millis(100), move || fired.set(true));
+                Context::current()
+                    .timeout("note", Duration::from_millis(100), move || fired.set(true));
             });
             div().key("note")
         }
@@ -5416,9 +5161,7 @@ fn on_mounted_arms_a_timeout_before_layout() {
     let cx = context();
     let fired = Rc::new(Cell::new(false));
     let mut ui = Ui::new(
-        &cx,
         Note {
-            context: cx.clone(),
             fired: Rc::clone(&fired),
         },
         Theme::light(),
@@ -5473,7 +5216,6 @@ fn an_explicit_cursor_wins_on_that_node_and_a_button_stays_a_pointer() {
 
     let cx = context();
     let mut ui = settled(
-        &cx,
         div()
             .key("pad")
             .style(StyleRefinement::default().size(80).cursor(CursorIcon::Grab))
@@ -5494,7 +5236,6 @@ fn an_explicit_cursor_wins_on_that_node_and_a_button_stays_a_pointer() {
     assert_eq!(ui.cursor(), CursorIcon::Pointer);
 
     let mut refused = settled(
-        &cx,
         div()
             .key("button")
             .style(
@@ -5510,7 +5251,6 @@ fn an_explicit_cursor_wins_on_that_node_and_a_button_stays_a_pointer() {
     assert_eq!(refused.cursor(), CursorIcon::NotAllowed);
 
     let mut resize = settled(
-        &cx,
         div().key("handle").style(
             StyleRefinement::default()
                 .size(30)
@@ -5530,17 +5270,14 @@ fn changing_only_the_cursor_leaves_the_frame_idle() {
     let cx = context();
     let grab = cx.signal(false);
     let flag = grab.clone();
-    let mut ui = settled(
-        &cx,
-        div().key("box").style_dyn(move || {
-            let style = StyleRefinement::default().size(40);
-            if flag.get() {
-                style.cursor(CursorIcon::Grab)
-            } else {
-                style
-            }
-        }),
-    );
+    let mut ui = settled(div().key("box").style_dyn(move || {
+        let style = StyleRefinement::default().size(40);
+        if flag.get() {
+            style.cursor(CursorIcon::Grab)
+        } else {
+            style
+        }
+    }));
     grab.set(true);
     assert_eq!(ui.update(VIEWPORT), UpdateOutcome::Idle);
     ui.handle_event(InputEvent::PointerMoved {
@@ -5560,7 +5297,6 @@ fn pointer_events_none_lets_the_click_reach_the_parent() {
     let back_click = back.clone();
     let front_click = front.clone();
     let mut ui = settled(
-        &cx,
         div()
             .key("back")
             .style(StyleRefinement::default().size(80))
@@ -5594,7 +5330,6 @@ fn a_child_can_opt_back_into_pointer_events() {
     let wrap = wrap_clicks.clone();
     let button = button_clicks.clone();
     let mut ui = settled(
-        &cx,
         div()
             .key("wrap")
             .style(
@@ -5627,7 +5362,6 @@ fn an_overlay_with_pointer_events_none_does_not_block_the_page() {
     let clicks = cx.signal(0);
     let count = clicks.clone();
     let mut ui = settled(
-        &cx,
         div()
             .key("page")
             .style(StyleRefinement::default().size(100))
@@ -5651,17 +5385,14 @@ fn changing_only_pointer_events_leaves_the_frame_idle() {
     let cx = context();
     let pass = cx.signal(false);
     let flag = pass.clone();
-    let mut ui = settled(
-        &cx,
-        div().key("box").style_dyn(move || {
-            let style = StyleRefinement::default().size(40).background(Color::BLACK);
-            if flag.get() {
-                style.pointer_events(PointerEvents::None)
-            } else {
-                style
-            }
-        }),
-    );
+    let mut ui = settled(div().key("box").style_dyn(move || {
+        let style = StyleRefinement::default().size(40).background(Color::BLACK);
+        if flag.get() {
+            style.pointer_events(PointerEvents::None)
+        } else {
+            style
+        }
+    }));
     pass.set(true);
     assert_eq!(ui.update(VIEWPORT), UpdateOutcome::Idle);
 }
@@ -5670,7 +5401,6 @@ fn changing_only_pointer_events_leaves_the_frame_idle() {
 fn style_opacity_scales_the_fill_and_a_tween_multiplies_it() {
     let cx = context();
     let mut ui = settled(
-        &cx,
         div().key("box").style(
             StyleRefinement::default()
                 .size(40)
@@ -5704,7 +5434,6 @@ fn a_top_border_is_the_only_edge_on_the_quad() {
 
     let cx = context();
     let ui = settled(
-        &cx,
         div().key("box").style(
             StyleRefinement::default()
                 .size(40)
@@ -5731,7 +5460,7 @@ fn a_top_border_is_the_only_edge_on_the_quad() {
 #[test]
 fn a_sticky_header_stays_at_the_top_until_its_parent_leaves() {
     let cx = context();
-    let mut ui = settled(&cx, sticky_section());
+    let mut ui = settled(sticky_section());
     let scroller = ui.node_rect(ui.find_by_key("scroller").unwrap()).unwrap();
     let header = ui.find_by_key("header").unwrap();
     assert_eq!(ui.node_rect(header).unwrap().y, scroller.y);
@@ -5755,7 +5484,6 @@ fn a_sticky_child_of_the_scroller_stays_at_the_top_for_the_whole_scroll() {
 
     let cx = context();
     let mut ui = settled(
-        &cx,
         div().child(
             div()
                 .key("scroller")

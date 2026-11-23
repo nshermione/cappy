@@ -9,10 +9,7 @@ use playground_scenes::{Application, Run, init_logging, showcase, window_options
 fn main() -> ExitCode {
     init_logging();
     let application = Application::new();
-    match application.run(
-        window_options("cappy playground (winit)"),
-        showcase(application.context()),
-    ) {
+    match application.run(window_options("cappy playground (winit)"), showcase()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("winit demo failed: {error}");

@@ -74,12 +74,15 @@ impl<H> Default for WindowSession<H> {
 
 #[cfg(test)]
 mod tests {
-    use cappy_core::{Application, SurfaceOptions, div};
+    use cappy_core::{Application, Context, SurfaceOptions, div};
 
     use super::*;
 
     fn two_ids() -> (SurfaceId, SurfaceId) {
-        let context = Application::new().context().clone();
+        let context = {
+            Application::new();
+            Context::current()
+        };
         let first = context.open_surface(SurfaceOptions::new("a"), |_| div());
         let second = context.open_surface(SurfaceOptions::new("b"), |_| div());
         let _ = context.drain_surfaces();
