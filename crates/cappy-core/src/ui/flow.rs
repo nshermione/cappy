@@ -402,6 +402,12 @@ impl Ui {
                     load,
                 }
             }
+            ElementContent::Canvas(draw) => NodeContent::Canvas(crate::canvas::CanvasNode {
+                draw: Some(draw),
+                commands: Vec::new(),
+                playing: true,
+                clock: None,
+            }),
             ElementContent::Input(spec) => {
                 disabled_when = disabled_when.or(spec.disabled_when);
                 let (text, writer) = match spec.value {

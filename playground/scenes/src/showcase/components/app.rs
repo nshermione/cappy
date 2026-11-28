@@ -4,6 +4,7 @@ use cappy::Class as ThemeClass;
 use cappy::prelude::*;
 use cappy_components::DebugPanel;
 
+use super::super::canvas::CanvasTab;
 use super::super::checklist::ChecklistTab;
 use super::super::counter::CounterTab;
 use super::super::images::ImagesTab;
@@ -24,6 +25,7 @@ pub(super) enum Tab {
     Paint,
     Images,
     Motion,
+    Canvas,
 }
 
 #[component]
@@ -45,6 +47,7 @@ impl Component for App {
                     TabButton(selected = selected, tab = Tab::Paint, title = "Paint", key = "tab-paint")
                     TabButton(selected = selected, tab = Tab::Images, title = "Images", key = "tab-images")
                     TabButton(selected = selected, tab = Tab::Motion, title = "Motion", key = "tab-motion")
+                    TabButton(selected = selected, tab = Tab::Canvas, title = "Canvas", key = "tab-canvas")
                 }
                 show (:selected.get() == Tab::Counter) {
                     CounterTab()
@@ -63,6 +66,9 @@ impl Component for App {
                 }
                 show (:selected.get() == Tab::Motion) {
                     MotionTab()
+                }
+                show (:selected.get() == Tab::Canvas) {
+                    CanvasTab()
                 }
                 if (:app.debug.get()) {
                     DebugPanel()

@@ -8,6 +8,7 @@ use cappy_style::{ClassName, InteractionState, Style, StyleRefinement, Styleshee
 use std::time::Duration;
 
 use crate::bitmap::{ImageClip, ObjectFit};
+use crate::canvas::CanvasNode;
 use crate::image_decode::ImagePaint;
 use crate::image_load::ImageLoad;
 use crate::time::Instant;
@@ -99,6 +100,7 @@ pub(crate) enum NodeContent {
         load: Option<ImageLoad>,
     },
     Input(InputField),
+    Canvas(CanvasNode),
 }
 
 /// Editing state of one input. A multiline field keeps newlines and scrolls vertically.
@@ -204,7 +206,10 @@ impl Node {
     pub(crate) fn text(&self) -> Option<&str> {
         match &self.content {
             NodeContent::Text(text) => Some(text),
-            NodeContent::Container | NodeContent::Image { .. } | NodeContent::Input(_) => None,
+            NodeContent::Container
+            | NodeContent::Image { .. }
+            | NodeContent::Input(_)
+            | NodeContent::Canvas(_) => None,
         }
     }
 

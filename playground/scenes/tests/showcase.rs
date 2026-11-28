@@ -1,4 +1,4 @@
-use cappy::{Application, Background, Damage, Primitive};
+use cappy::{Application, Background, Color, Damage, Primitive};
 use cappy_testing::TestUi;
 use playground_scenes::showcase;
 
@@ -470,4 +470,62 @@ fn motion_loops_are_already_running() {
 fn settled_scene_is_idle() {
     let mut harness = harness();
     assert_eq!(harness.damage(), Damage::None);
+    assert!(
+        harness
+            .ui()
+            .frame_deadline(std::time::Instant::now())
+            .is_none()
+    );
+}
+
+#[test]
+fn the_canvas_tab_redraws_its_stage_and_stops_when_left() {
+    use std::thread::sleep;
+    use std::time::Duration;
+
+    let mut harness = harness();
+    assert!(
+        harness
+            .ui()
+            .frame_deadline(std::time::Instant::now())
+            .is_none()
+    );
+    open_tab(&mut harness, "tab-canvas");
+    let opened = std::time::Instant::now();
+    assert_eq!(harness.ui().frame_deadline(opened), Some(opened));
+    let first = orb_center(&harness);
+
+    sleep(Duration::from_millis(80));
+    harness.update();
+    let second = orb_center(&harness);
+    let moved = (second.0 - first.0).abs() + (second.1 - first.1).abs();
+    assert!(moved > 4.0, "orb moved {moved}");
+
+    open_tab(&mut harness, "tab-counter");
+    assert!(
+        harness
+            .ui()
+            .frame_deadline(std::time::Instant::now())
+            .is_none()
+    );
+}
+
+fn orb_center(harness: &TestUi) -> (f32, f32) {
+    harness
+        .ui()
+        .display_list()
+        .iter()
+        .find_map(|primitive| {
+            let Primitive::Quad(quad) = primitive else {
+                return None;
+            };
+            let Background::Solid(color) = quad.background else {
+                return None;
+            };
+            (color == Color::rgb(14, 165, 233) && quad.rect.width > 20.0).then_some((
+                quad.rect.x + quad.rect.width * 0.5,
+                quad.rect.y + quad.rect.height * 0.5,
+            ))
+        })
+        .expect("canvas orb")
 }

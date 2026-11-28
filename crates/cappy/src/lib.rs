@@ -64,11 +64,12 @@ pub mod prelude {
         ImageDecodeError, ImagePixels, ImageSource, IntoElement, IntoReactive, Justify, ObjectFit,
         Overflow, PointerEvents, Position, Radius, Reactive, Signal, Slot, Space, StyleRefinement,
         Stylesheet, SurfaceId, SurfaceOptions, TextAlign, Theme, ThemeCatalog, ThemeHandle, Themes,
-        Ui, UpdateOutcome, asset_path, div, for_each, fragment, hex, if_else, image, input, linear,
-        list_window, on, on_before_mount, on_before_unmount, on_mounted, on_unmounted, on_updated,
-        percent, reactive, shadow, show, slot, text, text_dyn, use_local_store, use_store,
+        Ui, UpdateOutcome, asset_path, canvas, div, for_each, fragment, hex, if_else, image, input,
+        linear, list_window, on, on_before_mount, on_before_unmount, on_mounted, on_unmounted,
+        on_updated, percent, reactive, shadow, show, slot, text, text_dyn, use_local_store,
+        use_store,
     };
-    pub use cappy_core::{Anim, AnimHandle, Ease, Motion, Repeat};
+    pub use cappy_core::{Anim, AnimHandle, Canvas, CanvasFrame, CanvasTick, Ease, Motion, Repeat};
     pub use cappy_dsl::{element, style};
     pub use cappy_macros::{ClassName, Props, Reactive, component, store, style_token, stylesheet};
 }

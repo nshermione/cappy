@@ -761,6 +761,38 @@ impl Ui {
                             }
                         },
                         super::NodeContent::Container => {}
+                        super::NodeContent::Canvas(state) => {
+                            let commands = state.commands.clone();
+                            let content = text_content_rect(node, space);
+                            if let Some(draw_clip) = nest_clip(clip, content) {
+                                let padding = node.style.layout.padding;
+                                for command in commands {
+                                    let local = Rect::new(
+                                        node.rect.x + padding.left + command.rect.x,
+                                        node.rect.y + padding.top + command.rect.y,
+                                        command.rect.width.max(0.0),
+                                        command.rect.height.max(0.0),
+                                    );
+                                    if local.is_empty() {
+                                        continue;
+                                    }
+                                    let (rect, spin) = map_paint_rect(local, space);
+                                    let radius = (command.radius * space.scale).max(0.0);
+                                    primitives.push(Primitive::Quad(QuadPrimitive {
+                                        rect,
+                                        background: Background::Solid(fade_color(
+                                            command.color,
+                                            opacity,
+                                        )),
+                                        border_color: Color::TRANSPARENT,
+                                        border_width: Edges::ZERO,
+                                        corner_radius: Corners::all(radius),
+                                        clip: Some(draw_clip),
+                                        spin,
+                                    }));
+                                }
+                            }
+                        }
                     }
                     let child_clip = if node.style.layout.clips() {
                         nest_clip(
@@ -1155,6 +1187,83 @@ impl Ui {
         let node = &self.nodes[index];
         node.alive && !node.suppressed && node.style.layout.display != Display::None
     }
+
+    /// Runs every visible canvas that is still drawing. Hidden canvases drop their clock so the
+    /// gap is not applied when they return. Each tick damages that node.
+    pub(super) fn step_canvases(&mut self, now: crate::time::Instant) {
+        let mut ticked = Vec::new();
+        for index in 0..self.nodes.len() {
+            if !matches!(self.nodes[index].content, super::NodeContent::Canvas(_)) {
+                continue;
+            }
+            if !self.canvas_is_visible(index) {
+                if let super::NodeContent::Canvas(state) = &mut self.nodes[index].content {
+                    state.clock = None;
+                }
+                continue;
+            }
+            let size = content_size(&self.nodes[index]);
+            let draw = match &mut self.nodes[index].content {
+                super::NodeContent::Canvas(state) if state.playing => {
+                    let dt = scroll::paced_delta(state.clock, now);
+                    state.draw.take().map(|draw| (draw, dt))
+                }
+                _ => None,
+            };
+            let Some((draw, dt)) = draw else {
+                continue;
+            };
+            let mut recorder = crate::canvas::Canvas::new();
+            let tick = draw(&mut recorder, &crate::canvas::CanvasFrame { now, dt, size });
+            let super::NodeContent::Canvas(state) = &mut self.nodes[index].content else {
+                unreachable!("canvas draw runs on a canvas node");
+            };
+            state.draw = Some(draw);
+            state.commands = recorder.into_commands();
+            state.clock = Some(now);
+            state.playing = tick != crate::canvas::CanvasTick::Rest;
+            ticked.push(index);
+        }
+        for index in ticked {
+            let generation = self.nodes[index].generation;
+            self.mark_paint_dirty(NodeId::new(index as u32, generation));
+        }
+    }
+
+    /// True when a canvas is visible and its callback asked for another frame.
+    pub(super) fn canvas_wants_frame(&self) -> bool {
+        self.nodes.iter().enumerate().any(|(index, node)| {
+            matches!(
+                &node.content,
+                super::NodeContent::Canvas(state) if state.playing
+            ) && self.canvas_is_visible(index)
+        })
+    }
+
+    fn canvas_is_visible(&self, index: usize) -> bool {
+        let node = &self.nodes[index];
+        if !node.alive || node.suppressed || node.style.layout.display == Display::None {
+            return false;
+        }
+        if node.rect.is_empty() {
+            return false;
+        }
+        if let Some(clip) = node.clip
+            && node.rect.intersection(&clip).is_none()
+        {
+            return false;
+        }
+        let viewport = Rect::from_size(self.logical_viewport());
+        node.rect.intersection(&viewport).is_some()
+    }
+}
+
+fn content_size(node: &super::node::Node) -> Size {
+    let padding = node.style.layout.padding;
+    Size::new(
+        (node.rect.width - padding.horizontal()).max(0.0),
+        (node.rect.height - padding.vertical()).max(0.0),
+    )
 }
 
 fn text_leaf(text: &str, style: &TextStyle) -> TextLeaf {

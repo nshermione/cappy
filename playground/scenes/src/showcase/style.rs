@@ -245,6 +245,12 @@ stylesheet! {
             radius: Radius::Md,
             background: ColorToken::Primary,
         }
+        /// Immediate stage. The fill is set on the element so it stays dark in every theme.
+        CanvasStage {
+            width: percent(100.0),
+            height: 200,
+            radius: Radius::Md,
+        }
     }
 }
 

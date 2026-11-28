@@ -6,13 +6,13 @@ use super::*;
 use crate::paint::Primitive;
 use crate::reactive::{live_signal_count, signal_is_alive, signal_subscriber_count};
 use crate::{
-    Application, ButtonState, Component, Context, Dynamic, Element, FocusScope, ImeEvent,
-    InputEvent, IntoElement, Key, KeyEvent, Modifiers, PointerButton, PointerPhase, Signal,
-    Singleton, SingletonOf, Slot, SurfaceCommand, SurfaceOptions, div, for_each, fragment, if_else,
-    input, list_window, on_before_mount, on_before_unmount, on_mounted, on_unmounted, on_updated,
-    show, slot, text, text_dyn, use_store,
+    Application, ButtonState, CanvasTick, Component, Context, Dynamic, Element, FocusScope,
+    ImeEvent, InputEvent, IntoElement, Key, KeyEvent, Modifiers, PointerButton, PointerPhase,
+    Signal, Singleton, SingletonOf, Slot, SurfaceCommand, SurfaceOptions, canvas, div, for_each,
+    fragment, if_else, input, list_window, on_before_mount, on_before_unmount, on_mounted,
+    on_unmounted, on_updated, show, slot, text, text_dyn, use_store,
 };
-use cappy_style::{Background, Color, FlexDirection, Overflow, StyleRefinement};
+use cappy_style::{Background, Color, Corners, FlexDirection, Overflow, StyleRefinement};
 
 const VIEWPORT: FrameInput = FrameInput {
     physical_width: 800,
@@ -5608,4 +5608,187 @@ fn sticky_section() -> Element {
                 ),
             ]),
     )
+}
+
+#[test]
+fn a_canvas_paints_local_fills_and_is_due_immediately() {
+    let _cx = context();
+    let mut ui = Ui::new(
+        canvas(|canvas, _frame| {
+            canvas.fill(Rect::new(4.0, 6.0, 10.0, 8.0), Color::rgb(12, 34, 56));
+            canvas.fill_rounded(Rect::new(20.0, 20.0, 12.0, 12.0), 3.0, Color::rgb(7, 8, 9));
+            CanvasTick::Continue
+        })
+        .key("pad")
+        .style(StyleRefinement::default().size(80)),
+        Theme::light(),
+    );
+    let start = Instant::now();
+    assert!(ui.update_at(VIEWPORT, start).needs_redraw());
+    assert_eq!(ui.frame_deadline(start), Some(start));
+    let pad = ui.node_rect(ui.find_by_key("pad").unwrap()).unwrap();
+    let quads: Vec<_> = ui
+        .display_list()
+        .iter()
+        .filter_map(|primitive| match primitive {
+            Primitive::Quad(quad) => Some(quad),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(quads.len(), 2);
+    assert_eq!(
+        quads[0].rect,
+        Rect::new(pad.x + 4.0, pad.y + 6.0, 10.0, 8.0)
+    );
+    assert_eq!(
+        quads[0].background,
+        Background::Solid(Color::rgb(12, 34, 56))
+    );
+    assert_eq!(quads[0].corner_radius, Corners::ZERO);
+    assert_eq!(quads[0].clip, Some(pad));
+    assert_eq!(
+        quads[1].rect,
+        Rect::new(pad.x + 20.0, pad.y + 20.0, 12.0, 12.0)
+    );
+    assert_eq!(quads[1].corner_radius, Corners::all(3.0));
+    assert_eq!(quads[1].clip, Some(pad));
+}
+
+#[test]
+fn a_canvas_rests_and_a_hidden_canvas_does_not_request_frames() {
+    let cx = context();
+    let rest = Rc::new(Cell::new(false));
+    let resting = Rc::clone(&rest);
+    let calls = Rc::new(Cell::new(0));
+    let seen = Rc::clone(&calls);
+    let mut ui = Ui::new(
+        canvas(move |canvas, _frame| {
+            seen.set(seen.get() + 1);
+            canvas.fill(Rect::new(0.0, 0.0, 4.0, 4.0), Color::BLACK);
+            if resting.get() {
+                CanvasTick::Rest
+            } else {
+                CanvasTick::Continue
+            }
+        })
+        .style(StyleRefinement::default().size(40)),
+        Theme::light(),
+    );
+    let start = Instant::now();
+    ui.update_at(VIEWPORT, start);
+    assert_eq!(calls.get(), 1);
+    assert_eq!(ui.frame_deadline(start), Some(start));
+    rest.set(true);
+    ui.update_at(VIEWPORT, start + Duration::from_millis(16));
+    assert_eq!(calls.get(), 2);
+    assert!(
+        ui.frame_deadline(start + Duration::from_millis(16))
+            .is_none()
+    );
+    ui.update_at(VIEWPORT, start + Duration::from_millis(32));
+    assert_eq!(calls.get(), 2);
+    drop(ui);
+
+    let open = cx.reactive(true);
+    let gate = open.clone();
+    let hidden_calls = Rc::new(Cell::new(0));
+    let hidden_seen = Rc::clone(&hidden_calls);
+    let mut ui = Ui::new(
+        show(
+            move || gate.get(),
+            move || {
+                let hidden_seen = Rc::clone(&hidden_seen);
+                canvas(move |canvas, _frame| {
+                    hidden_seen.set(hidden_seen.get() + 1);
+                    canvas.fill(Rect::new(0.0, 0.0, 4.0, 4.0), Color::BLACK);
+                    CanvasTick::Continue
+                })
+                .key("pad")
+                .style(StyleRefinement::default().size(40))
+            },
+        ),
+        Theme::light(),
+    );
+    let start = Instant::now();
+    ui.update_at(VIEWPORT, start);
+    assert_eq!(hidden_calls.get(), 1);
+    assert_eq!(ui.frame_deadline(start), Some(start));
+    open.set(false);
+    ui.update_at(VIEWPORT, start + Duration::from_millis(16));
+    assert_eq!(hidden_calls.get(), 1);
+    assert!(
+        ui.frame_deadline(start + Duration::from_millis(16))
+            .is_none()
+    );
+}
+
+#[test]
+fn a_canvas_frame_repaints_only_its_rect_and_skips_bindings() {
+    let cx = context();
+    let calls = Rc::new(Cell::new(0));
+    let count = cx.reactive(1_i32);
+    let label = count.clone();
+    let seen = Rc::clone(&calls);
+    let mut ui = Ui::new(
+        div().children([
+            text_dyn(move || {
+                seen.set(seen.get() + 1);
+                format!("{}", label.get())
+            }),
+            canvas(|canvas, _frame| {
+                canvas.fill(Rect::new(0.0, 0.0, 8.0, 8.0), Color::rgb(10, 20, 30));
+                CanvasTick::Continue
+            })
+            .key("pad")
+            .style(StyleRefinement::default().size(40)),
+        ]),
+        Theme::light(),
+    );
+    let start = Instant::now();
+    ui.update_at(VIEWPORT, start);
+    ui.prepare_frame();
+    let after_setup = calls.get();
+    assert!(after_setup > 0);
+    let pad = ui.node_rect(ui.find_by_key("pad").unwrap()).unwrap();
+    let outcome = ui.update_at(VIEWPORT, start + Duration::from_millis(16));
+    assert_eq!(calls.get(), after_setup);
+    assert_eq!(
+        outcome,
+        UpdateOutcome::Redraw {
+            damage: Damage::Regions(vec![pad]),
+        }
+    );
+    count.set(2);
+    ui.update_at(VIEWPORT, start + Duration::from_millis(32));
+    assert!(calls.get() > after_setup);
+}
+
+#[test]
+fn a_canvas_receives_the_gap_between_updates() {
+    let _cx = context();
+    let seen = Rc::new(Cell::new(Duration::from_secs(9)));
+    let record = Rc::clone(&seen);
+    let mut ui = Ui::new(
+        canvas(move |canvas, frame| {
+            record.set(frame.dt);
+            canvas.fill(Rect::new(0.0, 0.0, 4.0, 4.0), Color::BLACK);
+            CanvasTick::Continue
+        })
+        .style(StyleRefinement::default().size(40)),
+        Theme::light(),
+    );
+    let start = Instant::now();
+    ui.update_at(VIEWPORT, start);
+    assert_eq!(seen.get(), Duration::ZERO);
+    ui.update_at(VIEWPORT, start + Duration::from_millis(16));
+    assert_eq!(seen.get(), Duration::from_millis(16));
+    assert_eq!(
+        ui.frame_deadline(start + Duration::from_millis(16)),
+        Some(start + Duration::from_millis(16))
+    );
+    ui.update_at(
+        VIEWPORT,
+        start + Duration::from_millis(16) + Duration::from_secs(2),
+    );
+    assert_eq!(seen.get(), Duration::ZERO);
 }

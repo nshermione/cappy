@@ -4,6 +4,7 @@
 
 mod binding;
 mod bitmap;
+mod canvas;
 mod clipboard;
 mod context;
 mod damage;
@@ -33,12 +34,14 @@ pub use lifecycle::{on_before_mount, on_before_unmount, on_mounted, on_unmounted
 
 pub use binding::{Dynamic, IntoClasses, IntoStyle, IntoText, LiveText};
 pub use bitmap::{ImageClip, ImageDecodeError, ImagePixels, ImagePixelsError, ObjectFit};
+pub use canvas::{Canvas, CanvasFrame, CanvasTick};
 pub use clipboard::{Clipboard, MemoryClipboard, NoopClipboard};
 pub use damage::{Damage, DamageTracker, coalesce_regions};
 pub use debug::DebugStats;
 pub use element::{
     Component, Element, FocusScope, IntoCaret, IntoElement, IntoInputValue, IntoSelection, Slot,
-    div, for_each, fragment, if_else, image, input, list_window, show, slot, text, text_dyn,
+    canvas, div, for_each, fragment, if_else, image, input, list_window, show, slot, text,
+    text_dyn,
 };
 #[doc(hidden)]
 pub use element::{DivBuilder, ImageBuilder, InputBuilder, TextBuilder};

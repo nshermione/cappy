@@ -31,14 +31,23 @@ pub(crate) enum ScrollAxis {
 
 pub(crate) const THUMB_COLOR: Color = Color::rgba(100, 116, 139, 160);
 
-/// Seconds of ease to apply. A pause longer than [`SCROLL_IDLE_GAP`] contributes nothing, so the
-/// first event after idle does not finish the motion in one step.
-pub(crate) fn scroll_dt(previous: Option<Instant>, now: Instant) -> f32 {
+/// Time since `previous`. A missing sample, or a pause longer than [`SCROLL_IDLE_GAP`], contributes
+/// nothing, so the first event after idle does not finish the motion in one step.
+pub(crate) fn paced_delta(previous: Option<Instant>, now: Instant) -> Duration {
     let Some(previous) = previous else {
-        return 0.0;
+        return Duration::ZERO;
     };
-    let dt = now.saturating_duration_since(previous).as_secs_f32();
-    if dt > SCROLL_IDLE_GAP { 0.0 } else { dt }
+    let dt = now.saturating_duration_since(previous);
+    if dt.as_secs_f32() > SCROLL_IDLE_GAP {
+        Duration::ZERO
+    } else {
+        dt
+    }
+}
+
+/// Seconds of ease to apply. See [`paced_delta`].
+pub(crate) fn scroll_dt(previous: Option<Instant>, now: Instant) -> f32 {
+    paced_delta(previous, now).as_secs_f32()
 }
 
 /// Moves `current` toward `target`. The result stays on the segment between them.

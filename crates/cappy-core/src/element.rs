@@ -13,6 +13,7 @@ use cappy_style::{ClassName, StyleRefinement, Stylesheet};
 
 use crate::binding::{Dynamic, IntoClasses, IntoStyle, IntoText, LiveText};
 use crate::bitmap::ObjectFit;
+use crate::canvas::{Canvas, CanvasDraw, CanvasFrame, CanvasTick};
 use crate::clipboard::Clipboard;
 use crate::image_source::ImageSource;
 use crate::{ClickEvent, ImeEvent, KeyEvent, PointerEvent};
@@ -41,6 +42,8 @@ pub(crate) enum ElementContent {
         source: ImageSource,
         fit: ObjectFit,
     },
+    /// Immediate leaf. The callback redraws this box every frame until it rests.
+    Canvas(CanvasDraw),
     /// Transparent hole. Mount skips it until a parent replaces it with a child.
     Slot {
         index: u16,
@@ -366,6 +369,16 @@ pub fn image(source: impl Into<ImageSource>) -> Element {
         source: source.into(),
         fit: ObjectFit::Fill,
     })
+}
+
+/// A leaf that redraws from `draw` while that callback returns [`CanvasTick::Continue`].
+///
+/// Coordinates in the callback are local to the content box. [`CanvasTick::Rest`] keeps the last
+/// picture and stops requesting frames. A hidden node, a node with `display: none`, or one scrolled
+/// out of view does not run, and the gap is not added to the next [`CanvasFrame::dt`].
+#[must_use]
+pub fn canvas(draw: impl Fn(&mut Canvas, &CanvasFrame) -> CanvasTick + 'static) -> Element {
+    Element::new(ElementContent::Canvas(Box::new(draw)))
 }
 
 /// A hole where a `#[slot]` field is placed. `slot(self.body)` reads that field. The parent
@@ -798,9 +811,9 @@ impl Element {
         assert!(
             !matches!(
                 self.content,
-                ElementContent::Image { .. } | ElementContent::Input(_)
+                ElementContent::Image { .. } | ElementContent::Input(_) | ElementContent::Canvas(_)
             ),
-            "image and input elements cannot have children"
+            "image, input, and canvas elements cannot have children"
         );
         self.children.push(child.into_element());
         self
@@ -920,6 +933,7 @@ impl fmt::Debug for Element {
             ElementContent::StaticText(text) => format!("text({text:?})"),
             ElementContent::DynamicText(_) => "text(<dynamic>)".to_owned(),
             ElementContent::Image { .. } => "image".to_owned(),
+            ElementContent::Canvas(_) => "canvas".to_owned(),
             ElementContent::Slot { index } => format!("slot({index})"),
             ElementContent::Fragment(children) => format!("fragment({})", children.len()),
             ElementContent::Flow(_) => "flow".to_owned(),

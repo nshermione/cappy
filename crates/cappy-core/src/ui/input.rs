@@ -1714,7 +1714,10 @@ impl Ui {
     fn place_painted(&mut self, id: NodeId, paint_index: usize, mask: bool, extend: bool) {
         let real = match &self.nodes[id.index()].content {
             NodeContent::Input(field) => field.edit.index_from_paint(paint_index, mask),
-            NodeContent::Container | NodeContent::Text(_) | NodeContent::Image { .. } => return,
+            NodeContent::Container
+            | NodeContent::Text(_)
+            | NodeContent::Image { .. }
+            | NodeContent::Canvas(_) => return,
         };
         self.edit_input(id, |edit| edit.place(real, extend));
     }

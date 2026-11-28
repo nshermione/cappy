@@ -13,9 +13,11 @@
 //! - [`checklist`]: the checklist tab;
 //! - [`paint`]: the paint tab (linear gradients, drop shadows and a fitted image);
 //! - [`images`]: the images tab (PNG, JPEG, GIF, WebP, BMP, ICO, and SVG decoded from files);
-//! - [`motion`]: the motion tab.
+//! - [`motion`]: the motion tab;
+//! - [`canvas`]: the canvas tab. Its stage redraws every frame and stops when the tab is hidden.
 
 mod badge;
+mod canvas;
 mod checklist;
 mod components;
 mod counter;
@@ -28,7 +30,7 @@ mod tiles;
 
 use cappy::prelude::*;
 
-/// Header with a theme switcher, and one tab per demo: counter, tiles, checklist, paint, motion.
+/// Header with a theme switcher, and one tab per demo.
 pub fn showcase() -> Ui {
     // A runtime reused for another scene still holds the previous singletons.
     use_store(store::Counter).reset();

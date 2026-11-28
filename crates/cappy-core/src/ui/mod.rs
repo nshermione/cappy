@@ -343,7 +343,9 @@ impl Ui {
             || !self.roving_enter.is_empty()
     }
 
-    /// When the host should update next. `None` once scroll, tweens, and timers rest.
+    /// When the host should update next. `None` once scroll, tweens, timers, and canvases rest.
+    /// A visible canvas that is still drawing is due immediately, so the host is not held to the
+    /// animation step.
     pub fn frame_deadline(&self, now: Instant) -> Option<Instant> {
         let paced =
             (self.scroll_animating() || self.motion_animating() || !self.ticking.is_empty())
@@ -351,7 +353,11 @@ impl Ui {
         let image = self.image_frame_deadline(now);
         let caret = self.caret_deadline.filter(|_| self.focused.is_some());
         let timer = self.timer_deadline();
-        [paced, image, caret, timer].into_iter().flatten().min()
+        let canvas = self.canvas_wants_frame().then_some(now);
+        [paced, image, caret, timer, canvas]
+            .into_iter()
+            .flatten()
+            .min()
     }
 
     /// Replaces the clipboard. The default keeps text in memory, which is what tests paste from.
@@ -377,6 +383,13 @@ impl Ui {
     /// [`Ui::update`] at `now`, so tests can step the scroll ease without waiting.
     pub(crate) fn update_at(&mut self, input: FrameInput, now: Instant) -> UpdateOutcome {
         let _entered = self.queue.runtime.enter_board(&self.board);
+        if self.canvas_fast_path(input, now) {
+            self.updated_at = Some(now);
+            self.step_canvases(now);
+            self.collect_paint_damage();
+            self.rebuild_display_list();
+            return self.settled_outcome(input);
+        }
         let dt = scroll::scroll_dt(self.updated_at, now);
         self.updated_at = Some(now);
         self.drain_timer_commands(now);
@@ -405,10 +418,40 @@ impl Ui {
         self.run_layout();
         self.flush_geometry_bindings();
         self.settle_roving_enter();
+        self.step_canvases(now);
         self.collect_paint_damage();
         self.rebuild_display_list();
         self.reclaim_unused();
-        if self.damage.is_empty() && !self.scroll_animating() && !self.motion_animating() {
+        self.settled_outcome(input)
+    }
+
+    /// A canvas frame when nothing else is due. Style, layout, and bindings stay as they are.
+    fn canvas_fast_path(&self, input: FrameInput, now: Instant) -> bool {
+        if self.viewport != Some(input)
+            || self.needs_update()
+            || !self.ticking.is_empty()
+            || self.pointer_stale
+        {
+            return false;
+        }
+        if self.focused.is_some() && self.caret_deadline.is_some_and(|due| due <= now) {
+            return false;
+        }
+        if self.image_frame_deadline(now).is_some_and(|due| due <= now) {
+            return false;
+        }
+        if self.timer_deadline().is_some_and(|due| due <= now) {
+            return false;
+        }
+        self.canvas_wants_frame()
+    }
+
+    fn settled_outcome(&self, input: FrameInput) -> UpdateOutcome {
+        let resting = self.damage.is_empty()
+            && !self.scroll_animating()
+            && !self.motion_animating()
+            && !self.canvas_wants_frame();
+        if resting {
             UpdateOutcome::Idle
         } else {
             UpdateOutcome::Redraw {
