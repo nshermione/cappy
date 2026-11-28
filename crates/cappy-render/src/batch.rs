@@ -14,6 +14,7 @@ const CULL_MARGIN: f32 = 1.0;
 pub(crate) struct Batch {
     pub quads: Vec<usize>,
     pub images: Vec<usize>,
+    pub videos: Vec<usize>,
     pub vectors: Vec<usize>,
     pub texts: Vec<usize>,
 }
@@ -39,6 +40,12 @@ pub(crate) fn plan_batches(primitives: &[Primitive], damage: &[Rect]) -> Vec<Bat
                 }
                 current_mut(&mut batches).images.push(index);
             }
+            Primitive::Video(_) => {
+                if overlaps_batch(primitives, current(&batches), &bounds, BatchPart::Image) {
+                    batches.push(Batch::default());
+                }
+                current_mut(&mut batches).videos.push(index);
+            }
             Primitive::Vector(_) => {
                 if overlaps_batch(primitives, current(&batches), &bounds, BatchPart::Vector) {
                     batches.push(Batch::default());
@@ -51,6 +58,7 @@ pub(crate) fn plan_batches(primitives: &[Primitive], damage: &[Rect]) -> Vec<Bat
     batches.retain(|batch| {
         !batch.quads.is_empty()
             || !batch.images.is_empty()
+            || !batch.videos.is_empty()
             || !batch.vectors.is_empty()
             || !batch.texts.is_empty()
     });
@@ -74,7 +82,10 @@ fn overlaps_batch(primitives: &[Primitive], batch: &Batch, bounds: &Rect, part: 
     };
     match part {
         BatchPart::Quad => {
-            overlaps(&batch.images) || overlaps(&batch.vectors) || overlaps(&batch.texts)
+            overlaps(&batch.images)
+                || overlaps(&batch.videos)
+                || overlaps(&batch.vectors)
+                || overlaps(&batch.texts)
         }
         BatchPart::Image => overlaps(&batch.vectors) || overlaps(&batch.texts),
         BatchPart::Vector => overlaps(&batch.texts),
@@ -144,6 +155,7 @@ mod tests {
             [Batch {
                 quads: vec![0, 2],
                 images: vec![],
+                videos: vec![],
                 vectors: vec![],
                 texts: vec![1],
             }]
@@ -160,12 +172,14 @@ mod tests {
                 Batch {
                     quads: vec![],
                     images: vec![],
+                    videos: vec![],
                     vectors: vec![],
                     texts: vec![0],
                 },
                 Batch {
                     quads: vec![1],
                     images: vec![],
+                    videos: vec![],
                     vectors: vec![],
                     texts: vec![2],
                 },
@@ -182,6 +196,7 @@ mod tests {
             [Batch {
                 quads: vec![1],
                 images: vec![],
+                videos: vec![],
                 vectors: vec![],
                 texts: vec![],
             }]

@@ -271,6 +271,7 @@ fn images_tab_decodes_each_file() {
             .find_map(|primitive| match primitive {
                 Primitive::Image(image) if image.rect == rect => Some(image.pixels.clone()),
                 Primitive::Image(_)
+                | Primitive::Video(_)
                 | Primitive::Quad(_)
                 | Primitive::Shadow(_)
                 | Primitive::Text(_)

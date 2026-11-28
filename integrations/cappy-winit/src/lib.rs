@@ -51,10 +51,10 @@ use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
-use winit::keyboard::{KeyCode, PhysicalKey};
+use winit::keyboard::{Key, KeyCode, NamedKey, PhysicalKey};
 #[cfg(target_os = "windows")]
 use winit::platform::windows::{HWND, WindowAttributesExtWindows};
-use winit::window::{Window, WindowAttributes, WindowId};
+use winit::window::{Fullscreen, Window, WindowAttributes, WindowId};
 
 pub use cappy_host::{FontOptions, RendererKind, WindowOptions};
 pub use renderer::AVAILABLE_RENDERERS;
@@ -406,6 +406,20 @@ impl WinitHost {
         }
     }
 
+    fn apply_fullscreen(&mut self) {
+        let Some(on) = Context::current().take_fullscreen_request() else {
+            return;
+        };
+        let Some(chrome) = &self.primary else {
+            return;
+        };
+        // The monitor, not the app window. The video overlay covers that screen.
+        chrome
+            .window
+            .set_fullscreen(on.then_some(Fullscreen::Borderless(None)));
+        chrome.window.request_redraw();
+    }
+
     fn apply_surface_commands(&mut self, event_loop: &ActiveEventLoop) {
         if self.primary.is_none() {
             return;
@@ -631,6 +645,7 @@ impl ApplicationHandler<Wake> for WinitHost {
             return;
         }
         self.apply_surface_commands(event_loop);
+        self.apply_fullscreen();
         if self.error.is_some() {
             return;
         }
@@ -646,6 +661,7 @@ impl ApplicationHandler<Wake> for WinitHost {
         #[cfg(target_arch = "wasm32")]
         self.open_gpu_surface();
         self.apply_surface_commands(event_loop);
+        self.apply_fullscreen();
         if self.error.is_some() || self.primary.is_none() {
             event_loop.set_control_flow(ControlFlow::Wait);
             return;
@@ -744,6 +760,16 @@ fn apply_window_event(chrome: &mut WindowChrome, host: &mut WindowHost, event: W
             .collect(),
         WindowEvent::MouseWheel { delta, .. } => {
             vec![translate::mouse_wheel(delta, window.scale_factor())]
+        }
+        WindowEvent::KeyboardInput { event, .. }
+            if event.state == ElementState::Pressed
+                && event.logical_key == Key::Named(NamedKey::Escape)
+                && Context::current().is_fullscreen() =>
+        {
+            window.set_fullscreen(None);
+            Context::current().note_fullscreen(false);
+            window.request_redraw();
+            Vec::new()
         }
         WindowEvent::KeyboardInput { event, .. } if is_debug_toggle(&event) => {
             host.toggle_debug_damage();

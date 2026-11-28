@@ -48,6 +48,9 @@ impl Ui {
                 } else {
                     self.drag_capture(PointerPhase::Move);
                     self.refresh_hover();
+                    if self.pointer_capture.is_none() {
+                        self.hover_pointer();
+                    }
                 }
             }
             InputEvent::PointerLeft => {
@@ -615,6 +618,18 @@ impl Ui {
             self.show_caret(id);
         }
         self.emit_pointer(id, PointerPhase::Down, count, PointerButton::Primary);
+    }
+
+    /// Move events for the hovered `on_pointer` target while no press is captured.
+    fn hover_pointer(&mut self) {
+        let Some(id) = self.hovered.iter().rev().copied().find(|id| {
+            self.is_current(*id)
+                && !self.node_disabled(*id)
+                && self.nodes[id.index()].on_pointer.is_some()
+        }) else {
+            return;
+        };
+        self.emit_pointer(id, PointerPhase::Move, 0, PointerButton::Primary);
     }
 
     fn drag_capture(&mut self, phase: PointerPhase) {
@@ -1717,7 +1732,8 @@ impl Ui {
             NodeContent::Container
             | NodeContent::Text(_)
             | NodeContent::Image { .. }
-            | NodeContent::Canvas(_) => return,
+            | NodeContent::Canvas(_)
+            | NodeContent::Video { .. } => return,
         };
         self.edit_input(id, |edit| edit.place(real, extend));
     }

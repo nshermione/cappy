@@ -167,6 +167,30 @@ pub struct ImagePlacement {
     pub uv_max_y: f32,
 }
 
+/// A video picture scaled into `rect`. `id` stays for the life of the source. `generation`
+/// changes when the presented picture changes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct VideoPrimitive {
+    pub rect: Rect,
+    pub id: u64,
+    pub generation: u64,
+    pub width: u32,
+    pub height: u32,
+    pub y: Arc<[u8]>,
+    pub u: Arc<[u8]>,
+    pub v: Arc<[u8]>,
+    pub fit: ObjectFit,
+    pub corner_radius: f32,
+    pub clip: Option<Rect>,
+    pub opacity: f32,
+}
+
+impl VideoPrimitive {
+    pub fn placement(&self) -> ImagePlacement {
+        image_placement(self.rect, self.width, self.height, self.fit)
+    }
+}
+
 /// An image scaled into `rect` and clipped to its corner radius.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ImagePrimitive {
@@ -220,6 +244,7 @@ pub enum Primitive {
     Shadow(ShadowPrimitive),
     Quad(QuadPrimitive),
     Image(ImagePrimitive),
+    Video(VideoPrimitive),
     Vector(VectorPrimitive),
     Text(TextPrimitive),
 }
@@ -230,6 +255,7 @@ impl Primitive {
             Self::Shadow(shadow) => (spun_aabb(shadow.ink_bounds(), shadow.spin), shadow.clip),
             Self::Quad(quad) => (spun_aabb(quad.rect, quad.spin), quad.clip),
             Self::Image(image) => (image.rect, image.clip),
+            Self::Video(video) => (video.rect, video.clip),
             Self::Vector(vector) => (vector.rect, vector.clip),
             Self::Text(text) => (text.rect, text.clip),
         };

@@ -15,7 +15,8 @@ use super::{NodeId, Ui};
 use crate::image_decode::ImagePaint;
 use crate::paint::{
     ImagePrimitive, Primitive, QuadPrimitive, ShadowPrimitive, Spin, TextPrimitive,
-    VectorPrimitive, paint_bounds, rect_center, scale_about, shadow_shape, spun_aabb,
+    VectorPrimitive, VideoPrimitive, paint_bounds, rect_center, scale_about, shadow_shape,
+    spun_aabb,
 };
 
 const LAYOUT_OUT_OF_SYNC: &str = "layout tree is out of sync with the node tree";
@@ -760,6 +761,27 @@ impl Ui {
                                 }));
                             }
                         },
+                        super::NodeContent::Video {
+                            source,
+                            fit,
+                            picture,
+                            ..
+                        } => {
+                            primitives.push(Primitive::Video(VideoPrimitive {
+                                rect,
+                                id: source.id(),
+                                generation: picture.generation,
+                                width: picture.planes.width,
+                                height: picture.planes.height,
+                                y: picture.planes.y.clone(),
+                                u: picture.planes.u.clone(),
+                                v: picture.planes.v.clone(),
+                                fit: *fit,
+                                corner_radius: visual.corner_radius.max_radius(),
+                                clip,
+                                opacity,
+                            }));
+                        }
                         super::NodeContent::Container => {}
                         super::NodeContent::Canvas(state) => {
                             let commands = state.commands.clone();
@@ -1181,6 +1203,173 @@ impl Ui {
             soonest = Some(soonest.map_or(due, |current| current.min(due)));
         }
         soonest
+    }
+
+    /// Advances visible, playing videos and damages a node when its picture changes.
+    pub(super) fn step_videos(&mut self, now: crate::time::Instant) {
+        let mut changed = Vec::new();
+        for index in 0..self.nodes.len() {
+            if !matches!(self.nodes[index].content, super::NodeContent::Video { .. }) {
+                continue;
+            }
+            if !self.video_is_visible(index) {
+                if let super::NodeContent::Video { clock, .. } = &mut self.nodes[index].content {
+                    *clock = None;
+                }
+                continue;
+            }
+            let playing = match &self.nodes[index].content {
+                super::NodeContent::Video { source, .. } => source.playing(),
+                _ => false,
+            };
+            if !playing {
+                // A paused seek still paints that frame. Scrubbing stops the clock and the
+                // picture follows the pointer until the button comes up.
+                let super::NodeContent::Video {
+                    source,
+                    elapsed,
+                    clock,
+                    shown,
+                    picture,
+                    anchor,
+                    ..
+                } = &mut self.nodes[index].content
+                else {
+                    continue;
+                };
+                *clock = None;
+                if let Some((epoch, at)) = source.clock_anchor()
+                    && *anchor != epoch
+                {
+                    *anchor = epoch;
+                    *elapsed = at;
+                    let next = source.picture_at(at);
+                    if next.generation != *shown {
+                        *shown = next.generation;
+                        *picture = next;
+                        changed.push(index);
+                    }
+                }
+                continue;
+            }
+            let super::NodeContent::Video {
+                source,
+                elapsed,
+                clock,
+                shown,
+                picture,
+                anchor,
+                audio_at,
+                ..
+            } = &mut self.nodes[index].content
+            else {
+                continue;
+            };
+            if let Some((epoch, at)) = source.clock_anchor()
+                && *anchor != epoch
+            {
+                *anchor = epoch;
+                *elapsed = at;
+                *clock = Some(now);
+                *audio_at = None;
+            }
+            let waiting_for_first_picture = *shown == 0;
+            let rate = source.playback_rate();
+            if let Some(at) = source.audio_time() {
+                let joining = audio_at.is_none();
+                let resumed = audio_at.is_some_and(|previous| at > previous);
+                let close = elapsed.saturating_sub(at) <= crate::time::Duration::from_millis(200);
+                if joining || at > *elapsed || (resumed && close) {
+                    // Samples are the clock. The first one after a seek pulls the picture onto them.
+                    // A short underrun may step the picture ahead; the next samples pull it back.
+                    *elapsed = at;
+                    *clock = Some(now);
+                } else if source.audio_starved()
+                    && !waiting_for_first_picture
+                    && let Some(previous) = *clock
+                {
+                    // The device played every sample and no more arrived. Holding the picture
+                    // here leaves the queue full, so the decoder never reads the next audio.
+                    let advanced = *elapsed
+                        + crate::video::media_elapsed(
+                            now.saturating_duration_since(previous),
+                            rate,
+                        );
+                    let next = match source.latest_pts() {
+                        Some(ready) => advanced.min(ready),
+                        None => *elapsed,
+                    };
+                    if next > *elapsed {
+                        *elapsed = next;
+                    }
+                    *clock = Some(now);
+                }
+                *audio_at = Some(at);
+            } else if !waiting_for_first_picture && let Some(previous) = *clock {
+                // No samples yet. Move through pictures already decoded, and stop there,
+                // so the label cannot run while the frame stays put.
+                let advanced = *elapsed
+                    + crate::video::media_elapsed(now.saturating_duration_since(previous), rate);
+                let next = match source.latest_pts() {
+                    Some(ready) => advanced.min(ready),
+                    None => advanced,
+                };
+                if next > *elapsed {
+                    *elapsed = next;
+                }
+                *clock = Some(now);
+                *audio_at = None;
+            } else {
+                *clock = Some(now);
+                *audio_at = None;
+            }
+            let next = source.picture_at(*elapsed);
+            if next.generation != *shown {
+                *shown = next.generation;
+                *picture = next;
+                changed.push(index);
+            }
+        }
+        for index in changed {
+            let generation = self.nodes[index].generation;
+            self.mark_paint_dirty(NodeId::new(index as u32, generation));
+        }
+    }
+
+    /// When the next visible video picture is due.
+    pub(super) fn video_frame_deadline(
+        &self,
+        now: crate::time::Instant,
+    ) -> Option<crate::time::Instant> {
+        let mut soonest: Option<crate::time::Instant> = None;
+        for (index, node) in self.nodes.iter().enumerate() {
+            let super::NodeContent::Video {
+                source, elapsed, ..
+            } = &node.content
+            else {
+                continue;
+            };
+            if !source.playing() || !self.video_is_visible(index) {
+                continue;
+            }
+            let Some(next) = source.next_pts(*elapsed) else {
+                continue;
+            };
+            let gap = next.saturating_sub(*elapsed);
+            let wait = if source.audio_time().is_some() {
+                gap
+            } else {
+                crate::video::wall_wait(gap, source.playback_rate())
+            };
+            let due = now + wait;
+            soonest = Some(soonest.map_or(due, |current| current.min(due)));
+        }
+        soonest
+    }
+
+    fn video_is_visible(&self, index: usize) -> bool {
+        let node = &self.nodes[index];
+        node.alive && !node.suppressed && node.style.layout.display != Display::None
     }
 
     fn image_is_visible(&self, index: usize) -> bool {

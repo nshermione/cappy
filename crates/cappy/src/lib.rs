@@ -64,8 +64,10 @@ pub mod prelude {
         ImageDecodeError, ImagePixels, ImageSource, IntoElement, IntoReactive, Justify, ObjectFit,
         Overflow, PointerEvents, Position, Radius, Reactive, Signal, Slot, Space, StyleRefinement,
         Stylesheet, SurfaceId, SurfaceOptions, TextAlign, Theme, ThemeCatalog, ThemeHandle, Themes,
-        Ui, UpdateOutcome, asset_path, canvas, div, for_each, fragment, hex, if_else, image, input,
+        Ui, UpdateOutcome, VideoSource, YuvPlanes, asset_path, canvas, div, for_each, fragment,
+        hex, if_else, image, input,
         linear, list_window, on, on_before_mount, on_before_unmount, on_mounted, on_unmounted,
+        video,
         on_updated, percent, reactive, shadow, show, slot, text, text_dyn, use_local_store,
         use_store,
     };

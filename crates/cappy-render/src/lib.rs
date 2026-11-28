@@ -11,6 +11,7 @@ mod renderer;
 mod surface;
 mod text;
 mod vector;
+mod video;
 
 pub use renderer::{RenderError, RenderTarget, Renderer, TargetLoad};
 pub use surface::{SurfaceError, WindowSurface, open_window_renderer};

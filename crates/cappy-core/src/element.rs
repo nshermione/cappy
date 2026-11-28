@@ -44,6 +44,11 @@ pub(crate) enum ElementContent {
     },
     /// Immediate leaf. The callback redraws this box every frame until it rests.
     Canvas(CanvasDraw),
+    /// A video leaf. The node clocks [`VideoSource`](crate::VideoSource) and paints one picture.
+    Video {
+        source: crate::VideoSource,
+        fit: ObjectFit,
+    },
     /// Transparent hole. Mount skips it until a parent replaces it with a child.
     Slot {
         index: u16,
@@ -381,6 +386,19 @@ pub fn canvas(draw: impl Fn(&mut Canvas, &CanvasFrame) -> CanvasTick + 'static) 
     Element::new(ElementContent::Canvas(Box::new(draw)))
 }
 
+/// A video leaf. `source` supplies pictures and the audio track list. The node advances its
+/// clock only while the source is playing and the leaf is visible.
+///
+/// Give the element a width and height. The box does not size itself from the picture.
+/// [`Element::fit`] chooses how the picture fills that box.
+#[must_use]
+pub fn video(source: crate::VideoSource) -> Element {
+    Element::new(ElementContent::Video {
+        source,
+        fit: ObjectFit::Fill,
+    })
+}
+
 /// A hole where a `#[slot]` field is placed. `slot(self.body)` reads that field. The parent
 /// replaces the hole; an unfilled hole is omitted at mount.
 #[must_use]
@@ -537,8 +555,11 @@ impl Element {
     /// Panics when the element is not an image.
     #[must_use]
     pub fn fit(mut self, fit: ObjectFit) -> Self {
-        let ElementContent::Image { fit: slot, .. } = &mut self.content else {
-            panic!("fit() is only for image elements");
+        let slot = match &mut self.content {
+            ElementContent::Image { fit: slot, .. } | ElementContent::Video { fit: slot, .. } => {
+                slot
+            }
+            _ => panic!("fit() is only for image and video elements"),
         };
         *slot = fit;
         self
@@ -811,9 +832,12 @@ impl Element {
         assert!(
             !matches!(
                 self.content,
-                ElementContent::Image { .. } | ElementContent::Input(_) | ElementContent::Canvas(_)
+                ElementContent::Image { .. }
+                    | ElementContent::Input(_)
+                    | ElementContent::Canvas(_)
+                    | ElementContent::Video { .. }
             ),
-            "image, input, and canvas elements cannot have children"
+            "image, input, canvas, and video elements cannot have children"
         );
         self.children.push(child.into_element());
         self
@@ -934,6 +958,7 @@ impl fmt::Debug for Element {
             ElementContent::DynamicText(_) => "text(<dynamic>)".to_owned(),
             ElementContent::Image { .. } => "image".to_owned(),
             ElementContent::Canvas(_) => "canvas".to_owned(),
+            ElementContent::Video { .. } => "video".to_owned(),
             ElementContent::Slot { index } => format!("slot({index})"),
             ElementContent::Fragment(children) => format!("fragment({})", children.len()),
             ElementContent::Flow(_) => "flow".to_owned(),

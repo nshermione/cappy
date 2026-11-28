@@ -408,6 +408,24 @@ impl Ui {
                 playing: true,
                 clock: None,
             }),
+            ElementContent::Video { source, fit } => {
+                // A stage that is built again, such as leaving fullscreen, must keep the
+                // picture the source is already showing. Starting at 0 rewinds that clock.
+                let at = source.presented();
+                let picture = source.picture_at(at);
+                let anchor = source.clock_anchor().map(|(epoch, _)| epoch).unwrap_or(0);
+                let audio_at = source.audio_time();
+                NodeContent::Video {
+                    source,
+                    fit,
+                    elapsed: at,
+                    clock: None,
+                    shown: picture.generation,
+                    picture,
+                    anchor,
+                    audio_at,
+                }
+            }
             ElementContent::Input(spec) => {
                 disabled_when = disabled_when.or(spec.disabled_when);
                 let (text, writer) = match spec.value {

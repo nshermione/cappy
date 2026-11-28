@@ -14,6 +14,7 @@ use crate::image::ImageLayer;
 use crate::quad::{QuadBatch, QuadBlend, QuadInstance, QuadPipelines, needs_manual_srgb};
 use crate::text::TextLayer;
 use crate::vector::VectorLayer;
+use crate::video::VideoLayer;
 
 /// Each scissor redraws every batch, so a long list of regions becomes their bounding box.
 const MAX_GPU_REGIONS: usize = 8;
@@ -84,6 +85,7 @@ struct PaintRegions<'a> {
 pub struct Renderer {
     quad_pipelines: QuadPipelines,
     images: ImageLayer,
+    videos: VideoLayer,
     vectors: VectorLayer,
     compositor: Compositor,
     scene_quads: QuadBatch,
@@ -112,6 +114,7 @@ impl Renderer {
             caret_quads: QuadBatch::new(device, &quad_pipelines, "cappy text carets"),
             overlay_quads: QuadBatch::new(device, &quad_pipelines, "cappy overlay quads"),
             images: ImageLayer::new(device),
+            videos: VideoLayer::new(device),
             vectors: VectorLayer::new(device),
             quad_pipelines,
             compositor: Compositor::new(device),
@@ -136,6 +139,12 @@ impl Renderer {
 
     pub fn set_collect_stats(&mut self, enabled: bool) {
         self.collect_stats = enabled;
+    }
+
+    /// How many video plane sets have been allocated. A new generation of the same size does not
+    /// increment this.
+    pub fn video_textures_created(&self) -> u32 {
+        self.videos.textures_created()
     }
 
     pub fn paint_stats(&self) -> PaintStats {
@@ -187,6 +196,14 @@ impl Renderer {
             quad_instances(&frame.primitives, &batches, &scissors, frame.scale_factor);
         self.scene_quads.upload(device, queue, size, &instances);
         self.images.prepare(
+            device,
+            queue,
+            size,
+            frame.scale_factor,
+            &frame.primitives,
+            &batches,
+        );
+        self.videos.prepare(
             device,
             queue,
             size,
@@ -335,11 +352,14 @@ impl Renderer {
                 let images = self
                     .images
                     .draw(device, &mut pass, OFFSCREEN_FORMAT, batch_index);
+                let videos = self
+                    .videos
+                    .draw(device, &mut pass, OFFSCREEN_FORMAT, batch_index);
                 let vectors = self
                     .vectors
                     .draw(device, &mut pass, OFFSCREEN_FORMAT, batch_index);
                 if collect {
-                    draws += images + vectors;
+                    draws += images + videos + vectors;
                 }
                 if selection_count > 0 {
                     self.selection_quads

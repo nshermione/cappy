@@ -197,6 +197,7 @@ fn batch_texts<'a>(
             Primitive::Quad(_)
             | Primitive::Shadow(_)
             | Primitive::Image(_)
+            | Primitive::Video(_)
             | Primitive::Vector(_) => None,
         })
 }

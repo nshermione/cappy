@@ -288,6 +288,9 @@ pub(crate) struct Runtime {
     /// Popup windows requested by UI code. The host takes them with [`crate::Context::drain_surfaces`].
     pub(crate) surfaces: RefCell<Vec<crate::surface::SurfaceCommand>>,
     pub(crate) next_surface: Cell<u64>,
+    /// What the UI last asked the host to do with the OS fullscreen state.
+    pub(crate) fullscreen: Cell<bool>,
+    pub(crate) fullscreen_request: Cell<Option<bool>>,
     /// Geometry boards of the UIs whose update or event handler is running. The last one is current.
     geometry_boards: RefCell<Vec<Rc<GeometryBoard>>>,
     /// Board of the first UI. Writes from outside an update land here.
@@ -820,6 +823,11 @@ pub(crate) fn runtime() -> Rc<Runtime> {
             .cloned()
             .expect("Context::current called before Application::new")
     })
+}
+
+/// The installed runtime, when [`crate::Application::new`] has run on this thread.
+pub(crate) fn runtime_if_any() -> Option<Rc<Runtime>> {
+    RUNTIME.with(|slot| slot.borrow().as_ref().cloned())
 }
 
 /// A reactive value. Copying copies the slot; every copy refers to the same value.

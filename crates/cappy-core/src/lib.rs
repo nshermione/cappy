@@ -25,6 +25,7 @@ mod theme_handle;
 pub mod time;
 mod ui;
 pub mod vector;
+mod video;
 
 pub use context::{
     Application, Context, FieldInit, Singleton, SingletonOf, on, reactive, use_local_store,
@@ -41,7 +42,7 @@ pub use debug::DebugStats;
 pub use element::{
     Component, Element, FocusScope, IntoCaret, IntoElement, IntoInputValue, IntoSelection, Slot,
     canvas, div, for_each, fragment, if_else, image, input, list_window, show, slot, text,
-    text_dyn,
+    text_dyn, video,
 };
 #[doc(hidden)]
 pub use element::{DivBuilder, ImageBuilder, InputBuilder, TextBuilder};
@@ -53,8 +54,8 @@ pub use image_source::ImageSource;
 pub use listener::Listener;
 pub use paint::{
     ImagePlacement, ImagePrimitive, Primitive, QuadPrimitive, RenderFrame, ShadowPrimitive, Spin,
-    TextPrimitive, VectorPrimitive, image_placement, paint_bounds, rounded_box_distance,
-    rounded_box_distance_corners, scale_about, spun_aabb, unspin_point,
+    TextPrimitive, VectorPrimitive, VideoPrimitive, image_placement, paint_bounds,
+    rounded_box_distance, rounded_box_distance_corners, scale_about, spun_aabb, unspin_point,
 };
 pub use prop::{ByHandle, ByValue, PropInput};
 pub use reactive::{IntoReactive, Reactive, RetirePlaceholder, Signal};
@@ -62,6 +63,9 @@ pub use surface::{SurfaceCommand, SurfaceId, SurfaceOptions};
 pub use theme_handle::{ThemeCatalog, ThemeHandle, Themes};
 pub use ui::{Anim, AnimHandle, Ease, Motion, MotionCtx, Repeat};
 pub use ui::{FrameInput, NodeId, ResourceCensus, Ui, UpdateOutcome};
+pub use video::{
+    AudioTrack, TextCue, TextTrack, VideoMedia, VideoPicture, VideoQuality, VideoSource, YuvPlanes,
+};
 
 pub use cappy_layout::{
     ApproximateTextMeasurer, CaretGeometry, Point, Rect, Size, TextMeasureRequest, TextMeasurer,

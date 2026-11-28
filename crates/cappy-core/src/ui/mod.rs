@@ -351,10 +351,11 @@ impl Ui {
             (self.scroll_animating() || self.motion_animating() || !self.ticking.is_empty())
                 .then_some(now + scroll::SCROLL_FRAME);
         let image = self.image_frame_deadline(now);
+        let video = self.video_frame_deadline(now);
         let caret = self.caret_deadline.filter(|_| self.focused.is_some());
         let timer = self.timer_deadline();
         let canvas = self.canvas_wants_frame().then_some(now);
-        [paced, image, caret, timer, canvas]
+        [paced, image, video, caret, timer, canvas]
             .into_iter()
             .flatten()
             .min()
@@ -380,9 +381,16 @@ impl Ui {
         self.update_at(input, Instant::now())
     }
 
-    /// [`Ui::update`] at `now`, so tests can step the scroll ease without waiting.
-    pub(crate) fn update_at(&mut self, input: FrameInput, now: Instant) -> UpdateOutcome {
+    /// [`Ui::update`] at `now`, so tests can step the clock without waiting.
+    pub fn update_at(&mut self, input: FrameInput, now: Instant) -> UpdateOutcome {
         let _entered = self.queue.runtime.enter_board(&self.board);
+        if self.video_fast_path(input, now) {
+            self.updated_at = Some(now);
+            self.step_videos(now);
+            self.collect_paint_damage();
+            self.rebuild_display_list();
+            return self.settled_outcome(input);
+        }
         if self.canvas_fast_path(input, now) {
             self.updated_at = Some(now);
             self.step_canvases(now);
@@ -413,6 +421,7 @@ impl Ui {
         self.step_motion(now);
         self.poll_image_loads();
         self.step_images(now);
+        self.step_videos(now);
         self.step_caret(now);
         self.finish_anims(now);
         self.run_layout();
@@ -444,6 +453,28 @@ impl Ui {
             return false;
         }
         self.canvas_wants_frame()
+    }
+
+    /// A video frame when nothing else is due. Style, layout, and bindings stay as they are.
+    fn video_fast_path(&self, input: FrameInput, now: Instant) -> bool {
+        if self.viewport != Some(input)
+            || self.needs_update()
+            || !self.ticking.is_empty()
+            || self.pointer_stale
+            || self.canvas_wants_frame()
+        {
+            return false;
+        }
+        if self.focused.is_some() && self.caret_deadline.is_some_and(|due| due <= now) {
+            return false;
+        }
+        if self.image_frame_deadline(now).is_some_and(|due| due <= now) {
+            return false;
+        }
+        if self.timer_deadline().is_some_and(|due| due <= now) {
+            return false;
+        }
+        self.video_frame_deadline(now).is_some_and(|due| due <= now)
     }
 
     fn settled_outcome(&self, input: FrameInput) -> UpdateOutcome {

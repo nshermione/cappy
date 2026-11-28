@@ -15,6 +15,9 @@
 //! - [`images`]: the images tab (PNG, JPEG, GIF, WebP, BMP, ICO, and SVG decoded from files);
 //! - [`motion`]: the motion tab;
 //! - [`canvas`]: the canvas tab. Its stage redraws every frame and stops when the tab is hidden.
+//!
+//! The video tab is compiled with the `video` feature. It plays a local Big Buck Bunny excerpt
+//! or the Mux HLS stream of the same film.
 
 mod badge;
 mod canvas;
@@ -27,6 +30,8 @@ mod paint;
 mod store;
 mod style;
 mod tiles;
+#[cfg(feature = "video")]
+mod video;
 
 use cappy::prelude::*;
 

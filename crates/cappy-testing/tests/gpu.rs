@@ -161,3 +161,44 @@ fn a_scaled_svg_circle_stays_crisp() {
         "outside {outside:?} at {outside_x},{outside_y}"
     );
 }
+
+#[test]
+fn a_video_reuses_its_textures_and_paints_luma() {
+    use std::sync::Arc;
+
+    use cappy_core::{ObjectFit, Primitive, Rect, RenderFrame, VideoPrimitive, YuvPlanes};
+
+    let picture = |generation: u64, y: u8| {
+        let planes = YuvPlanes::solid(2, 2, y, 128, 128);
+        Primitive::Video(VideoPrimitive {
+            rect: Rect::new(0.0, 0.0, 8.0, 8.0),
+            id: 7,
+            generation,
+            width: planes.width,
+            height: planes.height,
+            y: planes.y,
+            u: planes.u,
+            v: planes.v,
+            fit: ObjectFit::Fill,
+            corner_radius: 0.0,
+            clip: None,
+            opacity: 1.0,
+        })
+    };
+    let frame = |generation: u64, y: u8| RenderFrame {
+        physical_width: 8,
+        physical_height: 8,
+        scale_factor: 1.0,
+        primitives: Arc::new(vec![picture(generation, y)]),
+        damage: Damage::Full,
+    };
+    let mut gpu = renderer();
+    let white = gpu.render(&frame(1, 255), background()).unwrap();
+    let pixel = white.pixel(4, 4);
+    assert!(pixel[0] > 240 && pixel[1] > 240 && pixel[2] > 240, "{pixel:?}");
+    let created = gpu.renderer_mut().video_textures_created();
+    let black = gpu.render(&frame(2, 0), background()).unwrap();
+    let pixel = black.pixel(4, 4);
+    assert!(pixel[0] < 20 && pixel[1] < 20 && pixel[2] < 20, "{pixel:?}");
+    assert_eq!(gpu.renderer_mut().video_textures_created(), created);
+}

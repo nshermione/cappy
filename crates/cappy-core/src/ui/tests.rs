@@ -568,7 +568,8 @@ fn an_image_loads_from_a_filesystem_path() {
             Primitive::Quad(_)
             | Primitive::Shadow(_)
             | Primitive::Text(_)
-            | Primitive::Vector(_) => None,
+            | Primitive::Vector(_)
+            | Primitive::Video(_) => None,
         })
         .expect("loaded image");
     assert_eq!((image.pixels.width(), image.pixels.height()), (32, 32));
@@ -592,7 +593,8 @@ fn an_svg_file_paints_vectors() {
             Primitive::Image(_)
             | Primitive::Quad(_)
             | Primitive::Shadow(_)
-            | Primitive::Text(_) => None,
+            | Primitive::Text(_)
+            | Primitive::Video(_) => None,
         })
         .expect("svg is a vector primitive");
     assert_eq!(
@@ -603,6 +605,121 @@ fn an_svg_file_paints_vectors() {
 }
 
 #[test]
+fn a_video_advances_pauses_and_hides() {
+    use crate::{AudioTrack, VideoSource, YuvPlanes};
+
+    let source = VideoSource::scripted(
+        vec![
+            (Duration::ZERO, YuvPlanes::solid(2, 2, 10, 128, 128)),
+            (
+                Duration::from_millis(40),
+                YuvPlanes::solid(2, 2, 200, 128, 128),
+            ),
+        ],
+        Duration::from_millis(80),
+        vec![AudioTrack {
+            id: 1,
+            language: "en".to_owned(),
+            codec: "aac".to_owned(),
+            channels: 2,
+            sample_rate: 48_000,
+        }],
+    );
+    source.select_audio(1);
+    assert_eq!(source.selected_audio(), Some(1));
+    source.play();
+    let cx = context();
+    let _cx = cx;
+    let mut ui = Ui::new(
+        crate::video(source.clone())
+            .key("clip")
+            .style(StyleRefinement::default().size(40)),
+        Theme::light(),
+    );
+    let start = Instant::now();
+    ui.update_at(VIEWPORT, start);
+    ui.prepare_frame();
+    assert_eq!(video_luma(&ui), 10);
+    let outcome = ui.update_at(VIEWPORT, start + Duration::from_millis(40));
+    assert!(outcome.needs_redraw());
+    assert_eq!(video_luma(&ui), 200);
+    let damaged = regions(outcome);
+    let rect = ui.node_rect(ui.find_by_key("clip").unwrap()).unwrap();
+    assert!(
+        damaged
+            .iter()
+            .all(|region| rect.contains_rect(region) || region.contains_rect(&rect)),
+        "{damaged:?} vs {rect:?}"
+    );
+
+    source.pause();
+    ui.update_at(VIEWPORT, start + Duration::from_millis(80));
+    assert_eq!(video_luma(&ui), 200);
+    assert!(
+        ui.frame_deadline(start + Duration::from_millis(80))
+            .is_none()
+    );
+    let paused = VideoSource::scripted(
+        vec![
+            (Duration::ZERO, YuvPlanes::solid(2, 2, 10, 128, 128)),
+            (
+                Duration::from_millis(40),
+                YuvPlanes::solid(2, 2, 200, 128, 128),
+            ),
+        ],
+        Duration::from_millis(80),
+        Vec::new(),
+    );
+    paused.play();
+    let mut paused_ui = Ui::new(
+        crate::video(paused.clone())
+            .key("paused")
+            .style(StyleRefinement::default().size(40)),
+        Theme::light(),
+    );
+    paused_ui.update_at(VIEWPORT, start);
+    paused.pause();
+    paused_ui.update_at(VIEWPORT, start + Duration::from_millis(80));
+    assert_eq!(video_luma(&paused_ui), 10);
+
+    let hidden = VideoSource::scripted(
+        vec![
+            (Duration::ZERO, YuvPlanes::solid(2, 2, 10, 128, 128)),
+            (
+                Duration::from_millis(40),
+                YuvPlanes::solid(2, 2, 200, 128, 128),
+            ),
+        ],
+        Duration::from_millis(80),
+        Vec::new(),
+    );
+    hidden.play();
+    let mut style = StyleRefinement::default().size(40);
+    style.display = Some(cappy_style::Display::None);
+    let mut hidden_ui = Ui::new(
+        crate::video(hidden).key("hidden").style(style),
+        Theme::light(),
+    );
+    hidden_ui.update_at(VIEWPORT, start);
+    assert!(hidden_ui.frame_deadline(start).is_none());
+}
+
+fn video_luma(ui: &Ui) -> u8 {
+    let video = ui
+        .display_list()
+        .iter()
+        .find_map(|primitive| match primitive {
+            Primitive::Video(video) => Some(video),
+            Primitive::Image(_)
+            | Primitive::Quad(_)
+            | Primitive::Shadow(_)
+            | Primitive::Text(_)
+            | Primitive::Vector(_) => None,
+        })
+        .expect("video");
+    video.y[0]
+}
+
 fn a_gif_advances_when_its_delay_elapses() {
     use crate::ImageClip;
 
@@ -635,7 +752,8 @@ fn gif_pixel(ui: &Ui) -> [u8; 4] {
             Primitive::Quad(_)
             | Primitive::Shadow(_)
             | Primitive::Text(_)
-            | Primitive::Vector(_) => None,
+            | Primitive::Vector(_)
+            | Primitive::Video(_) => None,
         })
         .expect("gif");
     let rgba = image.pixels.rgba();
@@ -658,7 +776,8 @@ fn display_list_paints_back_to_front() {
             Primitive::Quad(_)
             | Primitive::Shadow(_)
             | Primitive::Image(_)
-            | Primitive::Vector(_) => None,
+            | Primitive::Vector(_)
+            | Primitive::Video(_) => None,
         })
         .collect();
     assert_eq!(texts, ["Count: 0", "+1"]);
@@ -3452,7 +3571,8 @@ fn a_fixed_height_multiline_input_scrolls_the_caret_into_view() {
             Primitive::Quad(_)
             | Primitive::Shadow(_)
             | Primitive::Image(_)
-            | Primitive::Vector(_) => None,
+            | Primitive::Vector(_)
+            | Primitive::Video(_) => None,
         });
     assert!(
         scroll_y.is_some_and(|offset| offset > 1.0),
@@ -3514,7 +3634,8 @@ fn painted_text(ui: &Ui) -> Vec<String> {
             Primitive::Quad(_)
             | Primitive::Shadow(_)
             | Primitive::Image(_)
-            | Primitive::Vector(_) => None,
+            | Primitive::Vector(_)
+            | Primitive::Video(_) => None,
         })
         .collect()
 }
@@ -4450,7 +4571,11 @@ fn the_right_and_middle_buttons_reach_on_pointer_without_clicking_or_blurring() 
         });
         assert_eq!(
             log.borrow().as_slice(),
-            [(button, PointerPhase::Down), (button, PointerPhase::Up)]
+            [
+                (PointerButton::Primary, PointerPhase::Move),
+                (button, PointerPhase::Down),
+                (button, PointerPhase::Up),
+            ]
         );
     }
     assert!(order.borrow().is_empty(), "{:?}", order.borrow());
@@ -4471,6 +4596,7 @@ fn the_right_and_middle_buttons_reach_on_pointer_without_clicking_or_blurring() 
     assert_eq!(
         log.borrow().as_slice(),
         [
+            (PointerButton::Primary, PointerPhase::Move),
             (PointerButton::Primary, PointerPhase::Down),
             (PointerButton::Primary, PointerPhase::Move),
             (PointerButton::Primary, PointerPhase::Up),

@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<MPD type="static" mediaPresentationDuration="PT0.8S">
+  <Period>
+    <AdaptationSet contentType="video" mimeType="video/mp2t">
+      <Representation id="hi" bandwidth="800000" width="64" height="64">
+        <SegmentList duration="0.4">
+          <Initialization sourceURL="empty.init"/>
+          <SegmentURL media="../hls/seg0.ts"/>
+          <SegmentURL media="../hls/seg1.ts"/>
+        </SegmentList>
+      </Representation>
+      <Representation id="lo" bandwidth="200000" width="32" height="32">
+        <SegmentList duration="0.4">
+          <SegmentURL media="../hls/lo0.ts"/>
+          <SegmentURL media="../hls/lo1.ts"/>
+        </SegmentList>
+      </Representation>
+    </AdaptationSet>
+    <AdaptationSet contentType="text" lang="en">
+      <Representation id="en" bandwidth="1000">
+        <SegmentList duration="1">
+          <SegmentURL media="../subs/en.vtt"/>
+        </SegmentList>
+      </Representation>
+    </AdaptationSet>
+    <AdaptationSet contentType="text" lang="vi">
+      <Representation id="vi" bandwidth="1000">
+        <SegmentList duration="1">
+          <SegmentURL media="../subs/empty.vtt"/>
+        </SegmentList>
+      </Representation>
+    </AdaptationSet>
+    <AdaptationSet contentType="audio" lang="en" mimeType="audio/mp2t">
+      <Representation id="audio" bandwidth="64000">
+        <SegmentList duration="0.4">
+          <SegmentURL media="../hls/audio0.ts"/>
+        </SegmentList>
+      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>

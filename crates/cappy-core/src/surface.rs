@@ -92,6 +92,35 @@ impl Context {
         std::mem::take(&mut *runtime().surfaces.borrow_mut())
     }
 
+    /// `true` after a fullscreen request until the host leaves fullscreen.
+    pub fn is_fullscreen(&self) -> bool {
+        let _ = self;
+        runtime().fullscreen.get()
+    }
+
+    /// Asks the host to fill the monitor. The video covers that screen.
+    pub fn request_fullscreen(&self, on: bool) {
+        let _ = self;
+        let runtime = runtime();
+        runtime.fullscreen.set(on);
+        runtime.fullscreen_request.set(Some(on));
+        runtime.wake_host();
+    }
+
+    /// The host calls this when fullscreen changes outside a UI request, such as Escape.
+    pub fn note_fullscreen(&self, on: bool) {
+        let _ = self;
+        let runtime = runtime();
+        runtime.fullscreen.set(on);
+        runtime.wake_host();
+    }
+
+    /// One pending fullscreen change, if the UI asked for one.
+    pub fn take_fullscreen_request(&self) -> Option<bool> {
+        let _ = self;
+        runtime().fullscreen_request.take()
+    }
+
     fn allocate_surface() -> SurfaceId {
         let runtime = runtime();
         let id = runtime.next_surface.get().wrapping_add(1);

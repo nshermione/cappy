@@ -10,10 +10,12 @@ publish = false
 [features]
 default = []
 gpu = ["dep:cappy-winit"]
+video = ["dep:cappy-video"]
 
 [dependencies]
 cappy = { workspace = true, features = ["basic"] }
 cappy-components.workspace = true
+cappy-video = { workspace = true, optional = true }
 cappy-winit = { workspace = true, optional = true }
 env_logger.workspace = true
 

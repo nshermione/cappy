@@ -9,7 +9,7 @@ publish = false
 
 [features]
 default = ["gpu"]
-gpu = ["playground-scenes/gpu"]
+gpu = ["playground-scenes/gpu", "playground-scenes/video"]
 
 [dependencies]
 playground-scenes.workspace = true

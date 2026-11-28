@@ -13,6 +13,8 @@ use super::super::paint::PaintTab;
 use super::super::store::AppStore;
 use super::super::style::Class;
 use super::super::tiles::TilesTab;
+#[cfg(feature = "video")]
+use super::super::video::VideoTab;
 use super::header::Header;
 use super::tab_button::TabButton;
 
@@ -26,6 +28,8 @@ pub(super) enum Tab {
     Images,
     Motion,
     Canvas,
+    #[cfg(feature = "video")]
+    Video,
 }
 
 #[component]
@@ -47,7 +51,8 @@ impl Component for App {
                     TabButton(selected = selected, tab = Tab::Paint, title = "Paint", key = "tab-paint")
                     TabButton(selected = selected, tab = Tab::Images, title = "Images", key = "tab-images")
                     TabButton(selected = selected, tab = Tab::Motion, title = "Motion", key = "tab-motion")
-                    TabButton(selected = selected, tab = Tab::Canvas, title = "Canvas", key = "tab-canvas")
+                    TabButton(selected = selected, tab = Tab::Canvas, title = "Canvas", key = "tab-canvas"),
+                    { video_tab_button(selected) }
                 }
                 show (:selected.get() == Tab::Counter) {
                     CounterTab()
@@ -69,7 +74,8 @@ impl Component for App {
                 }
                 show (:selected.get() == Tab::Canvas) {
                     CanvasTab()
-                }
+                },
+                { video_panel(selected) }
                 if (:app.debug.get()) {
                     DebugPanel()
                 }
@@ -77,4 +83,31 @@ impl Component for App {
             }
         }
     }
+}
+
+#[cfg(feature = "video")]
+fn video_tab_button(selected: Reactive<Tab>) -> Element {
+    element! {
+        TabButton(selected = selected, tab = Tab::Video, title = "Video", key = "tab-video")
+    }
+}
+
+#[cfg(not(feature = "video"))]
+fn video_tab_button(_selected: Reactive<Tab>) -> Element {
+    fragment(Vec::<Element>::new())
+}
+
+#[cfg(feature = "video")]
+fn video_panel(selected: Reactive<Tab>) -> Element {
+    let open = selected;
+    if_else(
+        move || open.get() == Tab::Video,
+        || element! { VideoTab() },
+        || fragment(Vec::<Element>::new()),
+    )
+}
+
+#[cfg(not(feature = "video"))]
+fn video_panel(_selected: Reactive<Tab>) -> Element {
+    fragment(Vec::<Element>::new())
 }

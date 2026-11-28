@@ -57,7 +57,9 @@ impl QuadInstance {
         match primitive {
             Primitive::Quad(quad) => Some(Self::from_quad(quad, scale_factor)),
             Primitive::Shadow(shadow) => Some(Self::from_shadow(shadow, scale_factor)),
-            Primitive::Image(_) | Primitive::Text(_) | Primitive::Vector(_) => None,
+            Primitive::Image(_) | Primitive::Video(_) | Primitive::Text(_) | Primitive::Vector(_) => {
+                None
+            }
         }
     }
 

@@ -12,6 +12,7 @@ use crate::canvas::CanvasNode;
 use crate::image_decode::ImagePaint;
 use crate::image_load::ImageLoad;
 use crate::time::Instant;
+use crate::video::{VideoPicture, VideoSource};
 
 use crate::element::{
     ClickHandler, FocusHandler, FocusScope, HoverHandler, ImeHandler, InputHandler, KeyHandler,
@@ -101,6 +102,18 @@ pub(crate) enum NodeContent {
     },
     Input(InputField),
     Canvas(CanvasNode),
+    Video {
+        source: VideoSource,
+        fit: ObjectFit,
+        elapsed: Duration,
+        /// `None` while the video is hidden or paused, so that gap is not added to `elapsed`.
+        clock: Option<Instant>,
+        shown: u64,
+        picture: VideoPicture,
+        anchor: u64,
+        /// Last audio clock sample. `None` until the next sample, including after a seek.
+        audio_at: Option<Duration>,
+    },
 }
 
 /// Editing state of one input. A multiline field keeps newlines and scrolls vertically.
@@ -209,7 +222,8 @@ impl Node {
             NodeContent::Container
             | NodeContent::Image { .. }
             | NodeContent::Input(_)
-            | NodeContent::Canvas(_) => None,
+            | NodeContent::Canvas(_)
+            | NodeContent::Video { .. } => None,
         }
     }
 
