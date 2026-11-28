@@ -5,5 +5,5 @@
 mod app;
 mod counter;
 
-pub use app::{App, Tab};
+pub use app::AppStore;
 pub use counter::Counter;

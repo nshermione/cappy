@@ -1,26 +1,10 @@
-//! The app store: which tab is open. One value per context, same as the counter.
+//! App-wide state that other components read and write. Debug is one of those values: the header
+//! toggles it, and the shell shows the panel.
 
 use cappy::prelude::*;
 
-#[derive(Clone, Copy, PartialEq, Eq, Default, Reactive)]
-pub enum Tab {
-    #[default]
-    Counter,
-    Tiles,
-    Checklist,
-    Paint,
-    Images,
-    Motion,
-}
-
 #[derive(Copy)]
 #[store]
-pub struct App {
-    pub tab: Tab,
-}
-
-impl App {
-    pub fn select(&self, tab: Tab) {
-        self.tab.set(tab);
-    }
+pub struct AppStore {
+    pub debug: bool,
 }

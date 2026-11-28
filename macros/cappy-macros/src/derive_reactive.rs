@@ -30,6 +30,10 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
             fn into_reactive(self) -> Self::Output {
                 ::cappy::Reactive::new(self)
             }
+
+            fn into_prop_default(self) -> Self::Output {
+                ::cappy::Reactive::placeholder(self)
+            }
         }
     })
 }

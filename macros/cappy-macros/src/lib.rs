@@ -58,11 +58,12 @@ pub fn derive_props(input: TokenStream) -> TokenStream {
 
 /// Stores a plain `'static` struct or enum in a [`Reactive`](cappy::Reactive) handle.
 ///
-/// The generated [`IntoReactive`](cappy::IntoReactive) impl is the one a hand-written plain type
-/// would use: [`Reactive::new`](cappy::Reactive::new). Primitives, [`String`](String) and
-/// [`Option`](Option) stay special because their prop default is a placeholder. A blanket impl
-/// would also clash with [`Reactive`](cappy::Reactive), [`Signal`](cappy::Signal), and with
-/// `#[store]` and `#[component]` structs, which must come back unchanged.
+/// The generated [`IntoReactive`](cappy::IntoReactive) impl stores a value with
+/// [`Reactive::new`](cappy::Reactive::new). Its prop default is a placeholder, same as primitives,
+/// [`String`](String) and [`Option`](Option), so a setter can drop that slot when the prop takes
+/// another handle. A blanket impl would clash with [`Reactive`](cappy::Reactive),
+/// [`Signal`](cappy::Signal), and with `#[store]` and `#[component]` structs, which must come back
+/// unchanged.
 ///
 /// ```ignore
 /// #[derive(Clone, Copy, PartialEq, Eq, Default, Reactive)]

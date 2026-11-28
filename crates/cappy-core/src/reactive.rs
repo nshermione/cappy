@@ -1024,8 +1024,12 @@ impl<T: 'static> Reactive<T> {
 
     /// A component prop default. The setter disposes this signal when another handle replaces it.
     /// [`ByValue`](crate::ByValue) keeps the signal and clears that mark.
+    ///
+    /// `#[derive(Reactive)]` calls this for a prop's starting slot. Application code uses
+    /// [`Context::reactive`](crate::Context::reactive).
+    #[doc(hidden)]
     #[must_use]
-    pub(crate) fn placeholder(value: T) -> Self {
+    pub fn placeholder(value: T) -> Self {
         Self {
             inner: Signal::create(value, true),
         }
@@ -1072,8 +1076,8 @@ impl<T: Clone + 'static> Reactive<T> {
 ///
 /// `#[derive(Reactive)]` writes the plain impl for a `'static` struct or enum. A blanket impl would
 /// clash with [`Reactive`], [`Signal`], and with a `#[store]` or `#[component]` struct, which stay
-/// as they are. Primitives, [`String`] and [`Option`] also stay separate: their prop default is a
-/// placeholder the setter can drop.
+/// as they are. Primitives, [`String`], [`Option`] and a derived type use a placeholder as the
+/// prop default, so a setter can drop it when the prop takes another handle.
 pub trait IntoReactive {
     /// The tracked form of this value.
     type Output;
@@ -1081,8 +1085,9 @@ pub trait IntoReactive {
     /// Converts this value into its tracked form.
     fn into_reactive(self) -> Self::Output;
 
-    /// Prop default. Primitives, [`String`] and [`Option`] allocate a placeholder the setter can
-    /// dispose when it switches the prop to another handle. Other values use [`into_reactive`](Self::into_reactive).
+    /// Prop default. Primitives, [`String`], [`Option`] and `#[derive(Reactive)]` allocate a
+    /// placeholder the setter can dispose when it switches the prop to another handle. Other values
+    /// use [`into_reactive`](Self::into_reactive).
     fn into_prop_default(self) -> Self::Output
     where
         Self: Sized,

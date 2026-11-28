@@ -5,24 +5,29 @@ use cappy::prelude::*;
 
 use super::style::Class;
 
-pub fn images_tab() -> Element {
-    element! {
-        div(class = [ThemeClass::Card, Class::Grow]) {
-            text("Images", class = ThemeClass::Subtitle)
-            text(
-                "Loaded from a file path on desktop and a URL in the browser. GIF plays.",
-                class = ThemeClass::Muted,
-            )
-            div(class = ThemeClass::Row) {
-                { specimen("PNG", "image-png", "sample.png") }
-                { specimen("JPEG", "image-jpeg", "sample.jpg") }
-                { specimen("GIF", "image-gif", "sample.gif") }
-                { specimen("WebP", "image-webp", "sample.webp") }
-            }
-            div(class = ThemeClass::Row) {
-                { specimen("BMP", "image-bmp", "sample.bmp") }
-                { specimen("ICO", "image-ico", "sample.ico") }
-                { specimen("SVG", "image-svg", "sample.svg") }
+#[component]
+pub struct ImagesTab {}
+
+impl Component for ImagesTab {
+    fn render(&self) -> Element {
+        element! {
+            div(class = [ThemeClass::Card, Class::Grow]) {
+                text("Images", class = ThemeClass::Subtitle)
+                text(
+                    "Loaded from a file path on desktop and a URL in the browser. GIF plays.",
+                    class = ThemeClass::Muted,
+                )
+                div(class = ThemeClass::Row) {
+                    { specimen("PNG", "image-png", "sample.png") }
+                    { specimen("JPEG", "image-jpeg", "sample.jpg") }
+                    { specimen("GIF", "image-gif", "sample.gif") }
+                    { specimen("WebP", "image-webp", "sample.webp") }
+                }
+                div(class = ThemeClass::Row) {
+                    { specimen("BMP", "image-bmp", "sample.bmp") }
+                    { specimen("ICO", "image-ico", "sample.ico") }
+                    { specimen("SVG", "image-svg", "sample.svg") }
+                }
             }
         }
     }

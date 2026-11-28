@@ -2,9 +2,10 @@
 //!
 //! - [`style`]: design tokens and the stylesheet. Tokens are the only thing that differs between
 //!   themes; classes are applied to every theme;
-//! - [`layout`]: the shell (header and tab bar). Each tab is its own component;
+//! - [`components`]: the shell. `App`, `Header` and `TabButton` each have their own file. The open
+//!   tab is state on `App`. Each demo tab is its own component;
 //! - [`store`]: singletons for one context. [`store::Counter`] is the shared count.
-//!   [`store::App`] is the open tab;
+//!   [`store::AppStore`] is app-wide state other components read and write. Debug lives there;
 //! - [`counter`]: the counter tab. It reads [`store::Counter`] and hosts one badge;
 //! - [`badge`]: a component with its own state, a prop, an event, slots and a sheet.
 //!   The counter tab hosts one. Badges are not nested;
@@ -16,9 +17,9 @@
 
 mod badge;
 mod checklist;
+mod components;
 mod counter;
 mod images;
-mod layout;
 mod motion;
 mod paint;
 mod store;
@@ -31,8 +32,8 @@ use cappy::prelude::*;
 pub fn showcase() -> Ui {
     // A runtime reused for another scene still holds the previous singletons.
     use_store(store::Counter).reset();
-    use_store(store::App).select(store::Tab::Counter);
+    use_store(store::AppStore).debug.set(false);
     Context::current().set_themes(style::themes().into_iter().map(style::stylesheet));
     // The catalog is already set, so this theme value is not installed.
-    Ui::new(layout::root(), Theme::light())
+    Ui::new(components::App::open(), Theme::light())
 }
