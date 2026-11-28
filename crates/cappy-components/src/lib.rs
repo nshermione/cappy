@@ -1,2 +1,5 @@
-//! Built-in cappy components (buttons, inputs, tables, dialogs, ...), enabled by the `full`
-//! feature of the `cappy` crate. Phase 1 ships only the core; components arrive in later phases.
+//! Built-in cappy components, enabled by the `full` feature of the `cappy` crate.
+
+mod debug_panel;
+
+pub use debug_panel::DebugPanel;

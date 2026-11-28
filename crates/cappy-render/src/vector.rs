@@ -254,25 +254,27 @@ impl VectorLayer {
             .write(device, queue, bytemuck::cast_slice(&indices));
     }
 
+    /// Draws this batch's vectors. Returns 1 when a draw was issued.
     pub fn draw(
         &mut self,
         device: &wgpu::Device,
         pass: &mut wgpu::RenderPass<'_>,
         format: wgpu::TextureFormat,
         batch_index: usize,
-    ) {
-        let Some(range) = self.ranges.get(batch_index) else {
-            return;
+    ) -> usize {
+        let Some(range) = self.ranges.get(batch_index).cloned() else {
+            return 0;
         };
         if range.is_empty() {
-            return;
+            return 0;
         }
         let pipeline = self.pipelines.get(device, format);
         pass.set_pipeline(&pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.set_vertex_buffer(0, self.vertices.buffer().slice(..));
         pass.set_index_buffer(self.indices.buffer().slice(..), wgpu::IndexFormat::Uint32);
-        pass.draw_indexed(range.clone(), 0, 0..1);
+        pass.draw_indexed(range, 0, 0..1);
+        1
     }
 
     fn append_primitive(

@@ -18,6 +18,8 @@ pub(crate) struct TextLayer {
     atlas: TextAtlas,
     renderers: Vec<TextRenderer>,
     buffers: ShapedTextCache,
+    /// Whether each batch prepared this paint has text. Empty batches do not issue a draw.
+    batch_has_text: Vec<bool>,
 }
 
 impl TextLayer {
@@ -35,7 +37,15 @@ impl TextLayer {
             atlas: TextAtlas::new(device, queue, &cache, format),
             renderers: Vec::new(),
             buffers: ShapedTextCache::new(),
+            batch_has_text: Vec::new(),
         }
+    }
+
+    pub(crate) fn has_text(&self, batch_index: usize) -> bool {
+        self.batch_has_text
+            .get(batch_index)
+            .copied()
+            .unwrap_or(false)
     }
 
     /// Shapes and uploads the text of every batch. Call before [`TextLayer::render`].
@@ -61,6 +71,9 @@ impl TextLayer {
                 self.buffers.ensure(&mut self.font_system, text);
             }
         }
+        self.batch_has_text.clear();
+        self.batch_has_text
+            .extend(batches.iter().map(|batch| !batch.texts.is_empty()));
         while self.renderers.len() < batches.len() {
             let renderer = TextRenderer::new(
                 &mut self.atlas,

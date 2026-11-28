@@ -281,28 +281,31 @@ impl ImageLayer {
             .write(device, queue, bytemuck::cast_slice(&instances));
     }
 
+    /// Draws this batch's images. Returns how many `draw` calls were issued.
     pub fn draw(
         &mut self,
         device: &wgpu::Device,
         pass: &mut wgpu::RenderPass<'_>,
         format: wgpu::TextureFormat,
         batch_index: usize,
-    ) {
+    ) -> usize {
         let empty = self
             .commands
             .get(batch_index)
             .is_none_or(|draws| draws.is_empty());
         if empty {
-            return;
+            return 0;
         }
         let pipeline = self.pipelines.get(device, format);
         let buffer = self.instances.buffer().clone();
         pass.set_pipeline(&pipeline);
         pass.set_vertex_buffer(0, buffer.slice(..));
-        for draw in &self.commands[batch_index] {
+        let draws = &self.commands[batch_index];
+        for draw in draws {
             pass.set_bind_group(0, &draw.bind_group, &[]);
             pass.draw(0..VERTICES_PER_QUAD, draw.instance..draw.instance + 1);
         }
+        draws.len()
     }
 
     fn texture(

@@ -6,6 +6,8 @@ use std::str::FromStr;
 
 use cappy_core::{Color, RenderFrame};
 
+use crate::PaintStats;
+
 /// Which backend draws the window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum RendererKind {
@@ -121,6 +123,14 @@ pub trait WindowRenderer {
     fn set_debug_damage(&mut self, enabled: bool);
 
     fn debug_damage(&self) -> bool;
+
+    /// Counts paint-pass draw calls while `enabled`. The host turns this on only when a binding
+    /// is subscribed to debug stats.
+    fn set_collect_stats(&mut self, enabled: bool);
+
+    /// Counts from the latest paint that was asked to collect them. An uncounted paint leaves
+    /// the previous value in place.
+    fn paint_stats(&self) -> PaintStats;
 }
 
 #[cfg(test)]

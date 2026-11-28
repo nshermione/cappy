@@ -330,6 +330,7 @@ name = "cappy-components"
 version = "0.1.0"
 dependencies = [
  "cappy-core",
+ "cappy-dsl",
 ]
 
 [[package]]
@@ -2082,6 +2083,7 @@ name = "playground-scenes"
 version = "0.1.0"
 dependencies = [
  "cappy",
+ "cappy-components",
  "cappy-testing",
  "cappy-winit",
  "env_logger",

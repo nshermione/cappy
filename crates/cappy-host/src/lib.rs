@@ -2,6 +2,7 @@
 //! and hands each frame to a [`WindowRenderer`] backend (wgpu in `cappy-render`);
 //! [`select_renderer`] checks [`WindowOptions`] and `CAPPY_RENDERER`.
 
+mod debug_overlay;
 mod regions;
 mod renderer;
 mod resize_pace;
@@ -10,6 +11,9 @@ mod session;
 mod window_host;
 
 pub use cappy_text::FontOptions;
+pub use debug_overlay::{
+    OVERLAY_IDLE, PaintStats, coverage_percent, earlier, is_overlay_refresh, rolling_fps,
+};
 pub use regions::{PixelRect, physical_regions};
 pub use renderer::{
     PresentOutcome, RendererError, RendererKind, UnknownRendererError, WindowRenderer,

@@ -3,6 +3,7 @@
 
 use cappy::Class as ThemeClass;
 use cappy::prelude::*;
+use cappy_components::DebugPanel;
 
 use super::checklist::ChecklistTab;
 use super::counter::CounterTab;
@@ -15,9 +16,10 @@ use super::tiles::TilesTab;
 
 pub fn root() -> Element {
     let app = use_store(App);
+    let debug = reactive(false);
     element! {
         div(class = ThemeClass::App) {
-            { header() }
+            { header(debug) }
             { tab_bar(app) }
             show (:app.tab.get() == Tab::Counter) {
                 CounterTab()
@@ -35,6 +37,9 @@ pub fn root() -> Element {
                 { images_tab() }
             }
             { motion_panel(app) }
+            if (:debug.get()) {
+                DebugPanel()
+            }
             text("F12 toggles the repaint overlay. Idle frames repaint nothing.", class = ThemeClass::Muted)
         }
     }
@@ -87,7 +92,7 @@ fn start_motion_loops(tab: Tab) {
     }
 }
 
-fn header() -> Element {
+fn header(debug: Reactive<bool>) -> Element {
     let themes = Context::current().themes();
     element! {
         div(class = Class::Header) {
@@ -95,12 +100,24 @@ fn header() -> Element {
                 text("cappy playground", class = ThemeClass::Title)
                 text("Retained UI on wgpu that repaints only what changed", class = ThemeClass::Muted)
             }
-            div(
-                class = ThemeClass::Btn,
-                key = "theme-toggle",
-                on_click = move |_| themes.set(themes.cycle()),
-            ) {
-                text(:format!("Theme: {}", themes.with(|current| current.name().to_owned())))
+            div(class = ThemeClass::Row) {
+                div(
+                    class = ThemeClass::Btn,
+                    key = "debug-toggle",
+                    on_click = move |_| debug.update(|on| *on = !*on),
+                ) {
+                    text(
+                        :if debug.get() { "Debug: on" } else { "Debug: off" }.to_owned(),
+                        key = "debug-label",
+                    )
+                }
+                div(
+                    class = ThemeClass::Btn,
+                    key = "theme-toggle",
+                    on_click = move |_| themes.set(themes.cycle()),
+                ) {
+                    text(:format!("Theme: {}", themes.with(|current| current.name().to_owned())))
+                }
             }
         }
     }

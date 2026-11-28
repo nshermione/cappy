@@ -1,5 +1,5 @@
-//! The playground scene in a winit window. Pass `--debug-damage` (or press F12) to see which
-//! regions each frame repaints.
+//! The playground scene in a winit window. Pass `--debug-damage` (or press F12) to outline
+//! repainted regions.
 
 use std::process::ExitCode;
 

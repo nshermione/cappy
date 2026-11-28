@@ -39,6 +39,8 @@ use node::{Node, NodeContent};
 pub struct ResourceCensus {
     pub nodes: usize,
     pub node_capacity: usize,
+    /// Nodes that have not been disposed. [`Self::nodes`] also counts free slots still in the arena.
+    pub live_nodes: usize,
     pub bindings: usize,
     pub binding_capacity: usize,
     pub flows: usize,
@@ -293,6 +295,23 @@ impl Ui {
         if self.primary {
             self.queue.set_runtime_waker(Some(waker));
         }
+    }
+
+    /// Whether a binding is subscribed to [`Context::debug_stats`](crate::Context::debug_stats).
+    ///
+    /// The host uses this to skip sampling when nothing is listening. The check does not allocate
+    /// the stats signal.
+    pub fn wants_debug_stats(&self) -> bool {
+        let _ = self;
+        crate::debug::has_subscribers()
+    }
+
+    /// Publishes `stats` to debug subscribers. An unchanged snapshot does not notify them.
+    ///
+    /// Returns whether a subscriber was woken.
+    pub fn publish_debug(&mut self, stats: crate::DebugStats) -> bool {
+        let _ = self;
+        crate::debug::publish(stats)
     }
 
     pub fn theme(&self) -> &ThemeHandle {
@@ -559,6 +578,7 @@ impl Ui {
         ResourceCensus {
             nodes: self.nodes.len(),
             node_capacity: self.nodes.capacity(),
+            live_nodes: self.nodes.iter().filter(|node| node.alive).count(),
             bindings: self.bindings.len(),
             binding_capacity: self.bindings.capacity(),
             flows: self.flows.len(),

@@ -65,7 +65,7 @@ Frames are drawn on the GPU with [wgpu](https://wgpu.rs/). cappy does not own a 
 │   ├── cappy-text/          Fonts, shaping and measurement
 │   ├── cappy-host/          Window host and resize pacing
 │   ├── cappy-render/        wgpu renderer
-│   ├── cappy-components/    Built-in widgets. Empty for now; enabled by the `full` feature
+│   ├── cappy-components/    Built-in widgets, including DebugPanel. Enabled by the `full` feature
 │   └── cappy-testing/       Headless driver and GPU snapshot helpers
 ├── macros/
 │   ├── cappy-dsl/           element! and style!
@@ -209,7 +209,7 @@ Each primitive carries the scrollport clips of its ancestors.
 - A signal write from outside the event (a `set_waker` callback) asks winit to wake.
 - Live resize follows the pointer. Presents stay on a resize interval, then one more frame is presented when the size settles.
 - On Windows, the host drops the DWM redirection bitmap so the swapchain is the window content during a drag.
-- F12 toggles the damage overlay. The playground starts with it on when `--debug-damage` or `CAPPY_DEBUG_DAMAGE=1` is set.
+- F12 toggles the damage overlay. The playground starts with it on when `--debug-damage` or `CAPPY_DEBUG_DAMAGE=1` is set. Mount `cappy::components::DebugPanel` (the `full` feature) to sample frame stats; nothing is measured until a binding reads them.
 
 `select_renderer` accepts `CAPPY_RENDERER=gpu` or the value from `WindowOptions::with_renderer`. Any other name is an error.
 

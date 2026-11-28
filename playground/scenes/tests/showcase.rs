@@ -41,6 +41,21 @@ fn counter_click_repaints_only_part_of_the_window() {
 }
 
 #[test]
+fn debug_button_mounts_the_panel_only_while_it_is_on() {
+    let mut harness = harness();
+    assert_eq!(harness.text("debug-label"), "Debug: off");
+    assert!(!harness.ui().wants_debug_stats());
+    harness.click("debug-toggle");
+    harness.update();
+    assert_eq!(harness.text("debug-label"), "Debug: on");
+    assert!(harness.ui().wants_debug_stats());
+    harness.click("debug-toggle");
+    harness.update();
+    assert_eq!(harness.text("debug-label"), "Debug: off");
+    assert!(!harness.ui().wants_debug_stats());
+}
+
+#[test]
 fn theme_button_cycles_themes_without_moving_nodes() {
     let mut harness = harness();
     let count_rect = harness.rect("count");
@@ -243,9 +258,9 @@ fn images_tab_decodes_each_file() {
     ] {
         let rect = harness.rect(key);
         if key == "image-svg" {
-            let painted = harness.ui().display_list().iter().any(|primitive| {
-                matches!(primitive, Primitive::Vector(vector) if vector.rect == rect)
-            });
+            let painted = harness.ui().display_list().iter().any(
+                |primitive| matches!(primitive, Primitive::Vector(vector) if vector.rect == rect),
+            );
             assert!(painted, "image-svg has no vector primitive");
             continue;
         }

@@ -3,7 +3,7 @@
 use std::fmt;
 
 use cappy_core::{Color, RenderFrame};
-use cappy_host::{PresentOutcome, RendererError, RendererKind, WindowRenderer};
+use cappy_host::{PaintStats, PresentOutcome, RendererError, RendererKind, WindowRenderer};
 
 use crate::{FontContext, RenderError, RenderTarget, Renderer, TargetLoad};
 
@@ -247,6 +247,14 @@ impl WindowRenderer for WindowSurface {
 
     fn debug_damage(&self) -> bool {
         self.renderer.debug_damage()
+    }
+
+    fn set_collect_stats(&mut self, enabled: bool) {
+        self.renderer.set_collect_stats(enabled);
+    }
+
+    fn paint_stats(&self) -> PaintStats {
+        self.renderer.paint_stats()
     }
 }
 

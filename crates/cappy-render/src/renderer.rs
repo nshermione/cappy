@@ -5,7 +5,7 @@ use std::fmt;
 use std::ops::Range;
 
 use cappy_core::{Color, Damage, Primitive, Rect, RenderFrame, coalesce_regions};
-use cappy_host::{PixelRect, physical_regions};
+use cappy_host::{PaintStats, PixelRect, coverage_percent, physical_regions};
 
 use crate::FontContext;
 use crate::batch::{Batch, plan_batches};
@@ -73,6 +73,14 @@ impl From<glyphon::RenderError> for RenderError {
     }
 }
 
+struct PaintRegions<'a> {
+    frame_size: (u32, u32),
+    scissors: &'a [PixelRect],
+    quad_ranges: &'a [Range<u32>],
+    selection_count: u32,
+    caret_count: u32,
+}
+
 pub struct Renderer {
     quad_pipelines: QuadPipelines,
     images: ImageLayer,
@@ -87,8 +95,12 @@ pub struct Renderer {
     /// Frame size of the latest paint. The offscreen texture may be larger than this.
     viewport_size: (u32, u32),
     debug_damage: bool,
+    /// Count paint-pass draw calls. Off unless a debug-stats binding is subscribed.
+    collect_stats: bool,
     /// Physical rectangles repainted by the latest paint that had damage.
     last_repainted: Vec<Rect>,
+    /// Counts from the latest paint that was asked to collect them.
+    paint_stats: PaintStats,
 }
 
 impl Renderer {
@@ -107,7 +119,9 @@ impl Renderer {
             offscreen: None,
             viewport_size: (1, 1),
             debug_damage: false,
+            collect_stats: false,
             last_repainted: Vec::new(),
+            paint_stats: PaintStats::default(),
         }
     }
 
@@ -118,6 +132,14 @@ impl Renderer {
 
     pub fn debug_damage(&self) -> bool {
         self.debug_damage
+    }
+
+    pub fn set_collect_stats(&mut self, enabled: bool) {
+        self.collect_stats = enabled;
+    }
+
+    pub fn paint_stats(&self) -> PaintStats {
+        self.paint_stats
     }
 
     /// Paints `frame` and composites it onto `target`.
@@ -205,22 +227,37 @@ impl Renderer {
             &carets,
             frame.scale_factor,
         );
-        self.draw_regions(
+        let draw_calls = self.draw_regions(
             device,
             encoder,
-            size,
-            &scissors,
-            &quad_ranges,
-            selection_count,
-            caret_count,
+            PaintRegions {
+                frame_size: size,
+                scissors: &scissors,
+                quad_ranges: &quad_ranges,
+                selection_count,
+                caret_count,
+            },
         )?;
         self.text.finish_paint();
 
+        if self.collect_stats {
+            let covered = scissors
+                .iter()
+                .map(|scissor| u64::from(scissor.width) * u64::from(scissor.height))
+                .sum();
+            let viewport = u64::from(size.0) * u64::from(size.1);
+            self.paint_stats = PaintStats {
+                batches: batches.len(),
+                draw_calls,
+                regions: scissors.len(),
+                coverage_percent: coverage_percent(covered, viewport),
+            };
+        }
         self.last_repainted = scissors.iter().map(|scissor| scissor.to_rect()).collect();
         Ok(scissors.len())
     }
 
-    /// Copies the offscreen texture onto `target`, plus the damage overlay when enabled.
+    /// Copies the offscreen texture onto `target`, plus the damage outlines when enabled.
     pub fn composite(
         &mut self,
         device: &wgpu::Device,
@@ -229,8 +266,20 @@ impl Renderer {
         target: RenderTarget<'_>,
         load: TargetLoad,
     ) {
+        let instances = self.overlay_instances();
+        let overlay_pipeline = if instances.is_empty() {
+            None
+        } else {
+            let count = u32::try_from(instances.len()).unwrap_or(u32::MAX);
+            self.overlay_quads
+                .upload(device, queue, self.viewport_size, &instances);
+            Some((
+                self.quad_pipelines
+                    .get(device, target.format, QuadBlend::Over),
+                count,
+            ))
+        };
         let composite_pipeline = self.compositor.pipeline(device, target.format);
-        let overlay = self.prepare_overlay(device, queue, target.format);
         let mut pass = begin_pass(
             encoder,
             "cappy composite",
@@ -240,7 +289,7 @@ impl Renderer {
         if let Some(offscreen) = &self.offscreen {
             Compositor::draw(&mut pass, &composite_pipeline, offscreen);
         }
-        if let Some((pipeline, count)) = overlay {
+        if let Some((pipeline, count)) = overlay_pipeline {
             self.overlay_quads.draw(&mut pass, &pipeline, 0..count);
         }
     }
@@ -249,12 +298,15 @@ impl Renderer {
         &mut self,
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
-        frame_size: (u32, u32),
-        scissors: &[PixelRect],
-        quad_ranges: &[Range<u32>],
-        selection_count: u32,
-        caret_count: u32,
-    ) -> Result<(), RenderError> {
+        regions: PaintRegions<'_>,
+    ) -> Result<usize, RenderError> {
+        let PaintRegions {
+            frame_size,
+            scissors,
+            quad_ranges,
+            selection_count,
+            caret_count,
+        } = regions;
         let eraser = self
             .quad_pipelines
             .get(device, OFFSCREEN_FORMAT, QuadBlend::Replace);
@@ -269,35 +321,49 @@ impl Renderer {
         // Quads and text map pixels through this frame. The texture can be larger, so the pass
         // viewport has to be the frame or the content lands past the rectangle the composite reads.
         pass.set_viewport(0.0, 0.0, frame_size.0 as f32, frame_size.1 as f32, 0.0, 1.0);
+        let collect = self.collect_stats;
+        let mut draws = 0;
         for (index, scissor) in (0u32..).zip(scissors) {
             pass.set_scissor_rect(scissor.x, scissor.y, scissor.width, scissor.height);
             self.scene_quads.draw(&mut pass, &eraser, index..index + 1);
+            draws += usize::from(collect);
             for (batch_index, range) in quad_ranges.iter().enumerate() {
-                self.scene_quads.draw(&mut pass, &painter, range.clone());
-                self.images
+                if !range.is_empty() {
+                    self.scene_quads.draw(&mut pass, &painter, range.clone());
+                    draws += usize::from(collect);
+                }
+                let images = self
+                    .images
                     .draw(device, &mut pass, OFFSCREEN_FORMAT, batch_index);
-                self.vectors
+                let vectors = self
+                    .vectors
                     .draw(device, &mut pass, OFFSCREEN_FORMAT, batch_index);
-                self.selection_quads
-                    .draw(&mut pass, &painter, 0..selection_count);
+                if collect {
+                    draws += images + vectors;
+                }
+                if selection_count > 0 {
+                    self.selection_quads
+                        .draw(&mut pass, &painter, 0..selection_count);
+                    draws += usize::from(collect);
+                }
                 self.text.render(batch_index, &mut pass)?;
-                self.caret_quads.draw(&mut pass, &painter, 0..caret_count);
+                if collect && self.text.has_text(batch_index) {
+                    draws += 1;
+                }
+                if caret_count > 0 {
+                    self.caret_quads.draw(&mut pass, &painter, 0..caret_count);
+                    draws += usize::from(collect);
+                }
             }
         }
-        Ok(())
+        Ok(draws)
     }
 
-    fn prepare_overlay(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        format: wgpu::TextureFormat,
-    ) -> Option<(wgpu::RenderPipeline, u32)> {
-        if self.offscreen.is_none() || !self.debug_damage || self.last_repainted.is_empty() {
-            return None;
+    fn overlay_instances(&self) -> Vec<QuadInstance> {
+        if !self.debug_damage {
+            return Vec::new();
         }
-        let instances: Vec<QuadInstance> = self
-            .last_repainted
+        self.last_repainted
             .iter()
             .map(|rect| {
                 QuadInstance::new(
@@ -308,11 +374,7 @@ impl Renderer {
                     0.0,
                 )
             })
-            .collect();
-        self.overlay_quads
-            .upload(device, queue, self.viewport_size, &instances);
-        let pipeline = self.quad_pipelines.get(device, format, QuadBlend::Over);
-        Some((pipeline, instances.len() as u32))
+            .collect()
     }
 }
 

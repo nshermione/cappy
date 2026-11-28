@@ -5,9 +5,10 @@
 #[cfg(debug_assertions)]
 use cappy_core::ResourceCensus;
 use cappy_core::time::{Duration, Instant};
-use cappy_core::{CursorIcon, FrameInput, InputEvent, Ui, UpdateOutcome};
+use cappy_core::{CursorIcon, DebugStats, FrameInput, InputEvent, Ui, UpdateOutcome};
 use cappy_text::{CosmicTextMeasurer, FontContext};
 
+use crate::debug_overlay::{OVERLAY_IDLE, earlier, is_overlay_refresh, rolling_fps};
 use crate::resize_pace::{PresentedFrame, RESIZE_INTERVAL, ResizeFrame, choose_resize_frame};
 use crate::{PresentOutcome, RendererError, RendererKind, WindowRenderer};
 
@@ -149,6 +150,17 @@ pub struct WindowHost {
     animation_due: Option<Instant>,
     /// When set, each presented frame writes a repaint line. Off by default.
     log_frames: bool,
+    /// Real presents inside the trailing second. The idle panel wake is not recorded.
+    presented_at: Vec<Instant>,
+    /// CPU time of the last present that was not an idle panel wake.
+    last_update_ms: f32,
+    last_paint_ms: f32,
+    /// When set, the next redraw at this instant only refreshes the panel.
+    overlay_refresh_at: Option<Instant>,
+    /// Previous footprint shown on the panel, so the delta is against the last sample.
+    overlay_private_bytes: Option<usize>,
+    /// The next present only redraws stats that were just published. It is not a measured frame.
+    stats_echo: bool,
     /// Previous resource snapshot, so the memory trace logs only when something changed.
     #[cfg(debug_assertions)]
     traced_resources: Option<ResourceCensus>,
@@ -173,6 +185,12 @@ impl WindowHost {
             frames: 0,
             animation_due: None,
             log_frames: false,
+            presented_at: Vec::new(),
+            last_update_ms: 0.0,
+            last_paint_ms: 0.0,
+            overlay_refresh_at: None,
+            overlay_private_bytes: None,
+            stats_echo: false,
             #[cfg(debug_assertions)]
             traced_resources: None,
             #[cfg(debug_assertions)]
@@ -308,12 +326,28 @@ impl WindowHost {
         physical_size: (u32, u32),
         scale: f32,
     ) -> Result<RedrawResult, RendererError> {
+        let now = Instant::now();
+        let echo = self.stats_echo;
+        self.stats_echo = false;
+        let refresh_due = self.overlay_refresh_at.is_some_and(|at| at <= now);
+        let ui_due = self.ui.frame_deadline(now).is_some_and(|due| due <= now);
+        let ui_dirty = self.ui.needs_update();
+        let refreshing = is_overlay_refresh(refresh_due, ui_due, ui_dirty);
+        // Publishing stats wakes one frame so the binding can draw them. That frame is not a
+        // sample, or the panel would keep the window awake.
+        let displaying = echo && !ui_due && !refreshing;
+        if refreshing && self.ui.wants_debug_stats() {
+            let fps = rolling_fps(&mut self.presented_at, now, false);
+            let stats = self.measure_stats(fps);
+            self.stats_echo = self.ui.publish_debug(stats);
+        }
         let input = FrameInput::new(physical_size.0, physical_size.1, scale);
         self.last_input = Some(input);
         let first_frame = self.frames == 0;
         if first_frame {
             memory_mark("frame 1 before update");
         }
+        let update_started = Instant::now();
         self.ui.update(input);
         if first_frame {
             memory_mark("frame 1 after update");
@@ -322,9 +356,13 @@ impl WindowHost {
             .ui
             .prepare_frame()
             .expect("a frame is always available after an update");
+        let update_ms = elapsed_ms(update_started);
         if first_frame {
             memory_mark("frame 1 after prepare");
         }
+        let wanted = self.ui.wants_debug_stats();
+        self.renderer
+            .set_collect_stats(wanted && !displaying && !refreshing);
         let background = self.ui.theme().tokens().colors.background;
         let size = (physical_size.0, physical_size.1);
         if self.presented.map(|frame| frame.size) != Some(size) {
@@ -334,36 +372,114 @@ impl WindowHost {
                 memory_mark("frame 1 after resize");
             }
         }
+        let paint_started = Instant::now();
         let present = self.renderer.present(&frame, background)?;
+        let paint_ms = elapsed_ms(paint_started);
         if first_frame {
             memory_mark("frame 1 after present");
         }
-        if matches!(present, PresentOutcome::Presented { .. }) {
+        let presented_frame = matches!(present, PresentOutcome::Presented { .. });
+        if presented_frame {
             self.presented = Some(PresentedFrame {
                 size: (physical_size.0, physical_size.1),
                 scale_factor: scale,
                 at: Instant::now(),
             });
         }
+        if wanted && presented_frame && !displaying && !refreshing {
+            let fps = rolling_fps(&mut self.presented_at, now, true);
+            self.last_update_ms = update_ms;
+            self.last_paint_ms = paint_ms;
+            let stats = self.measure_stats(fps);
+            self.stats_echo = self.ui.publish_debug(stats);
+        }
+        if !wanted {
+            self.presented_at.clear();
+            self.overlay_refresh_at = None;
+            self.overlay_private_bytes = None;
+        }
         self.frames += 1;
-        if self.log_frames {
-            if let PresentOutcome::Presented { repainted } = present {
-                log::info!(
-                    "frame {}: repainted {repainted} region(s), damage {:?}",
-                    self.frames,
-                    frame.damage
-                );
-            }
+        if self.log_frames
+            && let PresentOutcome::Presented { repainted } = present
+        {
+            log::info!(
+                "frame {}: repainted {repainted} region(s), damage {:?}",
+                self.frames, frame.damage
+            );
         }
         #[cfg(debug_assertions)]
         self.trace_memory();
-        let settle_at = self.next_frame_at(Instant::now());
+        let settle_at = self.stats_deadline(wanted, presented_frame, refreshing, displaying);
         self.animation_due = settle_at;
         Ok(RedrawResult {
             present,
             cursor: self.take_cursor_change(),
             settle_at,
         })
+    }
+
+    /// Census, footprint and the last counted paint. Called only while a binding is subscribed.
+    fn measure_stats(&mut self, fps: u32) -> DebugStats {
+        let resources = self.ui.resources();
+        let (private_bytes, private_delta_kib) = self.sample_overlay_memory();
+        let paint = self.renderer.paint_stats();
+        DebugStats {
+            fps,
+            update_ms: self.last_update_ms,
+            paint_ms: self.last_paint_ms,
+            private_bytes,
+            private_delta_kib,
+            live_nodes: resources.live_nodes,
+            node_capacity: resources.node_capacity,
+            primitives: resources.display_list,
+            batches: paint.batches,
+            draw_calls: paint.draw_calls,
+            damage_regions: paint.regions,
+            damage_percent: paint.coverage_percent,
+            live_signals: resources.live_signals,
+            bindings: resources.bindings,
+            layout_nodes: resources.layout_nodes,
+            layout_retained: resources.layout_retained,
+        }
+    }
+
+    fn sample_overlay_memory(&mut self) -> (Option<usize>, i64) {
+        let Some((private_bytes, _)) = process_memory() else {
+            return (None, 0);
+        };
+        let delta_kib = self.overlay_private_bytes.map_or(0, |previous| {
+            let delta = private_bytes as isize - previous as isize;
+            i64::try_from(delta / 1024).unwrap_or(0)
+        });
+        self.overlay_private_bytes = Some(private_bytes);
+        (Some(private_bytes), delta_kib)
+    }
+
+    /// UI deadline, or one second after a real present while stats are subscribed and nothing
+    /// else is scheduled sooner. The idle wake runs once. The echo frame that draws a publish
+    /// keeps that deadline instead of measuring itself.
+    fn stats_deadline(
+        &mut self,
+        wanted: bool,
+        presented_frame: bool,
+        refreshing: bool,
+        displaying: bool,
+    ) -> Option<Instant> {
+        let now = Instant::now();
+        let ui_deadline = self.next_frame_at(now);
+        if !wanted || !presented_frame {
+            self.overlay_refresh_at = None;
+            return ui_deadline;
+        }
+        if refreshing {
+            self.overlay_refresh_at = None;
+            return ui_deadline;
+        }
+        if displaying {
+            return earlier(ui_deadline, self.overlay_refresh_at);
+        }
+        self.overlay_refresh_at = Some(now + OVERLAY_IDLE);
+        earlier(ui_deadline, self.overlay_refresh_at)
     }
 
     /// When the next animation frame is due. Vsync absorbs a short step, so the core's deadline
@@ -493,22 +609,32 @@ pub fn memory_mark(stage: &str) {
     );
 }
 
-/// Private bytes and working set of this process. Private bytes are what the process has asked
-/// the OS to keep; the working set is the part currently in RAM.
-#[cfg(debug_assertions)]
+fn elapsed_ms(since: Instant) -> f32 {
+    since.elapsed().as_secs_f32() * 1_000.0
+}
+
+/// Footprint and resident bytes of this process.
+///
+/// The footprint is what the panel calls memory: private bytes on Windows, `phys_footprint` on
+/// macOS (the number Activity Monitor shows). The resident value is the working set. Wasm and
+/// other targets return `None`; the panel prints `n/a` and still shows the arena counts.
 fn process_memory() -> Option<(usize, usize)> {
     #[cfg(windows)]
     {
         process_memory_windows::read()
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        process_memory_macos::read()
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         None
     }
 }
 
 /// `GetProcessMemoryInfo` has no safe wrapper in this crate's dependencies.
-#[cfg(all(debug_assertions, windows))]
+#[cfg(windows)]
 #[allow(unsafe_code)]
 mod process_memory_windows {
     pub(super) fn read() -> Option<(usize, usize)> {
@@ -553,5 +679,99 @@ mod process_memory_windows {
             let read = K32GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, counters.cb);
             (read != 0).then_some((counters.private_usage, counters.working_set_size))
         }
+    }
+}
+
+/// `task_info` has no safe wrapper in this crate's dependencies.
+///
+/// The struct is `task_vm_info` through `phys_footprint` (rev1). The count passed to the kernel
+/// is that prefix, so a newer kernel still fills the fields this panel reads.
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+mod process_memory_macos {
+    pub(super) fn read() -> Option<(usize, usize)> {
+        const TASK_VM_INFO: u32 = 22;
+
+        #[repr(C)]
+        struct TaskVmInfo {
+            virtual_size: u64,
+            region_count: i32,
+            page_size: i32,
+            resident_size: u64,
+            resident_size_peak: u64,
+            device: u64,
+            device_peak: u64,
+            internal: u64,
+            internal_peak: u64,
+            external: u64,
+            external_peak: u64,
+            reusable: u64,
+            reusable_peak: u64,
+            purgeable_volatile_pmap: u64,
+            purgeable_volatile_resident: u64,
+            purgeable_volatile_virtual: u64,
+            compressed: u64,
+            compressed_peak: u64,
+            compressed_lifetime: u64,
+            phys_footprint: u64,
+        }
+
+        unsafe extern "C" {
+            static mach_task_self_: u32;
+            fn task_info(
+                target_task: u32,
+                flavor: u32,
+                task_info_out: *mut i32,
+                task_info_count: *mut u32,
+            ) -> i32;
+        }
+
+        unsafe {
+            let mut info = TaskVmInfo {
+                virtual_size: 0,
+                region_count: 0,
+                page_size: 0,
+                resident_size: 0,
+                resident_size_peak: 0,
+                device: 0,
+                device_peak: 0,
+                internal: 0,
+                internal_peak: 0,
+                external: 0,
+                external_peak: 0,
+                reusable: 0,
+                reusable_peak: 0,
+                purgeable_volatile_pmap: 0,
+                purgeable_volatile_resident: 0,
+                purgeable_volatile_virtual: 0,
+                compressed: 0,
+                compressed_peak: 0,
+                compressed_lifetime: 0,
+                phys_footprint: 0,
+            };
+            let mut count = u32::try_from(size_of::<TaskVmInfo>() / size_of::<u32>()).ok()?;
+            let status = task_info(
+                mach_task_self_,
+                TASK_VM_INFO,
+                (&mut info as *mut TaskVmInfo).cast(),
+                &mut count,
+            );
+            (status == 0 && info.phys_footprint > 0).then_some((
+                usize::try_from(info.phys_footprint).ok()?,
+                usize::try_from(info.resident_size).ok()?,
+            ))
+        }
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::process_memory;
+
+    #[test]
+    fn macos_reports_a_nonzero_footprint() {
+        let (footprint, resident) = process_memory().expect("task_info");
+        assert!(footprint > 0);
+        assert!(resident > 0);
     }
 }

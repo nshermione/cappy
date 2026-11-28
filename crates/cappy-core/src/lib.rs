@@ -7,6 +7,7 @@ mod bitmap;
 mod clipboard;
 mod context;
 mod damage;
+mod debug;
 mod element;
 mod event;
 mod geometry;
@@ -34,6 +35,7 @@ pub use binding::{Dynamic, IntoClasses, IntoStyle, IntoText, LiveText};
 pub use bitmap::{ImageClip, ImageDecodeError, ImagePixels, ImagePixelsError, ObjectFit};
 pub use clipboard::{Clipboard, MemoryClipboard, NoopClipboard};
 pub use damage::{Damage, DamageTracker, coalesce_regions};
+pub use debug::DebugStats;
 pub use element::{
     Component, Element, FocusScope, IntoCaret, IntoElement, IntoInputValue, IntoSelection, Slot,
     div, for_each, fragment, if_else, image, input, list_window, show, slot, text, text_dyn,

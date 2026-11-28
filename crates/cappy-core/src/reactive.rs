@@ -500,6 +500,26 @@ impl Runtime {
         })
     }
 
+    fn live_subscriber_count(&self, index: u32, generation: u32) -> usize {
+        self.with_slot(index, generation, |slot| {
+            slot.subscribers.retain(Observer::is_alive);
+            slot.subscribers.len()
+        })
+    }
+
+    /// One rooted signal per `T`, created the first time this is called.
+    pub(crate) fn singleton_signal<T: Default + 'static>(&self) -> Signal<T> {
+        self.singleton(|| Signal::create_rooted(T::default()))
+    }
+
+    /// The rooted signal for `T` when something already asked for it.
+    pub(crate) fn existing_singleton<T: Clone + 'static>(&self) -> Option<T> {
+        self.singletons
+            .borrow()
+            .get(&TypeId::of::<T>())
+            .and_then(|value| value.downcast_ref::<T>().cloned())
+    }
+
     fn dispose(&self, index: u32, generation: u32) {
         let mut slots = self.slots.borrow_mut();
         if let Some(entry) = slots.get_mut(index as usize)
@@ -855,6 +875,23 @@ impl<T: 'static> Signal<T> {
             _value: PhantomData,
             _thread: PhantomData,
         }
+    }
+
+    /// A signal the current component does not own. Disposing that component leaves it in place.
+    pub(crate) fn create_rooted(value: T) -> Self {
+        let runtime = runtime();
+        let (index, generation) = runtime.create(Box::new(value), false);
+        Self {
+            index,
+            generation,
+            _value: PhantomData,
+            _thread: PhantomData,
+        }
+    }
+
+    pub(crate) fn subscriber_count(self) -> usize {
+        self.runtime()
+            .live_subscriber_count(self.index, self.generation)
     }
 
     /// Reads the value and subscribes the current tracking scope.
